@@ -282,9 +282,9 @@ function StockTable() {
       const res = await getInventory({ stock_type: activeTab });
       const normalized = (res.data || []).map(r => ({
         ...r,
+        cs_in_date: isImport ? formatISODateToDMY(r.cs_in_date) : r.cs_in_date,
         production_date: formatMonthYearDisplay(r.production_date),
         expiration_date: formatMonthYearDisplay(r.expiration_date),
-        cs_in_date: activeTab === 'IMPORT' ? formatISODateToDMY(r.cs_in_date) : r.cs_in_date,
       }));
       setInventory(normalized);
     } catch (err) {
@@ -292,7 +292,7 @@ function StockTable() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab]);
+  }, [activeTab, isImport]);
 
   useEffect(() => {
     setLoading(true);

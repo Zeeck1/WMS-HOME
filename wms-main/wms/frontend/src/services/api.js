@@ -100,6 +100,18 @@ export const getOacCheck = (id) => api.get(`/oac/checks/${id}`);
 export const deleteOacCheck = (id) => api.delete(`/oac/checks/${id}`);
 export const getOacStockSummary = () => api.get('/oac/stock-summary');
 
+// ─── Imports (Shipments) ─────────────────────────────
+export const getImportShipments = () => api.get('/imports');
+export const getImportStockTable = () => api.get('/imports/stock-table');
+export const getImportMovementHistory = (params) => api.get('/imports/movement-history', { params });
+export const getImportShipment = (id) => api.get(`/imports/${id}`);
+export const createImportShipment = (data) => api.post('/imports', data);
+export const updateImportShipment = (id, data) => api.put(`/imports/${id}`, data);
+export const deleteImportShipment = (id) => api.delete(`/imports/${id}`);
+export const createImportStockOut = (shipmentId, data) => api.post(`/imports/${shipmentId}/stock-out`, data);
+export const updateImportStockOut = (outId, data) => api.put(`/imports/stock-out/${outId}`, data);
+export const deleteImportStockOut = (outId) => api.delete(`/imports/stock-out/${outId}`);
+
 // ─── Settings ────────────────────────────────────────
 export const getSettings = () => api.get('/settings');
 export const saveSettings = (data) => api.put('/settings', data);

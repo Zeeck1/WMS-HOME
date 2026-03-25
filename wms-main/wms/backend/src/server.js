@@ -31,6 +31,7 @@ app.use('/api/reports', require('./routes/reports'));
 app.use('/api/manual', require('./routes/manual'));
 app.use('/api/customers', require('./routes/customers'));
 app.use('/api/oac', require('./routes/oac'));
+app.use('/api/imports', require('./routes/imports'));
 
 // Health check
 app.get('/api/health', (req, res) => {

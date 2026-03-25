@@ -2,6 +2,48 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 
+async function fetchImportShipmentRows(filters = {}) {
+  const { fish_name, location } = filters;
+  let sql = `
+    SELECT
+      ii.id AS _imp_item_id,
+      s.id AS _imp_shipment_id,
+      ii.item_name AS fish_name,
+      ii.size,
+      ii.wet_mc AS bulk_weight_kg,
+      s.inv_no AS order_code,
+      s.inv_no AS lot_no,
+      s.eta AS cs_in_date,
+      s.production_date,
+      s.expiry_date AS expiration_date,
+      COALESCE(NULLIF(TRIM(ii.lines), ''), s.origin_country) AS line_place,
+      ii.lines AS stack_no,
+      ii.remark,
+      'IMPORT' AS stock_type,
+      NULL AS lot_id,
+      NULL AS location_id,
+      ii.factory_mc - COALESCE((SELECT SUM(o.mc) FROM import_stock_outs o WHERE o.item_id = ii.id), 0) AS hand_on_balance_mc,
+      ii.factory_nw_kgs - COALESCE((SELECT SUM(o.nw_kgs) FROM import_stock_outs o WHERE o.item_id = ii.id), 0) AS hand_on_balance_kg,
+      0 AS old_balance_mc,
+      0 AS new_income_mc,
+      0 AS stack_total,
+      '' AS type,
+      '' AS glazing,
+      '' AS sticker,
+      '' AS st_no,
+      '_shipment' AS _source
+    FROM import_items ii
+    JOIN import_shipments s ON ii.shipment_id = s.id
+    WHERE ii.item_name IS NOT NULL AND ii.item_name != ''
+  `;
+  const params = [];
+  if (fish_name) { sql += ' AND ii.item_name LIKE ?'; params.push(`%${fish_name}%`); }
+  if (location) { sql += ' AND (s.origin_country LIKE ? OR ii.lines LIKE ?)'; params.push(`%${location}%`, `%${location}%`); }
+  sql += ' ORDER BY s.inv_no ASC, ii.seq_no ASC';
+  const [rows] = await pool.query(sql, params);
+  return rows;
+}
+
 // GET inventory (stock table - mirrors Excel view, optional ?stock_type= filter)
 router.get('/', async (req, res) => {
   try {
@@ -22,6 +64,16 @@ router.get('/', async (req, res) => {
     if (offsetNum > 0) sql += ' OFFSET ?'; if (offsetNum > 0) params.push(offsetNum);
 
     const [rows] = await pool.query(sql, params);
+
+    if (!stock_type || stock_type === 'IMPORT') {
+      try {
+        const impRows = await fetchImportShipmentRows({ fish_name, location });
+        rows.push(...impRows);
+      } catch (e) {
+        console.error('Failed to fetch import shipment items for inventory:', e);
+      }
+    }
+
     res.json(rows);
   } catch (error) {
     console.error('Error fetching inventory:', error);

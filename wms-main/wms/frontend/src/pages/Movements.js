@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FiClock, FiSearch } from 'react-icons/fi';
 import { toast } from 'react-toastify';
-import { getMovements } from '../services/api';
+import { getMovements, getImportMovementHistory } from '../services/api';
 
 function Movements() {
   const [movements, setMovements] = useState([]);
@@ -24,8 +24,40 @@ function Movements() {
       if (filters.from_date) params.from_date = filters.from_date;
       if (filters.to_date) params.to_date = filters.to_date;
       if (filters.limit) params.limit = filters.limit;
-      const res = await getMovements(params);
-      setMovements(res.data);
+
+      let mainData = [];
+      let impData = [];
+
+      try {
+        const mainRes = await getMovements(params);
+        mainData = (mainRes.data || []).map(m => ({ ...m, _source: 'warehouse' }));
+      } catch (e) {
+        console.error('Failed to load warehouse movements:', e);
+      }
+
+      if (!filters.type || filters.type === 'OUT') {
+        try {
+          const impRes = await getImportMovementHistory({
+            from_date: filters.from_date,
+            to_date: filters.to_date,
+            limit: filters.limit
+          });
+          impData = (impRes.data || []).map(m => ({
+            ...m,
+            _source: 'import',
+            id: `imp_${m.id}`,
+            _date_out: m.date_out
+          }));
+        } catch (e) {
+          console.error('Failed to load import movements:', e);
+        }
+      }
+
+      const merged = [...mainData, ...impData].sort((a, b) =>
+        new Date(b.created_at) - new Date(a.created_at)
+      );
+
+      setMovements(merged);
     } catch (err) {
       toast.error('Failed to load movements');
     } finally {
@@ -124,17 +156,18 @@ function Movements() {
                     {search ? 'No movements match your search.' : 'No movements found'}
                   </td></tr>
                 ) : filtered.map(m => (
-                  <tr key={m.id}>
+                  <tr key={m.id} style={m._source === 'import' ? { background: 'rgba(79,70,229,0.03)' } : {}}>
                     <td style={{ whiteSpace: 'nowrap' }}>{new Date(m.created_at).toLocaleString()}</td>
                     <td>
                       <span className={`badge badge-${m.movement_type.toLowerCase()}`}>
                         {m.movement_type}
                       </span>
+                      {m._source === 'import' && <span style={{ marginLeft: 4, fontSize: '0.65rem', color: 'var(--primary)', fontWeight: 700 }}>IMP</span>}
                     </td>
                     <td><strong>{m.fish_name}</strong></td>
-                    <td>{m.size}</td>
+                    <td>{m.size || '-'}</td>
                     <td>{m.lot_no}</td>
-                    <td>{m.line_place} (Stack {m.stack_no})</td>
+                    <td>{m.stack_no ? `${m.line_place} (Stack ${m.stack_no})` : (m.line_place || '-')}</td>
                     <td className="num-cell">{m.quantity_mc}</td>
                     <td className="num-cell">{Number(m.weight_kg).toFixed(2)}</td>
                     <td>{m.reference_no || '-'}</td>

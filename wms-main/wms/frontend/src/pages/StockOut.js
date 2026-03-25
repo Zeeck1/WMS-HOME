@@ -31,7 +31,7 @@ function StockOut() {
   const fetchInventory = useCallback(async () => {
     try {
       const res = await getInventory({ stock_type: activeTab });
-      setInventory(res.data);
+      setInventory((res.data || []).filter(item => item.lot_id != null && item.location_id != null));
     } catch (err) {
       toast.error('Failed to load inventory');
     } finally {

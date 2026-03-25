@@ -411,6 +411,23 @@ router.post('/check', upload.array('files', 32), async (req, res) => {
       GROUP BY fish_name, size, bulk_weight_kg, type, glazing, stock_type, order_code
     `);
 
+    try {
+      const [impRows] = await conn.query(`
+        SELECT
+          ii.item_name AS fish_name, ii.size, ii.wet_mc AS bulk_weight_kg,
+          '' AS type, '' AS glazing, 'IMPORT' AS stock_type, s.inv_no AS order_code,
+          ii.factory_mc - COALESCE((SELECT SUM(o.mc) FROM import_stock_outs o WHERE o.item_id = ii.id), 0) AS total_mc,
+          ii.factory_nw_kgs - COALESCE((SELECT SUM(o.nw_kgs) FROM import_stock_outs o WHERE o.item_id = ii.id), 0) AS total_kg
+        FROM import_items ii
+        JOIN import_shipments s ON ii.shipment_id = s.id
+        WHERE ii.item_name IS NOT NULL AND ii.item_name != ''
+        HAVING total_mc > 0
+      `);
+      stockRows.push(...impRows);
+    } catch (e) {
+      console.error('Failed to fetch import items for OAC:', e);
+    }
+
     // Aggregate stock by (fish_name, size), collecting origin info per source
     const stockAgg = new Map();
     for (const row of stockRows) {
@@ -664,6 +681,25 @@ router.get('/stock-summary', async (req, res) => {
       GROUP BY fish_name, size, bulk_weight_kg, stock_type
       ORDER BY fish_name, size
     `);
+
+    try {
+      const [impRows] = await pool.query(`
+        SELECT
+          ii.item_name AS fish_name, ii.size, ii.wet_mc AS bulk_weight_kg,
+          'IMPORT' AS stock_type,
+          ii.factory_mc - COALESCE((SELECT SUM(o.mc) FROM import_stock_outs o WHERE o.item_id = ii.id), 0) AS total_mc,
+          ii.factory_nw_kgs - COALESCE((SELECT SUM(o.nw_kgs) FROM import_stock_outs o WHERE o.item_id = ii.id), 0) AS total_kg
+        FROM import_items ii
+        JOIN import_shipments s ON ii.shipment_id = s.id
+        WHERE ii.item_name IS NOT NULL AND ii.item_name != ''
+        HAVING total_mc > 0
+        ORDER BY fish_name, size
+      `);
+      rows.push(...impRows);
+    } catch (e) {
+      console.error('Failed to fetch import items for stock-summary:', e);
+    }
+
     res.json(rows);
   } catch (error) {
     console.error('Stock summary error:', error);

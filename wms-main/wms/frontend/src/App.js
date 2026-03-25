@@ -7,7 +7,7 @@ import {
   FiGrid, FiPackage, FiMapPin, FiArrowDownCircle,
   FiArrowUpCircle, FiTable, FiUpload, FiClock,
   FiMenu, FiX, FiChevronLeft, FiLayers, FiList,
-  FiShoppingCart, FiSettings, FiBarChart2, FiBook, FiAlertTriangle, FiTrendingDown, FiCalendar, FiUsers, FiUserCheck, FiClipboard, FiCpu
+  FiShoppingCart, FiSettings, FiBarChart2, FiBook, FiAlertTriangle, FiTrendingDown, FiCalendar, FiUsers, FiUserCheck, FiClipboard, FiCpu, FiAnchor
 } from 'react-icons/fi';
 
 import Dashboard from './pages/Dashboard';
@@ -37,6 +37,8 @@ import Settings from './pages/Settings';
 import CKIntelligence from './pages/CKIntelligence';
 import OrderAvailabilityChecker from './pages/OrderAvailabilityChecker';
 import OACResult from './pages/OACResult';
+import ImportShipments from './pages/ImportShipments';
+import ImportShipmentDetail from './pages/ImportShipmentDetail';
 
 // Sidebar wrapper that auto-closes on mobile route change
 function SidebarNav({ collapsed, mobileOpen, onNavClick }) {
@@ -73,6 +75,7 @@ function SidebarNav({ collapsed, mobileOpen, onNavClick }) {
       <div className="nav-section-title"><span>Operations</span></div>
       {link('/stock-in', <FiArrowDownCircle />, 'Stock IN')}
       {link('/stock-out', <FiArrowUpCircle />, 'Stock OUT')}
+      {link('/imports', <FiAnchor />, 'Import Stock')}
       {link('/withdraw', <FiShoppingCart />, 'Withdraw')}
       {link('/manage', <FiSettings />, 'Manage')}
       {link('/manual', <FiBook />, 'Manual')}
@@ -199,6 +202,9 @@ function App() {
               <Route path="/no-movement" element={<NoMovementStocks />} />
               <Route path="/low-safety-stocks" element={<LowSafetyStocks />} />
               <Route path="/calendar" element={<Calendar />} />
+              <Route path="/imports" element={<ImportShipments />} />
+              <Route path="/imports/new" element={<ImportShipmentDetail />} />
+              <Route path="/imports/:id" element={<ImportShipmentDetail />} />
               <Route path="/oac" element={<OrderAvailabilityChecker />} />
               <Route path="/oac-result/:id" element={<OACResult />} />
               <Route path="/settings" element={<Settings />} />

@@ -392,6 +392,112 @@ async function initDatabase() {
     `);
     console.log('  Table created: customer_withdrawal_items');
 
+    // ── Import shipment tables ────────────────────────────────────────
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS import_shipments (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        inv_no VARCHAR(100) NOT NULL,
+        container_no VARCHAR(100),
+        seal_no VARCHAR(100),
+        eta DATE,
+        origin_country VARCHAR(100),
+        production_date DATE,
+        expiry_date DATE,
+        last_update_stock DATETIME,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB
+    `);
+    console.log('  Table created: import_shipments');
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS import_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        shipment_id INT NOT NULL,
+        seq_no INT NOT NULL,
+        item_name VARCHAR(200),
+        size VARCHAR(100),
+        pack VARCHAR(200),
+        wet_mc DECIMAL(10,2) DEFAULT 0,
+        inv_mc INT DEFAULT 0,
+        inv_nw_kgs DECIMAL(12,2) DEFAULT 0,
+        factory_mc INT DEFAULT 0,
+        factory_nw_kgs DECIMAL(12,2) DEFAULT 0,
+        remark TEXT,
+        unit_price DECIMAL(12,2) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (shipment_id) REFERENCES import_shipments(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB
+    `);
+    console.log('  Table created: import_items');
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS import_stock_outs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        item_id INT NOT NULL,
+        date_out DATE NOT NULL,
+        order_ref VARCHAR(100),
+        mc INT DEFAULT 0,
+        nw_kgs DECIMAL(12,2) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (item_id) REFERENCES import_items(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB
+    `);
+    console.log('  Table created: import_stock_outs');
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS import_expenses (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        shipment_id INT NOT NULL,
+        seq_no INT NOT NULL,
+        expense_name VARCHAR(200),
+        total_baht DECIMAL(12,2) DEFAULT 0,
+        amount_usd_kgs DECIMAL(12,4) DEFAULT 0,
+        amount_usd_kgs_expr VARCHAR(200) DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (shipment_id) REFERENCES import_shipments(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB
+    `);
+    console.log('  Table created: import_expenses');
+
+    // Migration: add total_net_weight to import_shipments
+    try {
+      const [cols] = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'import_shipments' AND COLUMN_NAME = 'total_net_weight'
+      `, [dbName]);
+      if (cols.length === 0) {
+        await connection.query('ALTER TABLE import_shipments ADD COLUMN total_net_weight DECIMAL(12,2) DEFAULT 0 AFTER last_update_stock');
+        console.log('  Migration: added total_net_weight to import_shipments');
+      }
+    } catch (e) { /* ignore */ }
+
+    // Migration: add lines column to import_items
+    try {
+      const [cols] = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'import_items' AND COLUMN_NAME = 'lines'
+      `, [dbName]);
+      if (cols.length === 0) {
+        await connection.query('ALTER TABLE import_items ADD COLUMN `lines` VARCHAR(200) DEFAULT NULL AFTER unit_price');
+        console.log('  Migration: added lines to import_items');
+      }
+    } catch (e) { /* ignore */ }
+
+    // Migration: add amount_usd_kgs_expr to import_expenses
+    try {
+      const [cols] = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'import_expenses' AND COLUMN_NAME = 'amount_usd_kgs_expr'
+      `, [dbName]);
+      if (cols.length === 0) {
+        await connection.query('ALTER TABLE import_expenses ADD COLUMN amount_usd_kgs_expr VARCHAR(200) DEFAULT NULL AFTER amount_usd_kgs');
+        console.log('  Migration: added amount_usd_kgs_expr to import_expenses');
+      }
+    } catch (e) { /* ignore */ }
+
     console.log('\nDatabase schema initialized successfully!');
 
   } catch (error) {

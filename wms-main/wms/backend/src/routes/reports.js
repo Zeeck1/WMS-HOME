@@ -10,9 +10,41 @@ router.get('/low-stock', async (req, res) => {
   try {
     const thresholdKg = parseFloat(req.query.threshold_kg) || 2000;
     const [rows] = await pool.query(
-      `SELECT * FROM inventory_view WHERE hand_on_balance_kg < ? ORDER BY hand_on_balance_kg ASC, fish_name`,
+      'SELECT * FROM inventory_view WHERE hand_on_balance_kg < ? ORDER BY hand_on_balance_kg ASC, fish_name',
       [thresholdKg]
     );
+
+    try {
+      const [impRows] = await pool.query(`
+        SELECT
+          ii.item_name AS fish_name,
+          ii.size,
+          ii.wet_mc AS bulk_weight_kg,
+          s.inv_no AS order_code,
+          s.inv_no AS lot_no,
+          s.eta AS cs_in_date,
+          COALESCE(NULLIF(TRIM(ii.lines), ''), s.origin_country) AS line_place,
+          ii.lines AS stack_no,
+          ii.remark,
+          'IMPORT' AS stock_type,
+          NULL AS lot_id,
+          NULL AS location_id,
+          CONCAT(s.origin_country, ' Import') AS location_code,
+          ii.factory_mc - COALESCE((SELECT SUM(o.mc) FROM import_stock_outs o WHERE o.item_id = ii.id), 0) AS hand_on_balance_mc,
+          ii.factory_nw_kgs - COALESCE((SELECT SUM(o.nw_kgs) FROM import_stock_outs o WHERE o.item_id = ii.id), 0) AS hand_on_balance_kg,
+          '_shipment' AS _source
+        FROM import_items ii
+        JOIN import_shipments s ON ii.shipment_id = s.id
+        WHERE ii.item_name IS NOT NULL AND ii.item_name != ''
+        HAVING hand_on_balance_kg < ?
+        ORDER BY hand_on_balance_kg ASC, fish_name
+      `, [thresholdKg]);
+      rows.push(...impRows);
+    } catch (e) {
+      console.error('Failed to fetch import items for low-stock:', e);
+    }
+
+    rows.sort((a, b) => Number(a.hand_on_balance_kg) - Number(b.hand_on_balance_kg));
     res.json(rows);
   } catch (error) {
     console.error('Error fetching low-stock:', error);
@@ -44,6 +76,40 @@ router.get('/no-movement', async (req, res) => {
       ORDER BY days_idle DESC, iv.fish_name
     `, [cutoff]);
 
+    try {
+      const [impRows] = await pool.query(`
+        SELECT
+          ii.item_name AS fish_name,
+          ii.size,
+          ii.wet_mc AS bulk_weight_kg,
+          s.inv_no AS order_code,
+          s.inv_no AS lot_no,
+          s.eta AS cs_in_date,
+          COALESCE(NULLIF(TRIM(ii.lines), ''), s.origin_country) AS line_place,
+          ii.lines AS stack_no,
+          ii.remark,
+          'IMPORT' AS stock_type,
+          NULL AS lot_id,
+          NULL AS location_id,
+          CONCAT(s.origin_country, ' Import') AS location_code,
+          ii.factory_mc - COALESCE((SELECT SUM(o.mc) FROM import_stock_outs o WHERE o.item_id = ii.id), 0) AS hand_on_balance_mc,
+          ii.factory_nw_kgs - COALESCE((SELECT SUM(o.nw_kgs) FROM import_stock_outs o WHERE o.item_id = ii.id), 0) AS hand_on_balance_kg,
+          (SELECT MAX(o2.created_at) FROM import_stock_outs o2 WHERE o2.item_id = ii.id) AS last_out_date,
+          DATEDIFF(CURDATE(), s.eta) AS days_idle,
+          '_shipment' AS _source
+        FROM import_items ii
+        JOIN import_shipments s ON ii.shipment_id = s.id
+        WHERE ii.item_name IS NOT NULL AND ii.item_name != ''
+          AND s.eta IS NOT NULL AND s.eta <= ?
+        HAVING hand_on_balance_mc > 0
+        ORDER BY days_idle DESC, fish_name
+      `, [cutoff]);
+      rows.push(...impRows);
+    } catch (e) {
+      console.error('Failed to fetch import items for no-movement:', e);
+    }
+
+    rows.sort((a, b) => Number(b.days_idle || 0) - Number(a.days_idle || 0));
     res.json(rows);
   } catch (error) {
     console.error('Error fetching no-movement stocks:', error);

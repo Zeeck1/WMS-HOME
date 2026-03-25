@@ -64,7 +64,7 @@ function Withdraw() {
     try {
       const params = stockTypeTab ? { stock_type: stockTypeTab } : {};
       const res = await getInventory(params);
-      setInventory(res.data);
+      setInventory((res.data || []).filter(item => item.lot_id != null && item.location_id != null));
     } catch (err) {
       toast.error('Failed to load stock');
     } finally {
