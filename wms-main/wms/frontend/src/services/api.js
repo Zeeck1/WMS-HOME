@@ -1,27 +1,13 @@
 import axios from 'axios';
 
-/**
- * Logic to determine the API Base URL:
- * 1. Checks if an Environment Variable exists (Best for Railway)
- * 2. Checks if we are on a production domain (Automatically uses Railway URL)
- * 3. Falls back to localhost for your local development
- */
-const getBaseURL = () => {
-  if (process.env.REACT_APP_API_URL) {
-    return process.env.REACT_APP_API_URL;
-  }
-
-  // Check if we are NOT on localhost (meaning we are live on Railway)
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
-    // Replace this URL with your actual Railway Backend Public URL
-    return 'https://wms-ck-thailand.up.railway.app/api'; 
-  }
-
-  return 'http://localhost:5000/api';
-};
+const API_BASE =
+  process.env.REACT_APP_API_URL ||
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost'
+    ? 'http://localhost:5000/api'
+    : '/api');
 
 const api = axios.create({
-  baseURL: getBaseURL(),
+  baseURL: API_BASE,
   headers: { 'Content-Type': 'application/json' }
 });
 
