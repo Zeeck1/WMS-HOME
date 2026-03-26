@@ -4,32 +4,68 @@
  * Creates all tables and views if they don't exist
  */
 const mysql = require('mysql2/promise');
-const fs = require('fs');
-const path = require('path');
 require('dotenv').config();
+
+function getDbConfig() {
+  const connectionUrl = process.env.DB_URL || process.env.DATABASE_URL || process.env.MYSQL_URL;
+
+  if (connectionUrl) {
+    const parsed = new URL(connectionUrl);
+    const dbName = decodeURIComponent((parsed.pathname || '').replace(/^\//, '')) || 'wms_db';
+
+    return {
+      host: parsed.hostname,
+      port: parsed.port ? Number(parsed.port) : 3306,
+      user: decodeURIComponent(parsed.username || process.env.DB_USER || process.env.MYSQLUSER || 'root'),
+      password: decodeURIComponent(parsed.password || process.env.DB_PASSWORD || process.env.MYSQLPASSWORD || ''),
+      database: dbName
+    };
+  }
+
+  return {
+    host: process.env.DB_HOST || process.env.MYSQLHOST || 'localhost',
+    port: Number(process.env.DB_PORT || process.env.MYSQLPORT || 3306),
+    user: process.env.DB_USER || process.env.MYSQLUSER || 'root',
+    password: process.env.DB_PASSWORD || process.env.MYSQLPASSWORD || '',
+    database: process.env.DB_NAME || process.env.MYSQLDATABASE || 'wms_db'
+  };
+}
 
 async function initDatabase() {
   let connection;
   try {
-    const dbName = process.env.DB_NAME || 'wms_db';
+    const dbConfig = getDbConfig();
+    const dbName = dbConfig.database || 'wms_db';
 
-    // Step 1: Connect without database to create it
-    connection = await mysql.createConnection({
-      host: process.env.DB_HOST || 'localhost',
-      port: process.env.DB_PORT || 3306,
-      user: process.env.DB_USER || 'root',
-      password: process.env.DB_PASSWORD || '',
-      multipleStatements: true
-    });
+    // Step 1: Connect to configured database.
+    // If it does not exist yet (local setup), create it then continue.
+    try {
+      connection = await mysql.createConnection({
+        ...dbConfig,
+        multipleStatements: true
+      });
+      console.log(`Connected to MySQL database: ${dbName}`);
+    } catch (err) {
+      if (err.code !== 'ER_BAD_DB_ERROR') throw err;
 
-    console.log('Connected to MySQL server.');
+      const serverConnection = await mysql.createConnection({
+        host: dbConfig.host,
+        port: dbConfig.port,
+        user: dbConfig.user,
+        password: dbConfig.password,
+        multipleStatements: true
+      });
+      await serverConnection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+      await serverConnection.end();
 
-    // Step 2: Create database
-    await connection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-    await connection.query(`USE \`${dbName}\``);
-    console.log(`Using database: ${dbName}`);
+      connection = await mysql.createConnection({
+        ...dbConfig,
+        multipleStatements: true
+      });
+      console.log(`Created and connected to database: ${dbName}`);
+    }
 
-    // Step 3: Create tables directly
+    // Step 2: Create tables directly
     await connection.query(`
       CREATE TABLE IF NOT EXISTS products (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -173,7 +209,7 @@ async function initDatabase() {
     `);
     console.log('  Table created: movements');
 
-    // Step 4: Create views
+    // Step 3: Create views
     await connection.query(`
       CREATE OR REPLACE VIEW inventory_view AS
       SELECT

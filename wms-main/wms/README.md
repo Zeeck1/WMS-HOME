@@ -73,6 +73,40 @@ WMS/
 - **Node.js** v18+ (https://nodejs.org)
 - **MySQL** 8.0+ (https://dev.mysql.com/downloads/)
 
+## Deploy on Railway (Frontend + Backend + Database)
+
+### 1) Create MySQL database service
+
+1. In Railway, create a new project.
+2. Add a **MySQL** service.
+3. Keep this service in the same Railway project as the backend.
+
+Railway will expose variables like `MYSQL_URL`, `MYSQLHOST`, `MYSQLPORT`, `MYSQLUSER`, `MYSQLPASSWORD`, and `MYSQLDATABASE`.
+
+### 2) Deploy backend service
+
+1. Add a new service from this repo.
+2. Set **Root Directory** to `wms-main/wms/backend`.
+3. Deploy (this repo already includes `backend/nixpacks.toml`).
+4. In backend variables, set:
+   - `NODE_ENV=production`
+   - `DB_URL=${{MySQL.MYSQL_URL}}` (or map split DB variables if you prefer)
+5. Backend startup runs `npm run db:init && npm start` so tables/views are created automatically.
+
+### 3) Deploy frontend service
+
+1. Add another service from this repo.
+2. Set **Root Directory** to `wms-main/wms/frontend`.
+3. Add variable:
+   - `REACT_APP_API_URL=https://<your-backend-domain>/api`
+4. Deploy (this repo already includes `frontend/nixpacks.toml`).
+
+### 4) CORS + health check
+
+- Backend currently allows CORS from all origins, so frontend on another Railway domain will work.
+- Verify backend health from browser:
+  - `https://<your-backend-domain>/api/health`
+
 ## Running Without XAMPP
 
 This app only needs **MySQL** and **Node.js** — no Apache or PHP. You can run it without XAMPP in any of these ways:
