@@ -1,10 +1,18 @@
 import axios from 'axios';
 
-const API_BASE =
-  process.env.REACT_APP_API_URL ||
-  (typeof window !== 'undefined' && window.location.hostname === 'localhost'
-    ? 'http://localhost:5000/api'
-    : '/api');
+const API_BASE = (() => {
+  // Railway: set `REACT_APP_API_URL` during build to your backend public URL (including `/api`).
+  if (process.env.REACT_APP_API_URL) return process.env.REACT_APP_API_URL;
+
+  // Local dev:
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return 'http://localhost:5000/api';
+  }
+
+  // If backend and frontend are served from the same domain (or you use a reverse proxy),
+  // `/api` will correctly hit the backend.
+  return '/api';
+})();
 
 const api = axios.create({
   baseURL: API_BASE,
