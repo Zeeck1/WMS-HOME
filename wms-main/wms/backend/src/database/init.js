@@ -4,60 +4,21 @@
  * Creates all tables and views if they don't exist
  */
 const mysql = require('mysql2/promise');
-const { URL } = require('url');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-function parseMysqlUrl(connectionUrl) {
-  const parsed = new URL(connectionUrl);
-  return {
-    host: parsed.hostname,
-    port: parsed.port ? Number(parsed.port) : 3306,
-    user: decodeURIComponent(parsed.username || ''),
-    password: decodeURIComponent(parsed.password || ''),
-    database: decodeURIComponent((parsed.pathname || '').replace(/^\//, '')) || undefined
-  };
-}
-
-function getMysqlInitConfig() {
-  const connectionUrl = process.env.DB_URL || process.env.DATABASE_URL || process.env.MYSQL_URL;
-  if (connectionUrl) {
-    const parsed = parseMysqlUrl(connectionUrl);
-    return {
-      host: parsed.host,
-      port: parsed.port,
-      user: parsed.user,
-      password: parsed.password,
-      dbName: parsed.database || process.env.DB_NAME || process.env.MYSQLDATABASE || 'wms_db'
-    };
-  }
-
-  return {
-    host: process.env.DB_HOST || process.env.MYSQLHOST,
-    port: Number(process.env.DB_PORT || process.env.MYSQLPORT || 3306),
-    user: process.env.DB_USER || process.env.MYSQLUSER || 'root',
-    password: process.env.DB_PASSWORD || process.env.MYSQLPASSWORD || '',
-    dbName: process.env.DB_NAME || process.env.MYSQLDATABASE || 'wms_db'
-  };
-}
-
 async function initDatabase() {
   let connection;
   try {
-    const mysqlInit = getMysqlInitConfig();
-    const { host, port, user, password, dbName } = mysqlInit;
-
-    if (process.env.NODE_ENV === 'production' && !host) {
-      throw new Error('Missing MySQL host for init. Set DB_HOST/ MYSQLHOST (or DB_URL/ MYSQL_URL).');
-    }
+    const dbName = process.env.DB_NAME || 'wms_db';
 
     // Step 1: Connect without database to create it
     connection = await mysql.createConnection({
-      host,
-      port,
-      user,
-      password,
+      host: process.env.DB_HOST || 'localhost',
+      port: process.env.DB_PORT || 3306,
+      user: process.env.DB_USER || 'root',
+      password: process.env.DB_PASSWORD || '',
       multipleStatements: true
     });
 
