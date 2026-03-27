@@ -8,17 +8,39 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
+function getDbInitConfig() {
+  const connectionUrl = process.env.DB_URL || process.env.DATABASE_URL || process.env.MYSQL_URL;
+  if (connectionUrl) {
+    const parsed = new URL(connectionUrl);
+    return {
+      host: parsed.hostname,
+      port: parsed.port ? Number(parsed.port) : 3306,
+      user: decodeURIComponent(parsed.username || process.env.DB_USER || process.env.MYSQLUSER || 'root'),
+      password: decodeURIComponent(parsed.password || process.env.DB_PASSWORD || process.env.MYSQLPASSWORD || ''),
+      dbName: decodeURIComponent((parsed.pathname || '').replace(/^\//, '')) || process.env.DB_NAME || process.env.MYSQLDATABASE || 'wms_db'
+    };
+  }
+
+  return {
+    host: process.env.DB_HOST || process.env.MYSQLHOST || 'localhost',
+    port: Number(process.env.DB_PORT || process.env.MYSQLPORT || 3306),
+    user: process.env.DB_USER || process.env.MYSQLUSER || 'root',
+    password: process.env.DB_PASSWORD || process.env.MYSQLPASSWORD || '',
+    dbName: process.env.DB_NAME || process.env.MYSQLDATABASE || 'wms_db'
+  };
+}
+
 async function initDatabase() {
   let connection;
   try {
-    const dbName = process.env.DB_NAME || 'wms_db';
+    const { host, port, user, password, dbName } = getDbInitConfig();
 
     // Step 1: Connect without database to create it
     connection = await mysql.createConnection({
-      host: process.env.DB_HOST || 'localhost',
-      port: process.env.DB_PORT || 3306,
-      user: process.env.DB_USER || 'root',
-      password: process.env.DB_PASSWORD || '',
+      host,
+      port,
+      user,
+      password,
       multipleStatements: true
     });
 

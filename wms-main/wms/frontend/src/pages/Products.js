@@ -27,9 +27,13 @@ function Products() {
     setLoading(true);
     try {
       const res = await getProducts({ stock_type: activeTab });
-      setProducts(res.data);
+      setProducts(Array.isArray(res.data) ? res.data : []);
+      if (!Array.isArray(res.data)) {
+        toast.error('Backend response is invalid. Check API URL configuration.');
+      }
     } catch (err) {
       toast.error('Failed to load products');
+      setProducts([]);
     } finally {
       setLoading(false);
     }
