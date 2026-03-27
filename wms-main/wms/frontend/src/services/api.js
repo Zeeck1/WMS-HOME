@@ -1,10 +1,17 @@
 import axios from 'axios';
 
-const API_BASE =
-  process.env.REACT_APP_API_URL ||
-  (typeof window !== 'undefined' && window.location.hostname === 'localhost'
-    ? 'http://localhost:5000/api'
-    : '/api');
+const API_BASE = (() => {
+  // Highest priority: explicit environment value from Railway.
+  if (process.env.REACT_APP_API_URL) return process.env.REACT_APP_API_URL;
+
+  // Local development.
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return 'http://localhost:5000/api';
+  }
+
+  // Production fallback for your current Railway setup.
+  return 'https://wms-home-production.up.railway.app/api';
+})();
 
 const api = axios.create({
   baseURL: API_BASE,
