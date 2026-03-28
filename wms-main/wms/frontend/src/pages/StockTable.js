@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ReactDOM from 'react-dom';
-import { FiDownload, FiSearch, FiPackage, FiBox, FiTrash2, FiAnchor, FiChevronDown, FiCheck, FiX, FiCopy } from 'react-icons/fi';
+import { FiDownload, FiSearch, FiPackage, FiBox, FiTrash2, FiAnchor, FiChevronDown, FiCheck, FiX, FiCopy, FiPrinter, FiImage } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { getInventory, deleteAllStockData } from '../services/api';
 import * as XLSX from 'xlsx';
@@ -55,6 +55,8 @@ const CE_IMPORT_COLUMNS = [
   { key: 'line_place', label: 'Line' },
   { key: 'remark', label: 'Remark' }
 ];
+
+const BULK_AGGREGATE_KEYS = ['old_balance_mc', 'new_income_mc', 'hand_on_balance_mc', 'hand_on_balance_kg'];
 
 // Month/year dates from Excel like "12/2024" are stored in DB as "YYYY-MM-01".
 // Display rules:
@@ -232,6 +234,9 @@ function StockTable() {
   const [showBulkLinesPlace, setShowBulkLinesPlace] = useState(false);
   const [showBulkStackNo, setShowBulkStackNo] = useState(false);
   const [showBulkStackTotal, setShowBulkStackTotal] = useState(false);
+  // BULK: Old Balance / New Income — default ON (unlike Lines/Place etc.)
+  const [showBulkOldBalance, setShowBulkOldBalance] = useState(true);
+  const [showBulkNewIncome, setShowBulkNewIncome] = useState(true);
 
   // Container Extra: show/hide optional columns (default OFF)
   const [showCElinePlace, setShowCElinePlace] = useState(false);
@@ -243,16 +248,19 @@ function StockTable() {
       if (col.key === 'line_place') return showBulkLinesPlace;
       if (col.key === 'stack_no') return showBulkStackNo;
       if (col.key === 'stack_total') return showBulkStackTotal;
+      if (col.key === 'old_balance_mc') return showBulkOldBalance;
+      if (col.key === 'new_income_mc') return showBulkNewIncome;
       return true;
     });
-  }, [activeTab, columns, showBulkLinesPlace, showBulkStackNo, showBulkStackTotal]);
+  }, [activeTab, columns, showBulkLinesPlace, showBulkStackNo, showBulkStackTotal, showBulkOldBalance, showBulkNewIncome]);
 
-  const bulkColSpanBeforeOldBalance =
-    1 + // '#' column
-    7 + // fish_name, size, bulk_weight_kg, type, glazing, cs_in_date, sticker
-    (showBulkLinesPlace ? 1 : 0) +
-    (showBulkStackNo ? 1 : 0) +
-    (showBulkStackTotal ? 1 : 0);
+  const bulkFirstAggregateIndex = useMemo(() => {
+    if (activeTab !== 'BULK') return -1;
+    return bulkTableColumns.findIndex(c => BULK_AGGREGATE_KEYS.includes(c.key));
+  }, [activeTab, bulkTableColumns]);
+
+  const bulkTotalsColSpan =
+    bulkFirstAggregateIndex >= 0 ? 1 + bulkFirstAggregateIndex : 1;
 
   const visibleColumns = useMemo(() => {
     if (activeTab !== 'CONTAINER_EXTRA') return columns;
@@ -276,6 +284,16 @@ function StockTable() {
       return next;
     });
   }, [activeTab, showCElinePlace, showCEstNo]);
+
+  useEffect(() => {
+    if (activeTab !== 'BULK') return;
+    setColumnFilters(prev => {
+      const next = { ...prev };
+      if (!showBulkOldBalance) delete next.old_balance_mc;
+      if (!showBulkNewIncome) delete next.new_income_mc;
+      return next;
+    });
+  }, [activeTab, showBulkOldBalance, showBulkNewIncome]);
 
   const fetchInventory = useCallback(async () => {
     try {
@@ -426,18 +444,53 @@ function StockTable() {
           'Arrival Date': '', 'Line': '', 'Balance MC': totalMC, 'Total KG': totalKG, 'Remark': '' });
       }
     } else {
-      data = source.map((r, i) => ({
-        '#': i + 1, 'Fish Name': r.fish_name, 'Size': r.size,
-        'Bulk Weight (KG)': Number(r.bulk_weight_kg), 'Type': r.type || '', 'Glazing': r.glazing || '',
-        'CS In Date': r.cs_in_date, 'Sticker': r.sticker || '', 'Lines / Place': r.line_place,
-        'Stack No': r.stack_no, 'Stack Total': r.stack_total,
-        'Old Balance': Number(r.old_balance_mc), 'New Income': Number(r.new_income_mc),
-        'Hand On Balance': Number(r.hand_on_balance_mc), 'Weight (KG)': Number(r.hand_on_balance_kg)
-      }));
-      data.push({ '#': '', 'Fish Name': 'TOTAL', 'Size': '', 'Bulk Weight (KG)': '',
-        'Type': '', 'Glazing': '', 'CS In Date': '', 'Sticker': '', 'Lines / Place': '',
-        'Stack No': '', 'Stack Total': totalStacks, 'Old Balance': '', 'New Income': '',
-        'Hand On Balance': totalMC, 'Weight (KG)': totalKG });
+      const bulkExcelKeyToLabel = {
+        fish_name: 'Fish Name',
+        size: 'Size',
+        bulk_weight_kg: 'Bulk Weight (KG)',
+        type: 'Type',
+        glazing: 'Glazing',
+        cs_in_date: 'CS In Date',
+        sticker: 'Sticker',
+        line_place: 'Lines / Place',
+        stack_no: 'Stack No',
+        stack_total: 'Stack Total',
+        old_balance_mc: 'Old Balance',
+        new_income_mc: 'New Income',
+        hand_on_balance_mc: 'Hand On Balance',
+        hand_on_balance_kg: 'Weight (KG)'
+      };
+      const rowFromBulkCols = (r, i, isTotal) => {
+        const o = {};
+        o['#'] = isTotal ? '' : i + 1;
+        bulkTableColumns.forEach((col) => {
+          const L = bulkExcelKeyToLabel[col.key];
+          if (!L) return;
+          if (isTotal) {
+            if (col.key === 'fish_name') o[L] = 'TOTAL';
+            else if (col.key === 'stack_total') o[L] = totalStacks;
+            else if (col.key === 'old_balance_mc' || col.key === 'new_income_mc') o[L] = '';
+            else if (col.key === 'hand_on_balance_mc') o[L] = totalMC;
+            else if (col.key === 'hand_on_balance_kg') o[L] = totalKG;
+            else o[L] = '';
+            return;
+          }
+          switch (col.key) {
+            case 'bulk_weight_kg':
+            case 'old_balance_mc':
+            case 'new_income_mc':
+            case 'hand_on_balance_mc':
+            case 'hand_on_balance_kg':
+              o[L] = Number(r[col.key] ?? 0);
+              break;
+            default:
+              o[L] = r[col.key] ?? '';
+          }
+        });
+        return o;
+      };
+      data = source.map((r, i) => rowFromBulkCols(r, i, false));
+      data.push(rowFromBulkCols({}, 0, true));
     }
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -515,6 +568,88 @@ function StockTable() {
     }
   };
 
+  const copyTableAsImage = async () => {
+    if (!reportContainerRef.current) return;
+    if (displayRows.length === 0) {
+      toast.warn('No rows to copy');
+      return;
+    }
+
+    const el = reportContainerRef.current;
+    const prevMaxHeight = el.style.maxHeight;
+    const prevOverflow = el.style.overflow;
+    try {
+      toast.info('Copying table as image…');
+      el.style.maxHeight = 'none';
+      el.style.overflow = 'visible';
+      await new Promise((r) => setTimeout(r, 100));
+
+      const table = el.querySelector('table');
+      if (!table) {
+        toast.error('Table not found');
+        return;
+      }
+
+      const canvas = await html2canvas(table, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        useCORS: true,
+        logging: false
+      });
+
+      const blob = await new Promise((resolve, reject) => {
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png', 0.92);
+      });
+
+      const canClipboardImage =
+        typeof ClipboardItem !== 'undefined' &&
+        navigator.clipboard &&
+        typeof navigator.clipboard.write === 'function';
+
+      if (canClipboardImage) {
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+          toast.success('Table copied as image — paste into Word, Teams, etc.');
+          return;
+        } catch (clipErr) {
+          console.warn('Clipboard image failed:', clipErr);
+        }
+      }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const prefix = isCE ? 'Container_Extra' : isImport ? 'Import' : 'Bulk';
+      a.href = url;
+      a.download = `WMS_${prefix}_Stock_${new Date().toISOString().split('T')[0]}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.info('Image copied isn’t supported here — PNG file downloaded instead. You can paste the file where needed.');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to copy table as image');
+    } finally {
+      el.style.maxHeight = prevMaxHeight;
+      el.style.overflow = prevOverflow;
+    }
+  };
+
+  const handlePrint = () => {
+    if (displayRows.length === 0) {
+      toast.warn('No rows to print for the current tab and filters.');
+      return;
+    }
+    const style = document.createElement('style');
+    style.id = 'st-stock-table-print-page';
+    style.textContent = '@page { size: A4 landscape; margin: 10mm; }';
+    document.head.appendChild(style);
+    const onAfterPrint = () => {
+      document.getElementById('st-stock-table-print-page')?.remove();
+      window.removeEventListener('afterprint', onAfterPrint);
+    };
+    window.addEventListener('afterprint', onAfterPrint);
+    window.print();
+  };
+
   const exportAsText = async () => {
     if (filteredInventory.length === 0) {
       toast.warn('No data to copy');
@@ -590,16 +725,22 @@ function StockTable() {
     );
   };
 
+  const tabLabel = isCE ? 'Container Extra' : isImport ? 'Import' : 'Bulk';
+  const printedAt = new Date().toLocaleString();
+
   return (
-    <>
-      <div className="page-header">
+    <div className="stock-table-print-page">
+      <div className="page-header no-print">
         <h2>Stock Table</h2>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {inventory.length > 0 && (
             <button className="btn btn-danger" onClick={handleDeleteAll}>
               <FiTrash2 /> Delete All Data
             </button>
           )}
+          <button className="btn btn-primary" onClick={handlePrint} disabled={displayRows.length === 0} title="Print the table as shown (active tab, filters, row limit, columns)">
+            <FiPrinter /> Print
+          </button>
           <button className="btn btn-success" onClick={exportExcel}>
             <FiDownload /> Export to Excel
           </button>
@@ -609,7 +750,17 @@ function StockTable() {
         </div>
       </div>
       <div className="page-body">
-        <div className="stock-type-tabs">
+        <div className="st-print-banner only-print-st">
+          <h1>WMS — Stock Table</h1>
+          <p><strong>Stock type:</strong> {tabLabel}</p>
+          <p><strong>Rows printed:</strong> {displayRows.length}
+            {filteredInventory.length !== displayRows.length ? ` (of ${filteredInventory.length} after filters)` : ' (all matching filters)'}
+            {inventory.length > 0 ? ` · Source: ${inventory.length} rows in tab` : ''}
+          </p>
+          <p><strong>Printed:</strong> {printedAt}</p>
+        </div>
+
+        <div className="stock-type-tabs no-print">
           {TABS.map(tab => (
             <button key={tab.id} className={`stock-type-tab ${activeTab === tab.id ? 'active' : ''}`}
               onClick={() => setActiveTab(tab.id)}>
@@ -618,7 +769,7 @@ function StockTable() {
           ))}
         </div>
 
-        <div className="filter-bar">
+        <div className="filter-bar no-print">
           <div className="filter-bar-search-single">
             <FiSearch className="filter-bar-search-icon" />
             <input
@@ -632,6 +783,14 @@ function StockTable() {
           <button className="btn btn-outline btn-sm" onClick={exportAsText} disabled={filteredInventory.length === 0} title="Copy filtered table as text">
             <FiCopy /> Export as Text
           </button>
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={copyTableAsImage}
+            disabled={displayRows.length === 0}
+            title="Copy the visible table as a PNG (paste into Word, chat, etc.)"
+          >
+            <FiImage /> Copy as image
+          </button>
           <div className="st-row-limit-btns">
             <span className="st-row-limit-label">Show rows:</span>
             <button className={`st-row-limit-btn ${rowLimit === 50 ? 'active' : ''}`} onClick={() => setRowLimit(50)}>50</button>
@@ -644,10 +803,10 @@ function StockTable() {
         </div>
 
         {activeTab === 'BULK' && (
-          <div className="st-bulk-col-toggles">
+          <div className="st-bulk-col-toggles no-print">
             <div className="st-bulk-col-left">
               <span className="st-bulk-col-label">Columns (BULK)</span>
-              <span className="st-bulk-col-hint">Normally OFF</span>
+              <span className="st-bulk-col-hint">Lines/Stack normally OFF · Old/New Balance normally ON</span>
             </div>
             <div className="st-bulk-col-right">
               <button
@@ -671,12 +830,26 @@ function StockTable() {
               >
                 Stack Total
               </button>
+              <button
+                type="button"
+                className={`st-bulk-pill ${showBulkOldBalance ? 'active' : ''}`}
+                onClick={() => setShowBulkOldBalance(v => !v)}
+              >
+                Old Balance
+              </button>
+              <button
+                type="button"
+                className={`st-bulk-pill ${showBulkNewIncome ? 'active' : ''}`}
+                onClick={() => setShowBulkNewIncome(v => !v)}
+              >
+                New Income
+              </button>
             </div>
           </div>
         )}
 
         {activeTab === 'CONTAINER_EXTRA' && (
-          <div className="st-bulk-col-toggles">
+          <div className="st-bulk-col-toggles no-print">
             <div className="st-bulk-col-left">
               <span className="st-bulk-col-label">Columns (Container Extra)</span>
               <span className="st-bulk-col-hint">Normally OFF</span>
@@ -708,13 +881,13 @@ function StockTable() {
           </div>
         )}
 
-        <div className="dashboard-grid" style={{ marginBottom: 16 }}>
+        <div className="dashboard-grid no-print" style={{ marginBottom: 16 }}>
           <div className="stat-card"><div className="stat-info"><h4>Total MC</h4><div className="stat-value" style={{ fontSize: '1.3rem' }}>{totalMC.toLocaleString()}</div></div></div>
           <div className="stat-card"><div className="stat-info"><h4>Total KG</h4><div className="stat-value" style={{ fontSize: '1.3rem' }}>{totalKG.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div></div></div>
           <div className="stat-card"><div className="stat-info"><h4>Total Stacks</h4><div className="stat-value" style={{ fontSize: '1.3rem' }}>{totalStacks}</div></div></div>
         </div>
 
-        <div className="table-container" ref={reportContainerRef} style={{ maxHeight: '65vh', overflow: 'auto' }}>
+        <div className="table-container st-table-print-wrap" ref={reportContainerRef} style={{ maxHeight: '65vh', overflow: 'auto' }}>
           {isNonBulk ? (
             <table className="excel-table gs-table">
               <thead>
@@ -825,14 +998,41 @@ function StockTable() {
                   </tr>
                 ))}
               </tbody>
-              {displayRows.length > 0 && (
+              {displayRows.length > 0 && bulkFirstAggregateIndex >= 0 && (
                 <tfoot>
                   <tr>
-                    <td colSpan={bulkColSpanBeforeOldBalance} style={{ textAlign: 'right', fontWeight: 700 }}>TOTALS:</td>
-                    <td className="num-cell">{filteredInventory.reduce((s, r) => s + Number(r.old_balance_mc), 0)}</td>
-                    <td className="num-cell">{filteredInventory.reduce((s, r) => s + Number(r.new_income_mc), 0)}</td>
-                    <td className="num-cell" style={{ fontSize: '0.95rem' }}>{totalMC}</td>
-                    <td className="num-cell">{totalKG.toFixed(2)}</td>
+                    <td colSpan={bulkTotalsColSpan} style={{ textAlign: 'right', fontWeight: 700 }}>TOTALS:</td>
+                    {bulkTableColumns.slice(bulkFirstAggregateIndex).map((col) => {
+                      if (col.key === 'old_balance_mc') {
+                        return (
+                          <td key={col.key} className="num-cell">
+                            {filteredInventory.reduce((s, r) => s + Number(r.old_balance_mc), 0)}
+                          </td>
+                        );
+                      }
+                      if (col.key === 'new_income_mc') {
+                        return (
+                          <td key={col.key} className="num-cell">
+                            {filteredInventory.reduce((s, r) => s + Number(r.new_income_mc), 0)}
+                          </td>
+                        );
+                      }
+                      if (col.key === 'hand_on_balance_mc') {
+                        return (
+                          <td key={col.key} className="num-cell" style={{ fontSize: '0.95rem' }}>
+                            {totalMC}
+                          </td>
+                        );
+                      }
+                      if (col.key === 'hand_on_balance_kg') {
+                        return (
+                          <td key={col.key} className="num-cell">
+                            {totalKG.toFixed(2)}
+                          </td>
+                        );
+                      }
+                      return null;
+                    })}
                   </tr>
                 </tfoot>
               )}
@@ -840,7 +1040,7 @@ function StockTable() {
           )}
         </div>
       </div>
-    </>
+    </div>
   );
 }
 

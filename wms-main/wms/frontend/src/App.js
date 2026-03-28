@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { BrowserRouter as Router, Routes, Route, NavLink, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -7,9 +7,11 @@ import {
   FiGrid, FiPackage, FiMapPin, FiArrowDownCircle,
   FiArrowUpCircle, FiTable, FiUpload, FiClock,
   FiMenu, FiX, FiChevronLeft, FiLayers, FiList,
-  FiShoppingCart, FiSettings, FiBarChart2, FiBook, FiAlertTriangle, FiTrendingDown, FiCalendar, FiUsers, FiUserCheck, FiClipboard, FiCpu, FiAnchor
+  FiShoppingCart, FiSettings, FiBarChart2, FiBook, FiAlertTriangle, FiTrendingDown, FiCalendar, FiUsers, FiUserCheck, FiClipboard, FiCpu, FiAnchor, FiShield, FiLogOut
 } from 'react-icons/fi';
 
+import { AuthProvider, useAuth } from './context/AuthContext';
+import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
 import Locations from './pages/Locations';
@@ -35,70 +37,93 @@ import LowSafetyStocks from './pages/LowSafetyStocks';
 import Calendar from './pages/Calendar';
 import Settings from './pages/Settings';
 import CKIntelligence from './pages/CKIntelligence';
+import CKIntelligenceChat from './pages/CKIntelligenceChat';
 import OrderAvailabilityChecker from './pages/OrderAvailabilityChecker';
 import OACResult from './pages/OACResult';
 import ImportShipments from './pages/ImportShipments';
 import ImportShipmentDetail from './pages/ImportShipmentDetail';
+import UserManagement from './pages/UserManagement';
 
-// Sidebar wrapper that auto-closes on mobile route change
+// Protected route wrapper
+function Protected({ pageKey, children }) {
+  const { hasAccess } = useAuth();
+  if (!hasAccess(pageKey)) return <Navigate to="/" replace />;
+  return children;
+}
+
+// Sidebar wrapper that auto-closes on mobile route change and filters by permissions
 function SidebarNav({ collapsed, mobileOpen, onNavClick }) {
   const location = useLocation();
+  const { hasAccess, user } = useAuth();
 
   useEffect(() => {
-    // Close mobile sidebar on route change
     if (mobileOpen) onNavClick();
     // eslint-disable-next-line
   }, [location.pathname]);
 
-  const link = (to, icon, label, end) => (
-    <NavLink to={to} end={end} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-      {icon}
-      <span className="nav-label">{label}</span>
-    </NavLink>
-  );
+  const link = (to, icon, label, pageKey, end) => {
+    if (!hasAccess(pageKey)) return null;
+    return (
+      <NavLink to={to} end={end} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+        {icon}
+        <span className="nav-label">{label}</span>
+      </NavLink>
+    );
+  };
 
   return (
     <nav className="sidebar-nav">
       <div className="nav-section-title"><span>Overview</span></div>
-      {link('/', <FiGrid />, 'Dashboard', true)}
-      {link('/ck-intelligence', <FiCpu />, 'CK Intelligence')}
+      {link('/', <FiGrid />, 'Dashboard', 'dashboard', true)}
+      {link('/ck-intelligence', <FiCpu />, 'CK Intelligence', 'ck-intelligence')}
 
       <div className="nav-section-title"><span>Master Data</span></div>
-      {link('/products', <FiPackage />, 'Product Master')}
-      {link('/locations', <FiMapPin />, 'Location Master')}
-      {link('/customer-master', <FiUsers />, 'Customer Stock Master')}
+      {link('/products', <FiPackage />, 'Product Master', 'products')}
+      {link('/locations', <FiMapPin />, 'Location Master', 'locations')}
+      {link('/customer-master', <FiUsers />, 'Customer Stock Master', 'customer-master')}
 
       <div className="nav-section-title"><span>Customer</span></div>
-      {link('/customer', <FiUserCheck />, 'Customer')}
-      {link('/customer-summary', <FiClipboard />, 'Summary')}
+      {link('/customer', <FiUserCheck />, 'Customer', 'customer')}
+      {link('/customer-summary', <FiClipboard />, 'Summary', 'customer-summary')}
 
       <div className="nav-section-title"><span>Operations</span></div>
-      {link('/stock-in', <FiArrowDownCircle />, 'Stock IN')}
-      {link('/stock-out', <FiArrowUpCircle />, 'Stock OUT')}
-      {link('/imports', <FiAnchor />, 'Import Stock')}
-      {link('/withdraw', <FiShoppingCart />, 'Withdraw')}
-      {link('/manage', <FiSettings />, 'Manage')}
-      {link('/manual', <FiBook />, 'Manual')}
-      {link('/lines-reformat', <FiList />, 'Lines Re-format')}
-      {link('/movements', <FiClock />, 'Movement History')}
+      {link('/stock-in', <FiArrowDownCircle />, 'Stock IN', 'stock-in')}
+      {link('/stock-out', <FiArrowUpCircle />, 'Stock OUT', 'stock-out')}
+      {link('/imports', <FiAnchor />, 'Import Stock', 'imports')}
+      {link('/withdraw', <FiShoppingCart />, 'Withdraw', 'withdraw')}
+      {link('/manage', <FiSettings />, 'Manage', 'manage')}
+      {link('/manual', <FiBook />, 'Manual', 'manual')}
+      {link('/lines-reformat', <FiList />, 'Lines Re-format', 'lines-reformat')}
+      {link('/movements', <FiClock />, 'Movement History', 'movements')}
 
       <div className="nav-section-title"><span>Reports</span></div>
-      {link('/stock-table', <FiTable />, 'Stock Table')}
-      {link('/stock-chart', <FiBarChart2 />, 'Stock Chart')}
-      {link('/location-layout', <FiLayers />, 'Location Layout')}
-      {link('/no-movement', <FiAlertTriangle />, 'No-Movement (+3M)')}
-      {link('/low-safety-stocks', <FiTrendingDown />, 'Low/Safety Stocks')}
+      {link('/stock-table', <FiTable />, 'Stock Table', 'stock-table')}
+      {link('/stock-chart', <FiBarChart2 />, 'Stock Chart', 'stock-chart')}
+      {link('/location-layout', <FiLayers />, 'Location Layout', 'location-layout')}
+      {link('/no-movement', <FiAlertTriangle />, 'No-Movement (+3M)', 'no-movement')}
+      {link('/low-safety-stocks', <FiTrendingDown />, 'Low/Safety Stocks', 'low-safety-stocks')}
 
       <div className="nav-section-title"><span>Tools</span></div>
-      {link('/oac', <FiClipboard />, 'Order Checker (OAC)')}
-      {link('/upload', <FiUpload />, 'Excel Upload')}
-      {link('/calendar', <FiCalendar />, 'Calendar')}
-      {link('/settings', <FiSettings />, 'Settings')}
+      {link('/oac', <FiClipboard />, 'Order Checker (OAC)', 'oac')}
+      {link('/upload', <FiUpload />, 'Excel Upload', 'upload')}
+      {link('/calendar', <FiCalendar />, 'Calendar', 'calendar')}
+      {link('/settings', <FiSettings />, 'Settings', 'settings')}
+
+      {user?.role === 'superadmin' && (
+        <>
+          <div className="nav-section-title"><span>Admin</span></div>
+          <NavLink to="/user-management" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+            <FiShield />
+            <span className="nav-label">Permissions</span>
+          </NavLink>
+        </>
+      )}
     </nav>
   );
 }
 
-function App() {
+function AppShell() {
+  const { user, loading, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
@@ -122,6 +147,14 @@ function App() {
     }
   };
 
+  if (loading) {
+    return <div className="loading"><div className="spinner"></div>Loading...</div>;
+  }
+
+  if (!user) {
+    return <Login />;
+  }
+
   const sidebarClass = [
     'sidebar',
     collapsed && !isMobile ? 'collapsed' : '',
@@ -130,98 +163,119 @@ function App() {
   ].filter(Boolean).join(' ');
 
   return (
+    <div className={`app-layout ${collapsed && !isMobile ? 'sidebar-collapsed' : ''}`}>
+      {isMobile && mobileOpen && (
+        <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />
+      )}
+
+      <aside className={sidebarClass}>
+        <div className="sidebar-header">
+          <div className="sidebar-brand">
+            <div className="brand-icon">W</div>
+            <div className="brand-text">
+              <h1>WMS</h1>
+              <p>Warehouse Management</p>
+            </div>
+          </div>
+          {!isMobile && (
+            <button className="collapse-btn" onClick={toggleSidebar} title={collapsed ? 'Expand' : 'Collapse'}>
+              <FiChevronLeft />
+            </button>
+          )}
+          {isMobile && (
+            <button className="collapse-btn" onClick={() => setMobileOpen(false)}>
+              <FiX />
+            </button>
+          )}
+        </div>
+        <SidebarNav collapsed={collapsed} mobileOpen={mobileOpen} onNavClick={() => setMobileOpen(false)} />
+        <div className="sidebar-footer">
+          <div className="sidebar-user-info">
+            <span className="sidebar-user-name">{user.display_name || user.username}</span>
+            <span className="sidebar-user-role">{user.role === 'superadmin' ? 'Admin' : 'User'}</span>
+          </div>
+          <button className="sidebar-logout-btn" onClick={logout} title="Sign out">
+            <FiLogOut />
+            <span className="nav-label">Sign Out</span>
+          </button>
+        </div>
+      </aside>
+
+      <main className="main-content">
+        <div className="topbar">
+          {isMobile && (
+            <button className="topbar-menu-btn" onClick={toggleSidebar}>
+              <FiMenu />
+            </button>
+          )}
+          <div className="topbar-title">
+            {isMobile && <span className="topbar-brand">WMS</span>}
+          </div>
+          <div className="topbar-user">
+            <span className="topbar-username">{user.display_name || user.username}</span>
+            <button className="topbar-logout" onClick={logout} title="Sign out"><FiLogOut /></button>
+          </div>
+        </div>
+
+        <div className="main-scroll">
+          <Routes>
+            <Route path="/" element={<Protected pageKey="dashboard"><Dashboard /></Protected>} />
+            <Route path="/ck-intelligence" element={<Protected pageKey="ck-intelligence"><CKIntelligence /></Protected>} />
+            <Route path="/ck-intelligence-chat" element={<Protected pageKey="ck-intelligence"><CKIntelligenceChat /></Protected>} />
+            <Route path="/products" element={<Protected pageKey="products"><Products /></Protected>} />
+            <Route path="/locations" element={<Protected pageKey="locations"><Locations /></Protected>} />
+            <Route path="/stock-in" element={<Protected pageKey="stock-in"><StockIn /></Protected>} />
+            <Route path="/stock-out" element={<Protected pageKey="stock-out"><StockOut /></Protected>} />
+            <Route path="/stock-table" element={<Protected pageKey="stock-table"><StockTable /></Protected>} />
+            <Route path="/manual" element={<Protected pageKey="manual"><Manual /></Protected>} />
+            <Route path="/lines-reformat" element={<Protected pageKey="lines-reformat"><LinesReformat /></Protected>} />
+            <Route path="/customer-master" element={<Protected pageKey="customer-master"><CustomerMaster /></Protected>} />
+            <Route path="/customer" element={<Protected pageKey="customer"><CustomerStock /></Protected>} />
+            <Route path="/customer/print/:depositId/:withdrawalId" element={<Protected pageKey="customer"><CustomerPrint /></Protected>} />
+            <Route path="/customer-summary" element={<Protected pageKey="customer-summary"><CustomerSummary /></Protected>} />
+            <Route path="/stock-chart" element={<Protected pageKey="stock-chart"><StockChart /></Protected>} />
+            <Route path="/upload" element={<Protected pageKey="upload"><ExcelUpload /></Protected>} />
+            <Route path="/withdraw" element={<Protected pageKey="withdraw"><Withdraw /></Protected>} />
+            <Route path="/withdraw/:id/form" element={<Protected pageKey="withdraw"><WithdrawForm /></Protected>} />
+            <Route path="/withdraw/:id/report" element={<Protected pageKey="withdraw"><WithdrawReport /></Protected>} />
+            <Route path="/manage" element={<Protected pageKey="manage"><Manage /></Protected>} />
+            <Route path="/movements" element={<Protected pageKey="movements"><Movements /></Protected>} />
+            <Route path="/location-layout" element={<Protected pageKey="location-layout"><LocationLayout /></Protected>} />
+            <Route path="/no-movement" element={<Protected pageKey="no-movement"><NoMovementStocks /></Protected>} />
+            <Route path="/low-safety-stocks" element={<Protected pageKey="low-safety-stocks"><LowSafetyStocks /></Protected>} />
+            <Route path="/calendar" element={<Protected pageKey="calendar"><Calendar /></Protected>} />
+            <Route path="/imports" element={<Protected pageKey="imports"><ImportShipments /></Protected>} />
+            <Route path="/imports/new" element={<Protected pageKey="imports"><ImportShipmentDetail /></Protected>} />
+            <Route path="/imports/:id" element={<Protected pageKey="imports"><ImportShipmentDetail /></Protected>} />
+            <Route path="/oac" element={<Protected pageKey="oac"><OrderAvailabilityChecker /></Protected>} />
+            <Route path="/oac-result/:id" element={<Protected pageKey="oac"><OACResult /></Protected>} />
+            <Route path="/settings" element={<Protected pageKey="settings"><Settings /></Protected>} />
+            {user?.role === 'superadmin' && (
+              <Route path="/user-management" element={<UserManagement />} />
+            )}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function App() {
+  return (
     <Router>
-      <div className={`app-layout ${collapsed && !isMobile ? 'sidebar-collapsed' : ''}`}>
-        {/* Mobile overlay */}
-        {isMobile && mobileOpen && (
-          <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />
-        )}
-
-        <aside className={sidebarClass}>
-          <div className="sidebar-header">
-            <div className="sidebar-brand">
-              <div className="brand-icon">W</div>
-              <div className="brand-text">
-                <h1>WMS</h1>
-                <p>Warehouse Management</p>
-              </div>
-            </div>
-            {!isMobile && (
-              <button className="collapse-btn" onClick={toggleSidebar} title={collapsed ? 'Expand' : 'Collapse'}>
-                <FiChevronLeft />
-              </button>
-            )}
-            {isMobile && (
-              <button className="collapse-btn" onClick={() => setMobileOpen(false)}>
-                <FiX />
-              </button>
-            )}
-          </div>
-          <SidebarNav collapsed={collapsed} mobileOpen={mobileOpen} onNavClick={() => setMobileOpen(false)} />
-          <div className="sidebar-footer">
-            <p>v1.0.0</p>
-          </div>
-        </aside>
-
-        <main className="main-content">
-          {/* Top bar */}
-          <div className="topbar">
-            {isMobile && (
-              <button className="topbar-menu-btn" onClick={toggleSidebar}>
-                <FiMenu />
-              </button>
-            )}
-            <div className="topbar-title">
-              {isMobile && <span className="topbar-brand">WMS</span>}
-            </div>
-          </div>
-
-          <div className="main-scroll">
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/ck-intelligence" element={<CKIntelligence />} />
-              <Route path="/products" element={<Products />} />
-              <Route path="/locations" element={<Locations />} />
-              <Route path="/stock-in" element={<StockIn />} />
-              <Route path="/stock-out" element={<StockOut />} />
-              <Route path="/stock-table" element={<StockTable />} />
-              <Route path="/manual" element={<Manual />} />
-              <Route path="/lines-reformat" element={<LinesReformat />} />
-              <Route path="/customer-master" element={<CustomerMaster />} />
-              <Route path="/customer" element={<CustomerStock />} />
-              <Route path="/customer/print/:depositId/:withdrawalId" element={<CustomerPrint />} />
-              <Route path="/customer-summary" element={<CustomerSummary />} />
-              <Route path="/stock-chart" element={<StockChart />} />
-              <Route path="/upload" element={<ExcelUpload />} />
-              <Route path="/withdraw" element={<Withdraw />} />
-              <Route path="/withdraw/:id/form" element={<WithdrawForm />} />
-              <Route path="/withdraw/:id/report" element={<WithdrawReport />} />
-              <Route path="/manage" element={<Manage />} />
-              <Route path="/movements" element={<Movements />} />
-              <Route path="/location-layout" element={<LocationLayout />} />
-              <Route path="/no-movement" element={<NoMovementStocks />} />
-              <Route path="/low-safety-stocks" element={<LowSafetyStocks />} />
-              <Route path="/calendar" element={<Calendar />} />
-              <Route path="/imports" element={<ImportShipments />} />
-              <Route path="/imports/new" element={<ImportShipmentDetail />} />
-              <Route path="/imports/:id" element={<ImportShipmentDetail />} />
-              <Route path="/oac" element={<OrderAvailabilityChecker />} />
-              <Route path="/oac-result/:id" element={<OACResult />} />
-              <Route path="/settings" element={<Settings />} />
-            </Routes>
-          </div>
-        </main>
-      </div>
-
-      <ToastContainer
-        position="top-right"
-        autoClose={3000}
-        hideProgressBar={false}
-        newestOnTop
-        closeOnClick
-        pauseOnHover
-        theme="colored"
-      />
+      <AuthProvider>
+        <AppShell />
+        <ToastContainer
+          position="top-right"
+          autoClose={3000}
+          hideProgressBar={false}
+          newestOnTop
+          closeOnClick
+          pauseOnHover
+          theme="colored"
+        />
+      </AuthProvider>
     </Router>
   );
 }

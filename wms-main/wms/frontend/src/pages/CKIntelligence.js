@@ -1,4 +1,5 @@
 import React, { useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import logoAi from '../images/logo_ai.png';
 
 /** Seeded pseudo-random for stable star positions between renders */
@@ -9,6 +10,8 @@ function seededRandom(seed) {
 }
 
 function CKIntelligence() {
+  const navigate = useNavigate();
+
   useEffect(() => {
     document.body.classList.add('cki-route');
     return () => document.body.classList.remove('cki-route');
@@ -78,10 +81,14 @@ function CKIntelligence() {
           </div>
         </div>
 
-        <div className="cki-coming">
-          <span className="cki-coming-glow" />
-          <span className="cki-coming-text">Coming soon</span>
-        </div>
+        <button
+          type="button"
+          className="cki-explore-btn"
+          onClick={() => navigate('/ck-intelligence-chat')}
+        >
+          <span className="cki-coming-glow" aria-hidden="true" />
+          <span className="cki-coming-text">Explore Now</span>
+        </button>
 
         <p className="cki-footnote">We&apos;re building something stellar for your operations.</p>
       </div>

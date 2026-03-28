@@ -149,4 +149,14 @@ export const getCustomerPrintData = (depositId, withdrawalId) => api.get(`/custo
 export const getCustomerSummary = (params) => api.get('/customers/summary/all', { params });
 export const getDepositItemDetail = (depositItemId) => api.get(`/customers/summary/detail/${depositItemId}`);
 
+// ─── Auth ────────────────────────────────────────────
+export const login = (data) => api.post('/auth/login', data);
+export const getMe = () => api.get('/auth/me');
+
+// ─── Users (superadmin) ──────────────────────────────
+export const getUsers = () => api.get('/users');
+export const createUser = (data) => api.post('/users', data);
+export const updateUser = (id, data) => api.put(`/users/${id}`, data);
+export const deleteUser = (id) => api.delete(`/users/${id}`);
+
 export default api;

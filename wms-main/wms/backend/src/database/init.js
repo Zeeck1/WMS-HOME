@@ -520,6 +520,45 @@ async function initDatabase() {
       }
     } catch (e) { /* ignore */ }
 
+    // ── Auth: users & permissions ────────────────────────────────────
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(100) NOT NULL UNIQUE,
+        password_hash VARCHAR(255) NOT NULL,
+        display_name VARCHAR(100),
+        role ENUM('superadmin','user') NOT NULL DEFAULT 'user',
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB
+    `);
+    console.log('  Table created: users');
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS user_permissions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        page_key VARCHAR(100) NOT NULL,
+        can_access TINYINT(1) NOT NULL DEFAULT 1,
+        UNIQUE KEY uq_user_page (user_id, page_key),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB
+    `);
+    console.log('  Table created: user_permissions');
+
+    // Seed superadmin (skip if already exists)
+    const bcrypt = require('bcryptjs');
+    const [existing] = await connection.query("SELECT id FROM users WHERE username = 'Superadmin'");
+    if (existing.length === 0) {
+      const hash = await bcrypt.hash('ckfrozen123', 10);
+      await connection.query(
+        "INSERT INTO users (username, password_hash, display_name, role) VALUES ('Superadmin', ?, 'Super Admin', 'superadmin')",
+        [hash]
+      );
+      console.log('  Seeded superadmin user');
+    }
+
     console.log('\nDatabase schema initialized successfully!');
 
   } catch (error) {

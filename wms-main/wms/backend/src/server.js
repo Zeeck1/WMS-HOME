@@ -18,6 +18,9 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+// Auth routes (public)
+app.use('/api/auth', require('./routes/auth'));
+
 // API Routes
 app.use('/api/products', require('./routes/products'));
 app.use('/api/locations', require('./routes/locations'));
@@ -32,6 +35,7 @@ app.use('/api/manual', require('./routes/manual'));
 app.use('/api/customers', require('./routes/customers'));
 app.use('/api/oac', require('./routes/oac'));
 app.use('/api/imports', require('./routes/imports'));
+app.use('/api/users', require('./routes/users'));
 
 // Health check
 app.get('/api/health', (req, res) => {
