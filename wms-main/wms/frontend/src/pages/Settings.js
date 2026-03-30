@@ -1,9 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'react-toastify';
-import { FiSettings, FiSave, FiMail, FiMessageSquare } from 'react-icons/fi';
-import { getSettings, saveSettings } from '../services/api';
+import { FiSettings, FiSave, FiMail, FiMessageSquare, FiDownload, FiUploadCloud, FiDatabase, FiShield, FiFile, FiCheckCircle, FiAlertTriangle } from 'react-icons/fi';
+import { getSettings, saveSettings, exportBackup, importBackup } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 export default function Settings() {
+  const { user } = useAuth();
+  const isSuperadmin = user?.role === 'superadmin';
+
   const [form, setForm] = useState({
     line_channel_access_token: '',
     line_user_id: '',
@@ -18,6 +22,13 @@ export default function Settings() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [importResult, setImportResult] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -61,6 +72,74 @@ export default function Settings() {
     }
   };
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const response = await exportBackup();
+      const blob = new Blob([response.data], { type: 'application/sql' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      a.href = url;
+      a.download = `wms_backup_${timestamp}.sql`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      toast.success('Backup file downloaded successfully!');
+    } catch {
+      toast.error('Failed to export backup');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleFileSelect = (file) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.sql')) {
+      toast.error('Only .sql files are accepted');
+      return;
+    }
+    setImportFile(file);
+    setImportResult(null);
+  };
+
+  const handleImport = async () => {
+    if (!importFile) return;
+
+    if (!window.confirm(
+      'WARNING: This will overwrite ALL existing data with the backup file contents.\n\n' +
+      'This action cannot be undone. Are you sure you want to proceed?'
+    )) return;
+
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const { data } = await importBackup(importFile);
+      setImportResult({
+        success: true,
+        executed: data.statements_executed,
+        errors: data.error_count || 0,
+      });
+      toast.success(`Backup restored! ${data.statements_executed} statements executed.`);
+      setImportFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Failed to restore backup';
+      setImportResult({ success: false, message: msg });
+      toast.error(msg);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleFileSelect(file);
+  };
+
   if (loading) return <div className="page-container"><div className="settings-page"><p>Loading settings...</p></div></div>;
 
   return (
@@ -73,6 +152,116 @@ export default function Settings() {
             <p>Configure messaging and notification integrations</p>
           </div>
         </div>
+
+        {isSuperadmin && (
+          <div className="settings-backup-wrapper">
+            {/* Backup Export Section */}
+            <div className="settings-section backup-section">
+              <div className="settings-section-header">
+                <FiDatabase className="settings-section-icon settings-icon-backup" />
+                <div>
+                  <h3>Database Backup</h3>
+                  <p>Export all data as a downloadable SQL file</p>
+                </div>
+              </div>
+              <div className="backup-export-body">
+                <div className="backup-info-card">
+                  <FiShield className="backup-info-icon" />
+                  <div>
+                    <strong>Full Database Export</strong>
+                    <p>Downloads a complete .sql backup of all tables including products, locations, lots, movements, withdrawals, customers, imports, users, and settings.</p>
+                  </div>
+                </div>
+                <button
+                  className="backup-export-btn"
+                  onClick={handleExport}
+                  disabled={exporting}
+                >
+                  <FiDownload />
+                  {exporting ? 'Generating backup...' : 'Download Backup (.sql)'}
+                </button>
+              </div>
+            </div>
+
+            {/* Backup Import Section */}
+            <div className="settings-section backup-section">
+              <div className="settings-section-header">
+                <FiUploadCloud className="settings-section-icon settings-icon-restore" />
+                <div>
+                  <h3>Restore from Backup</h3>
+                  <p>Upload a .sql backup file to restore your database</p>
+                </div>
+              </div>
+              <div className="backup-import-body">
+                <div className="backup-warning-card">
+                  <FiAlertTriangle className="backup-warning-icon" />
+                  <div>
+                    <strong>Caution</strong>
+                    <p>Restoring a backup will <strong>overwrite all existing data</strong>. Make sure to export a current backup first if you want to preserve the current state.</p>
+                  </div>
+                </div>
+
+                <div
+                  className={`backup-dropzone${dragOver ? ' backup-dropzone-active' : ''}${importFile ? ' backup-dropzone-has-file' : ''}`}
+                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".sql"
+                    style={{ display: 'none' }}
+                    onChange={(e) => handleFileSelect(e.target.files?.[0])}
+                  />
+                  {importFile ? (
+                    <div className="backup-file-selected">
+                      <FiFile className="backup-file-icon" />
+                      <div>
+                        <strong>{importFile.name}</strong>
+                        <span>{(importFile.size / 1024).toFixed(1)} KB</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="backup-dropzone-placeholder">
+                      <FiUploadCloud className="backup-dropzone-icon" />
+                      <strong>Drop .sql file here or click to browse</strong>
+                      <span>Only .sql backup files are accepted</span>
+                    </div>
+                  )}
+                </div>
+
+                {importFile && (
+                  <button
+                    className="backup-import-btn"
+                    onClick={handleImport}
+                    disabled={importing}
+                  >
+                    <FiUploadCloud />
+                    {importing ? 'Restoring backup...' : 'Restore Backup'}
+                  </button>
+                )}
+
+                {importResult && (
+                  <div className={`backup-result ${importResult.success ? 'backup-result-success' : 'backup-result-error'}`}>
+                    {importResult.success ? (
+                      <>
+                        <FiCheckCircle />
+                        <span>Restore complete — {importResult.executed} statements executed{importResult.errors > 0 ? `, ${importResult.errors} errors` : ''}</span>
+                      </>
+                    ) : (
+                      <>
+                        <FiAlertTriangle />
+                        <span>{importResult.message}</span>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSave} className="settings-form">
           {/* LINE Messaging API Section */}

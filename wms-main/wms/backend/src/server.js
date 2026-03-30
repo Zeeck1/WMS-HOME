@@ -36,6 +36,8 @@ app.use('/api/customers', require('./routes/customers'));
 app.use('/api/oac', require('./routes/oac'));
 app.use('/api/imports', require('./routes/imports'));
 app.use('/api/users', require('./routes/users'));
+app.use('/api/backup', require('./routes/backup'));
+app.use('/api/gemini', require('./routes/geminiChat'));
 
 // Health check
 app.get('/api/health', (req, res) => {

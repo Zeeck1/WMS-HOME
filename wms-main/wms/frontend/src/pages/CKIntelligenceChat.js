@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import { FiArrowLeft, FiMoon, FiSun, FiArrowUp, FiPlus, FiMic } from 'react-icons/fi';
 import logoAi from '../images/logo_ai2.png';
+import { geminiChat } from '../services/api';
 
 const THEME_KEY = 'ck-intelligence-chat-theme';
 
@@ -15,8 +17,14 @@ function CKIntelligenceChat() {
     return 'dark';
   });
   const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState([
-    { id: 'w', role: 'assistant', text: 'Hi — I\'m the CK Intelligence assistant. Ask about stock, locations, or warehouse insights. (Demo: replies are placeholders until the model is connected.)' },
+    {
+      id: 'w',
+      role: 'assistant',
+      text:
+        'Hi — I\'m the CK Intelligence assistant, powered by Google Gemini. Ask about stock, locations, movements, or warehouse operations.',
+    },
   ]);
   const listRef = useRef(null);
   const textareaRef = useRef(null);
@@ -51,23 +59,58 @@ function CKIntelligenceChat() {
 
   const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
-  const send = () => {
+  const send = async () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || sending) return;
+
     const id = `${Date.now()}`;
-    setMessages((m) => [...m, { id, role: 'user', text }]);
+    const replyId = `${id}-r`;
+
+    const priorForApi = messages
+      .filter((m) => !m.pending && m.text)
+      .map((m) => ({ role: m.role, text: m.text }));
+
+    const forApi = [...priorForApi, { role: 'user', text }];
+
+    setMessages((m) => [
+      ...m,
+      { id, role: 'user', text },
+      { id: replyId, role: 'assistant', text: '', pending: true },
+    ]);
     setInput('');
     requestAnimationFrame(() => adjustTextareaHeight());
-    setTimeout(() => {
-      setMessages((m) => [
-        ...m,
-        {
-          id: `${id}-r`,
-          role: 'assistant',
-          text: 'Thanks for your message. Full AI responses will appear here once the backend is wired.',
-        },
-      ]);
-    }, 400);
+    setSending(true);
+
+    try {
+      const { data } = await geminiChat(forApi);
+      const reply = data?.text || '';
+      setMessages((m) =>
+        m.map((x) =>
+          x.id === replyId ? { id: replyId, role: 'assistant', text: reply || '(No text returned)' } : x
+        )
+      );
+    } catch (err) {
+      const d = err.response?.data;
+      const detail = [d?.error, d?.hint].filter(Boolean).join(' ');
+      const msg = detail || err.message || 'Could not reach the assistant.';
+      setMessages((m) =>
+        m.map((x) =>
+          x.id === replyId
+            ? {
+                id: replyId,
+                role: 'assistant',
+                text:
+                  err.response?.status === 503
+                    ? `${msg}\n\nAsk your administrator to set GEMINI_API_KEY on the server.`
+                    : msg,
+              }
+            : x
+        )
+      );
+      toast.error(err.response?.status === 503 ? 'Gemini API not configured on server' : 'Assistant request failed');
+    } finally {
+      setSending(false);
+    }
   };
 
   const onKeyDown = (e) => {
@@ -109,7 +152,11 @@ function CKIntelligenceChat() {
                   <img src={logoAi} alt="" />
                 </div>
               )}
-              <div className={`ckic-bubble ckic-bubble--${msg.role}`}>{msg.text}</div>
+              <div
+                className={`ckic-bubble ckic-bubble--${msg.role}${msg.pending ? ' ckic-bubble--pending' : ''}`}
+              >
+                {msg.pending ? 'Thinking…' : msg.text}
+              </div>
             </div>
           ))}
         </div>
@@ -123,6 +170,7 @@ function CKIntelligenceChat() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
+            disabled={sending}
           />
           <div className="ckic-composer-toolbar">
             <button
@@ -130,6 +178,7 @@ function CKIntelligenceChat() {
               className="ckic-composer-icon"
               title="Attach file"
               aria-label="Attach file"
+              disabled={sending}
             >
               <FiPlus />
             </button>
@@ -139,6 +188,7 @@ function CKIntelligenceChat() {
               className="ckic-composer-icon"
               title="Voice input"
               aria-label="Voice input"
+              disabled={sending}
             >
               <FiMic />
             </button>
@@ -146,7 +196,7 @@ function CKIntelligenceChat() {
               type="button"
               className="ckic-send-fab"
               onClick={send}
-              disabled={!input.trim()}
+              disabled={!input.trim() || sending}
               title="Send"
               aria-label="Send message"
             >

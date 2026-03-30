@@ -127,6 +127,17 @@ export const deleteImportStockOut = (outId) => api.delete(`/imports/stock-out/${
 export const getSettings = () => api.get('/settings');
 export const saveSettings = (data) => api.put('/settings', data);
 
+// ─── Backup / Restore ───────────────────────────────
+export const exportBackup = () => api.get('/backup/export', { responseType: 'blob' });
+export const importBackup = (file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post('/backup/import', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 300000,
+  });
+};
+
 // ─── Customers ───────────────────────────────────────
 export const getCustomers = () => api.get('/customers');
 export const getCustomer = (id) => api.get(`/customers/${id}`);
@@ -148,6 +159,9 @@ export const deleteAllWithdrawals = (customerId) => api.delete(`/customers/${cus
 export const getCustomerPrintData = (depositId, withdrawalId) => api.get(`/customers/print/${depositId}/${withdrawalId}`);
 export const getCustomerSummary = (params) => api.get('/customers/summary/all', { params });
 export const getDepositItemDetail = (depositItemId) => api.get(`/customers/summary/detail/${depositItemId}`);
+
+// ─── CK Intelligence / Gemini ───────────────────────
+export const geminiChat = (messages) => api.post('/gemini/chat', { messages });
 
 // ─── Auth ────────────────────────────────────────────
 export const login = (data) => api.post('/auth/login', data);
