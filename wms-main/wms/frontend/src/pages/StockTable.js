@@ -703,7 +703,7 @@ function StockTable() {
     }
   };
 
-  if (loading) return <div className="loading"><div className="spinner"></div>Loading stock table...</div>;
+  if (loading) return <div className="loading"><div className="spinner"></div>Loading stock summary...</div>;
 
   const renderHeaderCell = (col, headerLabel, style = {}) => {
     const allVals = allColumnValues[col.key] || [];
@@ -731,7 +731,7 @@ function StockTable() {
   return (
     <div className="stock-table-print-page">
       <div className="page-header no-print">
-        <h2>Stock Table</h2>
+        <h2>Stock Summary</h2>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {inventory.length > 0 && (
             <button className="btn btn-danger" onClick={handleDeleteAll}>
@@ -751,7 +751,7 @@ function StockTable() {
       </div>
       <div className="page-body">
         <div className="st-print-banner only-print-st">
-          <h1>WMS — Stock Table</h1>
+          <h1>WMS — Stock Summary</h1>
           <p><strong>Stock type:</strong> {tabLabel}</p>
           <p><strong>Rows printed:</strong> {displayRows.length}
             {filteredInventory.length !== displayRows.length ? ` (of ${filteredInventory.length} after filters)` : ' (all matching filters)'}

@@ -43,6 +43,7 @@ import OACResult from './pages/OACResult';
 import ImportShipments from './pages/ImportShipments';
 import ImportShipmentDetail from './pages/ImportShipmentDetail';
 import UserManagement from './pages/UserManagement';
+import logoThaiBg from './images/logo-thai-bg.jpg';
 
 // Protected route wrapper
 function Protected({ pageKey, children }) {
@@ -75,6 +76,7 @@ function SidebarNav({ collapsed, mobileOpen, onNavClick }) {
     <nav className="sidebar-nav">
       <div className="nav-section-title"><span>Overview</span></div>
       {link('/', <FiGrid />, 'Dashboard', 'dashboard', true)}
+      {link('/stock-table', <FiTable />, 'Stock Summary', 'stock-table')}
       {link('/ck-intelligence', <FiCpu />, 'CK Intelligence', 'ck-intelligence')}
 
       <div className="nav-section-title"><span>Master Data</span></div>
@@ -97,7 +99,6 @@ function SidebarNav({ collapsed, mobileOpen, onNavClick }) {
       {link('/movements', <FiClock />, 'Movement History', 'movements')}
 
       <div className="nav-section-title"><span>Reports</span></div>
-      {link('/stock-table', <FiTable />, 'Stock Table', 'stock-table')}
       {link('/stock-chart', <FiBarChart2 />, 'Stock Chart', 'stock-chart')}
       {link('/location-layout', <FiLayers />, 'Location Layout', 'location-layout')}
       {link('/no-movement', <FiAlertTriangle />, 'No-Movement (+3M)', 'no-movement')}
@@ -191,8 +192,16 @@ function AppShell() {
         <SidebarNav collapsed={collapsed} mobileOpen={mobileOpen} onNavClick={() => setMobileOpen(false)} />
         <div className="sidebar-footer">
           <div className="sidebar-user-info">
-            <span className="sidebar-user-name">{user.display_name || user.username}</span>
-            <span className="sidebar-user-role">{user.role === 'superadmin' ? 'Admin' : 'User'}</span>
+            <img
+              src={logoThaiBg}
+              alt=""
+              className="sidebar-user-avatar"
+              decoding="async"
+            />
+            <div className="sidebar-user-text">
+              <span className="sidebar-user-name">{user.display_name || user.username}</span>
+              <span className="sidebar-user-role">{user.role === 'superadmin' ? 'Admin' : 'User'}</span>
+            </div>
           </div>
           <button className="sidebar-logout-btn" onClick={logout} title="Sign out">
             <FiLogOut />

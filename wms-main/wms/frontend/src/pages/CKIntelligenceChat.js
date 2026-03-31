@@ -19,11 +19,12 @@ function CKIntelligenceChat() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState([
+    
     {
       id: 'w',
       role: 'assistant',
-      text:
-        'Hi — I\'m the CK Intelligence assistant, powered by Google Gemini. Ask about stock, locations, movements, or warehouse operations.',
+      text: `Hi — I'm the CK Intelligence AI. Ask about stock, locations, movements, or warehouse operations. \n\n
+    สวัสดีครับ — ผมคือ AI ของ CK Intelligence ยินดีให้ความช่วยเหลือเรื่องเช็กสต็อก, ตำแหน่งจัดเก็บ, การเคลื่อนย้ายสินค้า หรือการดำเนินงานในคลังสินค้า สอบถามได้เลยครับ`,
     },
   ]);
   const listRef = useRef(null);

@@ -97,21 +97,41 @@ router.get('/dashboard', async (req, res) => {
       LIMIT 10
     `);
 
-    // Check for stock errors (negative balances)
-    const [errors] = await pool.query(`
-      SELECT lot_id, location_id, 
-        SUM(CASE WHEN movement_type='IN' THEN quantity_mc ELSE 0 END) -
-        SUM(CASE WHEN movement_type='OUT' THEN quantity_mc ELSE 0 END) AS balance
-      FROM movements
-      GROUP BY lot_id, location_id
-      HAVING balance < 0
+    // Negative MC balance per lot + location (data inconsistency — more OUT than IN)
+    const [errorRows] = await pool.query(`
+      SELECT x.lot_id, x.location_id, x.balance_mc,
+        l.lot_no, p.fish_name, p.size, loc.line_place, p.stock_type
+      FROM (
+        SELECT lot_id, location_id,
+          SUM(CASE WHEN movement_type = 'IN' THEN quantity_mc ELSE 0 END) -
+          SUM(CASE WHEN movement_type = 'OUT' THEN quantity_mc ELSE 0 END) AS balance_mc
+        FROM movements
+        GROUP BY lot_id, location_id
+        HAVING balance_mc < 0
+      ) x
+      JOIN lots l ON x.lot_id = l.id
+      JOIN products p ON l.product_id = p.id
+      JOIN locations loc ON x.location_id = loc.id
+      ORDER BY x.balance_mc ASC, l.lot_no, loc.line_place
     `);
+
+    const stock_issues = errorRows.map((r) => ({
+      lot_id: r.lot_id,
+      location_id: r.location_id,
+      lot_no: r.lot_no,
+      fish_name: r.fish_name,
+      size: r.size,
+      line_place: r.line_place,
+      balance_mc: Number(r.balance_mc),
+      stock_type: r.stock_type,
+    }));
 
     res.json({
       ...summary[0],
-      stock_status: errors.length === 0 ? 'Correct' : `Error (${errors.length} issues)`,
+      stock_status: stock_issues.length === 0 ? 'Correct' : `Error (${stock_issues.length} issues)`,
       recent_movements: recentMovements,
-      error_count: errors.length
+      error_count: stock_issues.length,
+      stock_issues,
     });
   } catch (error) {
     console.error('Error fetching dashboard:', error);

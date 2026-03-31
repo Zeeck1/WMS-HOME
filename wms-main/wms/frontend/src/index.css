@@ -64,6 +64,8 @@ body {
 /* ─── Sidebar ─────────────────────────────────────── */
 .sidebar {
   width: var(--sidebar-width);
+  container-type: inline-size;
+  container-name: sidebar;
   background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
   color: white;
   position: fixed;
@@ -497,6 +499,58 @@ body {
   font-size: 0.75rem;
   color: var(--gray-400);
   margin-top: 1px;
+}
+
+.dashboard-stock-issues-btn {
+  margin-top: 10px;
+  width: 100%;
+  justify-content: center;
+}
+
+.modal.dashboard-stock-modal {
+  max-width: min(720px, 96vw);
+}
+
+.dashboard-stock-modal-intro {
+  margin: 0 0 16px;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--gray-700);
+}
+
+.dashboard-stock-issues-wrap {
+  max-height: min(50vh, 360px);
+  overflow: auto;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+}
+
+.dashboard-stock-issues-table {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.dashboard-stock-issues-table th,
+.dashboard-stock-issues-table td {
+  white-space: nowrap;
+}
+
+.dashboard-stock-issues-table td.dashboard-stock-balance-cell {
+  color: var(--danger-dark);
+  font-weight: 700;
+}
+
+.dashboard-stock-modal-footer {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dashboard-stock-modal-footer .btn {
+  margin: 0;
+}
+
+.text-right {
+  text-align: right;
 }
 
 /* ─── Buttons ─────────────────────────────────────── */
@@ -9489,15 +9543,45 @@ body.ckic-route:has(.ckic-page[data-theme="light"]) .topbar-logout {
    ============================================================ */
 .sidebar-user-info {
   display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: clamp(8px, 2vmin, 14px);
+  padding: 8px 0 10px;
+  border-top: none;
+}
+
+/* Responsive: vmin when container queries unavailable; + cqi tied to sidebar width when supported */
+.sidebar-user-avatar {
+  width: clamp(2.25rem, 5vmin + 1.25rem, 3.5rem);
+  height: auto;
+  aspect-ratio: 1;
+  max-width: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+@supports (width: 1cqi) {
+  .sidebar-user-avatar {
+    width: clamp(2.25rem, min(17cqi, 5vmin + 1.25rem), 3.5rem);
+  }
+}
+
+.sidebar-user-text {
+  display: flex;
   flex-direction: column;
-  padding: 8px 16px;
-  border-top: 1px solid var(--gray-200);
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
 }
 
 .sidebar-user-name {
   font-size: 0.82rem;
   font-weight: 600;
-  color: var(--gray-700);
+  color: rgba(255, 255, 255, 0.92);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -9505,7 +9589,7 @@ body.ckic-route:has(.ckic-page[data-theme="light"]) .topbar-logout {
 
 .sidebar-user-role {
   font-size: 0.72rem;
-  color: var(--gray-400);
+  color: rgba(255, 255, 255, 0.45);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }

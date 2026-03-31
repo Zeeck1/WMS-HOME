@@ -84,9 +84,9 @@ function StockChart() {
         <h2><FiBarChart2 /> Stock Chart</h2>
       </div>
       <div className="page-body">
-        <p className="stock-chart-intro">Charts are based on the same data as Stock Table. Use filters and Search to update.</p>
+        <p className="stock-chart-intro">Charts are based on the same data as Stock Summary. Use filters and Search to update.</p>
 
-        {/* Filter Bar — same as Stock Table */}
+        {/* Filter Bar — same as Stock Summary */}
         <form className="filter-bar" onSubmit={handleSearch}>
           <input
             className="form-control"

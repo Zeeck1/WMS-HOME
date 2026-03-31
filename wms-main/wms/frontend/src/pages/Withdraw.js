@@ -134,7 +134,7 @@ function Withdraw() {
         );
       });
     }
-    // Group by product identity + sticker so each sticker variant is its own group (matches Stock Table rows)
+    // Group by product identity + sticker so each sticker variant is its own group (matches Stock Summary rows)
     const groups = {};
     filtered.forEach(item => {
       const st = item.stock_type || 'BULK';

@@ -47,7 +47,7 @@ export default function LowSafetyStocks() {
             <FiTrendingDown className="ls-header-icon" />
             <div>
               <h2 className="ls-title">Low / Safety Stocks</h2>
-              <p className="ls-subtitle">Stock below {thresholdKg.toLocaleString()} KG (from Stock Table)</p>
+              <p className="ls-subtitle">Stock below {thresholdKg.toLocaleString()} KG (from Stock Summary)</p>
             </div>
           </div>
           <div className="ls-header-actions">

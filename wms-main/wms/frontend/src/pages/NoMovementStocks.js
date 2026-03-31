@@ -155,7 +155,7 @@ export default function NoMovementStocks() {
             <FiAlertTriangle className="nm-header-icon" />
             <div>
               <h2 className="nm-title">No-Movement Stocks</h2>
-              <p className="nm-subtitle">Items with CS-IN Date {months}+ months ago (from Stock Table)</p>
+              <p className="nm-subtitle">Items with CS-IN Date {months}+ months ago (from Stock Summary)</p>
             </div>
           </div>
           <div className="nm-header-actions">

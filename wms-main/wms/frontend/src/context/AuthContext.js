@@ -20,7 +20,7 @@ export const ALL_PAGES = [
   { key: 'manual',           label: 'Manual',                path: '/manual' },
   { key: 'lines-reformat',   label: 'Lines Re-format',       path: '/lines-reformat' },
   { key: 'movements',        label: 'Movement History',      path: '/movements' },
-  { key: 'stock-table',      label: 'Stock Table',           path: '/stock-table' },
+  { key: 'stock-table',      label: 'Stock Summary',         path: '/stock-table' },
   { key: 'stock-chart',      label: 'Stock Chart',           path: '/stock-chart' },
   { key: 'location-layout',  label: 'Location Layout',       path: '/location-layout' },
   { key: 'no-movement',      label: 'No-Movement (+3M)',     path: '/no-movement' },

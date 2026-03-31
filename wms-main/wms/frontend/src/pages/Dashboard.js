@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { FiBox, FiTruck, FiMapPin, FiCheckCircle, FiAlertTriangle } from 'react-icons/fi';
+import { NavLink } from 'react-router-dom';
+import { FiBox, FiTruck, FiMapPin, FiCheckCircle, FiAlertTriangle, FiTool, FiArrowDownCircle, FiClock } from 'react-icons/fi';
 import { getDashboard } from '../services/api';
 
 function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showStockIssues, setShowStockIssues] = useState(false);
 
   useEffect(() => {
     fetchDashboard();
@@ -23,7 +25,18 @@ function Dashboard() {
 
   if (loading) return <div className="loading"><div className="spinner"></div>Loading dashboard...</div>;
 
-  const d = data || { total_mc: 0, total_kg: 0, total_stacks: 0, stock_status: 'No Data', recent_movements: [] };
+  const d = data || {
+    total_mc: 0,
+    total_kg: 0,
+    total_stacks: 0,
+    stock_status: 'No Data',
+    recent_movements: [],
+    error_count: 0,
+    stock_issues: [],
+  };
+
+  const stockIssues = Array.isArray(d.stock_issues) ? d.stock_issues : [];
+  const hasStockErrors = typeof d.stock_status === 'string' && d.stock_status.startsWith('Error');
 
   return (
     <>
@@ -69,9 +82,87 @@ function Dashboard() {
                 </span>
               </div>
               <div className="stat-sub">Tracking Status</div>
+              {hasStockErrors && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline dashboard-stock-issues-btn"
+                  onClick={() => setShowStockIssues(true)}
+                >
+                  View details &amp; fix
+                </button>
+              )}
             </div>
           </div>
         </div>
+
+        {showStockIssues && (
+          <div className="modal-overlay" role="presentation" onClick={() => setShowStockIssues(false)}>
+            <div className="modal dashboard-stock-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3>Stock tracking issues</h3>
+                <button type="button" className="modal-close" onClick={() => setShowStockIssues(false)} aria-label="Close">
+                  &times;
+                </button>
+              </div>
+              <div className="modal-body">
+                <p className="dashboard-stock-modal-intro">
+                  These rows have a <strong>negative master-carton (MC) balance</strong> for a lot at a location — more
+                  stock has been recorded <em>out</em> than <em>in</em>. Correct movement history, add a matching Stock IN,
+                  or use <strong>Manual</strong> to align balances.
+                </p>
+                {stockIssues.length > 0 ? (
+                  <div className="table-wrap dashboard-stock-issues-wrap">
+                    <table className="data-table dashboard-stock-issues-table">
+                      <thead>
+                        <tr>
+                          <th>Lot</th>
+                          <th>Product</th>
+                          <th>Size</th>
+                          <th>Location</th>
+                          <th>Type</th>
+                          <th className="text-right">MC balance</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stockIssues.map((row) => (
+                          <tr key={`${row.lot_id}-${row.location_id}`}>
+                            <td>{row.lot_no}</td>
+                            <td>{row.fish_name}</td>
+                            <td>{row.size}</td>
+                            <td>{row.line_place}</td>
+                            <td>{row.stock_type || '—'}</td>
+                            <td className="text-right dashboard-stock-balance-cell">{Number(row.balance_mc).toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p style={{ color: 'var(--gray-500)', fontSize: '0.9rem' }}>
+                    Detailed rows are not available (refresh the dashboard). Count: {d.error_count || 0} issue(s).
+                  </p>
+                )}
+              </div>
+              <div className="modal-footer dashboard-stock-modal-footer">
+                <NavLink to="/manual" className="btn btn-primary" onClick={() => setShowStockIssues(false)}>
+                  <FiTool /> Manual edit
+                </NavLink>
+                <NavLink to="/stock-in" className="btn btn-outline" onClick={() => setShowStockIssues(false)}>
+                  <FiArrowDownCircle /> Stock IN
+                </NavLink>
+                <NavLink to="/stock-table" className="btn btn-outline" onClick={() => setShowStockIssues(false)}>
+                  Stock Summary
+                </NavLink>
+                <NavLink to="/movements" className="btn btn-outline" onClick={() => setShowStockIssues(false)}>
+                  <FiClock /> Movement history
+                </NavLink>
+                <button type="button" className="btn btn-outline" onClick={() => setShowStockIssues(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="dashboard-calendar-row">
           <div className="card dashboard-calendar-card">
