@@ -18,6 +18,30 @@ const toInputDate = (d) => d ? (typeof d === 'string' ? d.split('T')[0] : new Da
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB') : '';
 const num = (v) => parseFloat(v) || 0;
 
+/** N/W (KGS) string from MC × WET/MC (2 dp). */
+function nwKgsFromMcAndWet(mcStr, wetStr) {
+  if (mcStr === '' || mcStr === null || String(mcStr).trim() === '') return '';
+  const m = num(mcStr);
+  const w = num(wetStr);
+  const n = m * w;
+  if (!Number.isFinite(n)) return '';
+  return String(Math.round(n * 100) / 100);
+}
+
+/** After editing wet_mc / inv_mc / factory_mc, refresh derived N/W columns. */
+function itemWithDerivedNw(prev, field, val) {
+  const next = { ...prev, [field]: val };
+  const recalcInv = field === 'wet_mc' || field === 'inv_mc';
+  const recalcFac = field === 'wet_mc' || field === 'factory_mc';
+  if (recalcInv) {
+    next.inv_nw_kgs = nwKgsFromMcAndWet(next.inv_mc, next.wet_mc);
+  }
+  if (recalcFac) {
+    next.factory_nw_kgs = nwKgsFromMcAndWet(next.factory_mc, next.wet_mc);
+  }
+  return next;
+}
+
 // Safely evaluate simple math expressions: supports +, -, *, / and parentheses
 function evalFormula(expr) {
   if (expr === '' || expr === null || expr === undefined) return 0;
@@ -106,6 +130,8 @@ function ImportShipmentDetail() {
 
   // Item handlers
   const updateItem = (idx, field, val) => setItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: val } : it));
+  const updateItemDerived = (idx, field, val) =>
+    setItems(prev => prev.map((it, i) => (i === idx ? itemWithDerivedNw(it, field, val) : it)));
   const addItem = () => setItems(prev => [...prev, { ...EMPTY_ITEM }]);
   const removeItem = (idx) => {
     if (items.length <= 1) return;
@@ -593,11 +619,11 @@ function ImportShipmentDetail() {
                       <td><input className="imp-cell-input" value={it.size} onChange={e => updateItem(idx, 'size', e.target.value)} placeholder="Size" /></td>
                       {hasLines && <td><input className="imp-cell-input" value={it.lines || ''} onChange={e => updateItem(idx, 'lines', e.target.value)} placeholder="Lines" /></td>}
                       <td><input className="imp-cell-input imp-cell-wide" value={it.pack} onChange={e => updateItem(idx, 'pack', e.target.value)} placeholder="Pack info" /></td>
-                      <td><input className="imp-cell-input imp-cell-num" type="number" value={it.wet_mc} onChange={e => updateItem(idx, 'wet_mc', e.target.value)} /></td>
-                      <td className="imp-td-inv"><input className="imp-cell-input imp-cell-num" type="number" value={it.inv_mc} onChange={e => updateItem(idx, 'inv_mc', e.target.value)} /></td>
-                      <td className="imp-td-inv"><input className="imp-cell-input imp-cell-num" type="number" step="0.01" value={it.inv_nw_kgs} onChange={e => updateItem(idx, 'inv_nw_kgs', e.target.value)} /></td>
-                      <td className="imp-td-fac"><input className="imp-cell-input imp-cell-num" type="number" value={it.factory_mc} onChange={e => updateItem(idx, 'factory_mc', e.target.value)} /></td>
-                      <td className="imp-td-fac"><input className="imp-cell-input imp-cell-num" type="number" step="0.01" value={it.factory_nw_kgs} onChange={e => updateItem(idx, 'factory_nw_kgs', e.target.value)} /></td>
+                      <td><input className="imp-cell-input imp-cell-num" type="number" step="any" value={it.wet_mc} onChange={e => updateItemDerived(idx, 'wet_mc', e.target.value)} title="N/W = MC × WET/MC" /></td>
+                      <td className="imp-td-inv"><input className="imp-cell-input imp-cell-num" type="number" step="any" value={it.inv_mc} onChange={e => updateItemDerived(idx, 'inv_mc', e.target.value)} title="N/W QTY = INV MC × WET/MC" /></td>
+                      <td className="imp-td-inv"><input className="imp-cell-input imp-cell-num" type="number" step="0.01" value={it.inv_nw_kgs} onChange={e => updateItem(idx, 'inv_nw_kgs', e.target.value)} title="Auto from INV MC × WET/MC; editable if needed" /></td>
+                      <td className="imp-td-fac"><input className="imp-cell-input imp-cell-num" type="number" step="any" value={it.factory_mc} onChange={e => updateItemDerived(idx, 'factory_mc', e.target.value)} title="N/W QTY = FACTORY MC × WET/MC" /></td>
+                      <td className="imp-td-fac"><input className="imp-cell-input imp-cell-num" type="number" step="0.01" value={it.factory_nw_kgs} onChange={e => updateItem(idx, 'factory_nw_kgs', e.target.value)} title="Auto from FACTORY MC × WET/MC; editable if needed" /></td>
                       <td className={`imp-td-bal ${bal.mc < num(it.factory_mc) ? 'imp-bal-reduced' : ''}`}>
                         <span className="imp-bal-val">{bal.mc}</span>
                       </td>
@@ -677,7 +703,20 @@ function ImportShipmentDetail() {
               {!editingOut && (
                 <div className="imp-field">
                   <label>Item</label>
-                  <select value={outForm.item_id} onChange={e => setOutForm(f => ({ ...f, item_id: e.target.value }))}>
+                  <select
+                    value={outForm.item_id}
+                    onChange={(e) => {
+                      const item_id = e.target.value;
+                      setOutForm((f) => {
+                        const item = items.find((i) => String(i.id) === String(item_id));
+                        let nw_kgs = '';
+                        if (item && f.mc !== '' && String(f.mc).trim() !== '') {
+                          nw_kgs = nwKgsFromMcAndWet(f.mc, item.wet_mc);
+                        }
+                        return { ...f, item_id, nw_kgs };
+                      });
+                    }}
+                  >
                     <option value="">-- Select Item --</option>
                     {items.filter(i => i.id).map(i => (
                       <option key={i.id} value={i.id}>{i.item_name}</option>
@@ -709,10 +748,25 @@ function ImportShipmentDetail() {
                 <label>MC</label>
                 <input
                   type="number"
+                  step="any"
                   value={editingOut ? editingOut.mc : outForm.mc}
-                  onChange={e => editingOut
-                    ? setEditingOut(o => ({ ...o, mc: e.target.value }))
-                    : setOutForm(f => ({ ...f, mc: e.target.value }))}
+                  onChange={(e) => {
+                    const mc = e.target.value;
+                    if (editingOut) {
+                      setEditingOut((o) => {
+                        const item = items.find((it) => String(it.id) === String(o.item_id));
+                        const nw_kgs = item ? nwKgsFromMcAndWet(mc, item.wet_mc) : o.nw_kgs;
+                        return { ...o, mc, nw_kgs };
+                      });
+                    } else {
+                      setOutForm((f) => {
+                        const item = items.find((i) => String(i.id) === String(f.item_id));
+                        const nw_kgs = item ? nwKgsFromMcAndWet(mc, item.wet_mc) : f.nw_kgs;
+                        return { ...f, mc, nw_kgs };
+                      });
+                    }
+                  }}
+                  title="N/W QTY = MC × item WET/MC"
                 />
               </div>
               <div className="imp-field">

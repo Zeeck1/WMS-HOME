@@ -370,6 +370,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
         const mc = parseInt(row['MC'] || row['Balance MC'] || row['Balance'] || row['Hand On Balance'] || row['Qty'] || 0) || 0;
         const invoiceNo = (row['Invoice No'] || row['Invoice'] || row['invoice_no'] || row['Order'] || '').toString().trim();
         const arrivalDateRaw = row['Arrival Date'] || row['CS In Date'] || row['Date'] || row['arrival_date'] || '';
+        const country = (row['Country'] || row['country'] || '').toString().trim() || null;
         const remark = (row['Remark'] || row['remark'] || row['Remarks'] || '').toString().trim();
         const linePlace = (row['LINE'] || row['Line'] || row['Lines / Place'] || row['line_place'] || row['Location'] || '').toString().trim();
 
@@ -412,8 +413,8 @@ router.post('/import', upload.single('file'), async (req, res) => {
 
         const lotNo = `IMP-${Date.now()}-${i}`;
         const [lotResult] = await conn.query(
-          'INSERT INTO lots (lot_no, cs_in_date, product_id, remark) VALUES (?, ?, ?, ?)',
-          [lotNo, arrivalDate, product.id, remark || null]
+          'INSERT INTO lots (lot_no, cs_in_date, product_id, remark, country) VALUES (?, ?, ?, ?, ?)',
+          [lotNo, arrivalDate, product.id, remark || null, country]
         );
         const lotId = lotResult.insertId;
 

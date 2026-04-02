@@ -19,6 +19,7 @@ async function fetchImportShipmentRows(filters = {}) {
       COALESCE(NULLIF(TRIM(ii.lines), ''), s.origin_country) AS line_place,
       ii.lines AS stack_no,
       ii.remark,
+      NULLIF(TRIM(s.origin_country), '') AS country,
       'IMPORT' AS stock_type,
       NULL AS lot_id,
       NULL AS location_id,

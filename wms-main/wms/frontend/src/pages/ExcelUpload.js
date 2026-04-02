@@ -12,7 +12,7 @@ const TABS = [
 const COLUMN_HELP = {
   BULK: 'Fish Name, Size, Bulk Weight (KG), Type, Glazing, CS In Date, Sticker, Lines / Place, Stack No, Stack Total, Hand On Balance',
   CONTAINER_EXTRA: 'Order, Fish Name, Size, Packed size, Production/Packed Date, Expiration Date, Balance MC, St No, Line, Remark',
-  IMPORT: 'Fish Name, Size, KG, MC, Total KG, Arrival Date, LINE, Invoice No, Remark'
+  IMPORT: 'Fish Name, Size, KG, MC, Total KG, Arrival Date, Country, LINE, Invoice No, Remark'
 };
 
 function ExcelUpload() {

@@ -50,6 +50,7 @@ const CE_IMPORT_COLUMNS = [
   { key: 'size', label: 'Size' },
   { key: 'bulk_weight_kg', label: 'KG' },
   { key: 'cs_in_date', label: 'Arrival Date' },
+  { key: 'country', label: 'Country' },
   { key: 'hand_on_balance_kg', label: 'Total KG' },
   { key: 'hand_on_balance_mc', label: 'Balance MC' },
   { key: 'line_place', label: 'Line' },
@@ -234,9 +235,9 @@ function StockTable() {
   const [showBulkLinesPlace, setShowBulkLinesPlace] = useState(false);
   const [showBulkStackNo, setShowBulkStackNo] = useState(false);
   const [showBulkStackTotal, setShowBulkStackTotal] = useState(false);
-  // BULK: Old Balance / New Income — default ON (unlike Lines/Place etc.)
-  const [showBulkOldBalance, setShowBulkOldBalance] = useState(true);
-  const [showBulkNewIncome, setShowBulkNewIncome] = useState(true);
+  // BULK: Old Balance / New Income — default OFF (same as Lines/Place, Stack, etc.)
+  const [showBulkOldBalance, setShowBulkOldBalance] = useState(false);
+  const [showBulkNewIncome, setShowBulkNewIncome] = useState(false);
 
   // Container Extra: show/hide optional columns (default OFF)
   const [showCElinePlace, setShowCElinePlace] = useState(false);
@@ -437,11 +438,12 @@ function StockTable() {
         data = source.map((r, i) => ({
           '#': i + 1, [orderLabel]: r.order_code || '', 'Fish Name': r.fish_name,
           'Size': r.size, 'KG': Number(r.bulk_weight_kg), 'Arrival Date': r.cs_in_date || '',
+          'Country': r.country || '',
           'Line': r.line_place, 'Balance MC': Number(r.hand_on_balance_mc),
           'Total KG': Number(r.hand_on_balance_kg), 'Remark': r.remark || ''
         }));
         data.push({ '#': '', [orderLabel]: '', 'Fish Name': 'TOTAL', 'Size': '', 'KG': '',
-          'Arrival Date': '', 'Line': '', 'Balance MC': totalMC, 'Total KG': totalKG, 'Remark': '' });
+          'Arrival Date': '', 'Country': '', 'Line': '', 'Balance MC': totalMC, 'Total KG': totalKG, 'Remark': '' });
       }
     } else {
       const bulkExcelKeyToLabel = {
@@ -806,7 +808,7 @@ function StockTable() {
           <div className="st-bulk-col-toggles no-print">
             <div className="st-bulk-col-left">
               <span className="st-bulk-col-label">Columns (BULK)</span>
-              <span className="st-bulk-col-hint">Lines/Stack normally OFF · Old/New Balance normally ON</span>
+              <span className="st-bulk-col-hint">Lines/Stack and Old/New Balance normally OFF — toggle to show</span>
             </div>
             <div className="st-bulk-col-right">
               <button

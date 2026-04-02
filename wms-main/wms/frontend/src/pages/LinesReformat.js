@@ -14,7 +14,7 @@ const SIDES = [
 function buildPositionCodes(line, side) {
   const codes = [];
   const positions = side === 'L' ? 8 : 8;
-  const levels = WH.totalLevels;
+  const levels = WH.levels;
   for (let p = 1; p <= positions; p++) {
     for (let lv = 1; lv <= levels; lv++) {
       codes.push(`${line}${String(p).padStart(2, '0')}${side}-${lv}`);

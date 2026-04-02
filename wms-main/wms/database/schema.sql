@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS lots (
     expiration_date DATE DEFAULT NULL,
     st_no VARCHAR(50) DEFAULT NULL,
     remark TEXT DEFAULT NULL,
+    country VARCHAR(100) DEFAULT NULL COMMENT 'Origin country (e.g. Import Excel)',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (product_id) REFERENCES products(id) ON UPDATE CASCADE
@@ -102,6 +103,7 @@ SELECT
     l.expiration_date,
     l.st_no,
     l.remark,
+    l.country,
     loc.id AS location_id,
     loc.line_place,
     loc.stack_no,

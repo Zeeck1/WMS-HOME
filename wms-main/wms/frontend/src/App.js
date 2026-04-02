@@ -45,6 +45,64 @@ import ImportShipmentDetail from './pages/ImportShipmentDetail';
 import UserManagement from './pages/UserManagement';
 import logoThaiBg from './images/logo-thai-bg.jpg';
 
+/** Sidebar groups for superadmin; permission users see one "Overview" with all allowed links in this order. */
+const SIDEBAR_SECTIONS = [
+  {
+    title: 'Overview',
+    items: [
+      { to: '/', Icon: FiGrid, label: 'Dashboard', pageKey: 'dashboard', end: true },
+      { to: '/stock-table', Icon: FiTable, label: 'Stock Summary', pageKey: 'stock-table' },
+      { to: '/ck-intelligence', Icon: FiCpu, label: 'CK Intelligence', pageKey: 'ck-intelligence' },
+    ],
+  },
+  {
+    title: 'Master Data',
+    items: [
+      { to: '/products', Icon: FiPackage, label: 'Product Master', pageKey: 'products' },
+      { to: '/locations', Icon: FiMapPin, label: 'Location Master', pageKey: 'locations' },
+      { to: '/customer-master', Icon: FiUsers, label: 'Customer Stock Master', pageKey: 'customer-master' },
+    ],
+  },
+  {
+    title: 'Customer',
+    items: [
+      { to: '/customer', Icon: FiUserCheck, label: 'Customer', pageKey: 'customer' },
+      { to: '/customer-summary', Icon: FiClipboard, label: 'Summary', pageKey: 'customer-summary' },
+    ],
+  },
+  {
+    title: 'Operations',
+    items: [
+      { to: '/stock-in', Icon: FiArrowDownCircle, label: 'Stock IN', pageKey: 'stock-in' },
+      { to: '/stock-out', Icon: FiArrowUpCircle, label: 'Stock OUT', pageKey: 'stock-out' },
+      { to: '/imports', Icon: FiAnchor, label: 'Import Stock', pageKey: 'imports' },
+      { to: '/withdraw', Icon: FiShoppingCart, label: 'Withdraw', pageKey: 'withdraw' },
+      { to: '/manage', Icon: FiSettings, label: 'Manage', pageKey: 'manage' },
+      { to: '/manual', Icon: FiBook, label: 'Manual', pageKey: 'manual' },
+      { to: '/lines-reformat', Icon: FiList, label: 'Lines Re-format', pageKey: 'lines-reformat' },
+      { to: '/movements', Icon: FiClock, label: 'Movement History', pageKey: 'movements' },
+    ],
+  },
+  {
+    title: 'Reports',
+    items: [
+      { to: '/stock-chart', Icon: FiBarChart2, label: 'Stock Chart', pageKey: 'stock-chart' },
+      { to: '/location-layout', Icon: FiLayers, label: 'Location Layout', pageKey: 'location-layout' },
+      { to: '/no-movement', Icon: FiAlertTriangle, label: 'No-Movement (+3M)', pageKey: 'no-movement' },
+      { to: '/low-safety-stocks', Icon: FiTrendingDown, label: 'Low/Safety Stocks', pageKey: 'low-safety-stocks' },
+    ],
+  },
+  {
+    title: 'Tools',
+    items: [
+      { to: '/oac', Icon: FiClipboard, label: 'Order Checker (OAC)', pageKey: 'oac' },
+      { to: '/upload', Icon: FiUpload, label: 'Excel Upload', pageKey: 'upload' },
+      { to: '/calendar', Icon: FiCalendar, label: 'Calendar', pageKey: 'calendar' },
+      { to: '/settings', Icon: FiSettings, label: 'Settings', pageKey: 'settings' },
+    ],
+  },
+];
+
 // Protected route wrapper
 function Protected({ pageKey, children }) {
   const { hasAccess } = useAuth();
@@ -65,58 +123,41 @@ function SidebarNav({ collapsed, mobileOpen, onNavClick }) {
   const link = (to, icon, label, pageKey, end) => {
     if (!hasAccess(pageKey)) return null;
     return (
-      <NavLink to={to} end={end} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+      <NavLink key={pageKey} to={to} end={end} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
         {icon}
         <span className="nav-label">{label}</span>
       </NavLink>
     );
   };
 
+  const renderNavItem = (item) => {
+    const Icon = item.Icon;
+    return link(item.to, <Icon />, item.label, item.pageKey, item.end);
+  };
+
+  const isSuperadmin = user?.role === 'superadmin';
+  const flatNavItems = SIDEBAR_SECTIONS.flatMap((s) => s.items);
+
   return (
     <nav className="sidebar-nav">
-      <div className="nav-section-title"><span>Overview</span></div>
-      {link('/', <FiGrid />, 'Dashboard', 'dashboard', true)}
-      {link('/stock-table', <FiTable />, 'Stock Summary', 'stock-table')}
-      {link('/ck-intelligence', <FiCpu />, 'CK Intelligence', 'ck-intelligence')}
-
-      <div className="nav-section-title"><span>Master Data</span></div>
-      {link('/products', <FiPackage />, 'Product Master', 'products')}
-      {link('/locations', <FiMapPin />, 'Location Master', 'locations')}
-      {link('/customer-master', <FiUsers />, 'Customer Stock Master', 'customer-master')}
-
-      <div className="nav-section-title"><span>Customer</span></div>
-      {link('/customer', <FiUserCheck />, 'Customer', 'customer')}
-      {link('/customer-summary', <FiClipboard />, 'Summary', 'customer-summary')}
-
-      <div className="nav-section-title"><span>Operations</span></div>
-      {link('/stock-in', <FiArrowDownCircle />, 'Stock IN', 'stock-in')}
-      {link('/stock-out', <FiArrowUpCircle />, 'Stock OUT', 'stock-out')}
-      {link('/imports', <FiAnchor />, 'Import Stock', 'imports')}
-      {link('/withdraw', <FiShoppingCart />, 'Withdraw', 'withdraw')}
-      {link('/manage', <FiSettings />, 'Manage', 'manage')}
-      {link('/manual', <FiBook />, 'Manual', 'manual')}
-      {link('/lines-reformat', <FiList />, 'Lines Re-format', 'lines-reformat')}
-      {link('/movements', <FiClock />, 'Movement History', 'movements')}
-
-      <div className="nav-section-title"><span>Reports</span></div>
-      {link('/stock-chart', <FiBarChart2 />, 'Stock Chart', 'stock-chart')}
-      {link('/location-layout', <FiLayers />, 'Location Layout', 'location-layout')}
-      {link('/no-movement', <FiAlertTriangle />, 'No-Movement (+3M)', 'no-movement')}
-      {link('/low-safety-stocks', <FiTrendingDown />, 'Low/Safety Stocks', 'low-safety-stocks')}
-
-      <div className="nav-section-title"><span>Tools</span></div>
-      {link('/oac', <FiClipboard />, 'Order Checker (OAC)', 'oac')}
-      {link('/upload', <FiUpload />, 'Excel Upload', 'upload')}
-      {link('/calendar', <FiCalendar />, 'Calendar', 'calendar')}
-      {link('/settings', <FiSettings />, 'Settings', 'settings')}
-
-      {user?.role === 'superadmin' && (
+      {isSuperadmin ? (
         <>
+          {SIDEBAR_SECTIONS.map((section) => (
+            <React.Fragment key={section.title}>
+              <div className="nav-section-title"><span>{section.title}</span></div>
+              {section.items.map((item) => renderNavItem(item))}
+            </React.Fragment>
+          ))}
           <div className="nav-section-title"><span>Admin</span></div>
           <NavLink to="/user-management" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
             <FiShield />
             <span className="nav-label">Permissions</span>
           </NavLink>
+        </>
+      ) : (
+        <>
+          <div className="nav-section-title"><span>Overview</span></div>
+          {flatNavItems.map((item) => renderNavItem(item))}
         </>
       )}
     </nav>
