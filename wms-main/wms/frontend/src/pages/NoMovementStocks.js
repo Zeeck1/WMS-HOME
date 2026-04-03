@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { toast } from 'react-toastify';
 import {
   FiAlertTriangle, FiDownload, FiSearch,
-  FiRefreshCw, FiClock, FiPackage, FiMapPin
+  FiRefreshCw, FiClock, FiPackage, FiMapPin, FiPrinter
 } from 'react-icons/fi';
 import { SiLine, SiGmail } from 'react-icons/si';
 import { getNoMovementStocks, sendLineNotification, sendEmailReport } from '../services/api';
@@ -107,6 +107,23 @@ export default function NoMovementStocks() {
     }
   };
 
+  const handlePrint = () => {
+    if (filteredItems.length === 0) {
+      toast.warn('No rows to print for the current filters.');
+      return;
+    }
+    const style = document.createElement('style');
+    style.id = 'nm-ls-print-page-style';
+    style.textContent = '@page { size: A4 landscape; margin: 10mm; }';
+    document.head.appendChild(style);
+    const onAfterPrint = () => {
+      document.getElementById('nm-ls-print-page-style')?.remove();
+      window.removeEventListener('afterprint', onAfterPrint);
+    };
+    window.addEventListener('afterprint', onAfterPrint);
+    window.print();
+  };
+
   const handleDownloadPdf = async () => {
     if (filteredItems.length === 0) { toast.warning('No data to download'); return; }
     try {
@@ -150,7 +167,7 @@ export default function NoMovementStocks() {
     <div className="page-container">
       <div className="nm-page">
         {/* Header */}
-        <div className="nm-header">
+        <div className="nm-header no-print">
           <div className="nm-header-left">
             <FiAlertTriangle className="nm-header-icon" />
             <div>
@@ -159,29 +176,34 @@ export default function NoMovementStocks() {
             </div>
           </div>
           <div className="nm-header-actions">
-            <select value={months} onChange={e => setMonths(Number(e.target.value))} className="nm-month-select">
-              <option value={3}>3+ Months</option>
-              <option value={6}>6+ Months</option>
-              <option value={9}>9+ Months</option>
-              <option value={12}>12+ Months</option>
-            </select>
-            <button onClick={load} className="nm-btn nm-btn-outline" disabled={loading}>
-              <FiRefreshCw className={loading ? 'spin' : ''} /> Refresh
-            </button>
-            <button onClick={handleDownloadPdf} className="nm-btn nm-btn-primary" disabled={filteredItems.length === 0}>
-              <FiDownload /> PDF
-            </button>
-            <button onClick={handleSendLine} className="nm-btn nm-btn-line" disabled={sendingLine || filteredItems.length === 0}>
-              <SiLine className="nm-btn-brand-icon" /> {sendingLine ? 'Sending...' : 'LINE'}
-            </button>
-            <button onClick={handleSendEmail} className="nm-btn nm-btn-gmail" disabled={sendingEmail || filteredItems.length === 0}>
-              <SiGmail className="nm-btn-brand-icon" /> {sendingEmail ? 'Sending...' : 'Gmail'}
+            <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <select value={months} onChange={e => setMonths(Number(e.target.value))} className="nm-month-select">
+                <option value={3}>3+ Months</option>
+                <option value={6}>6+ Months</option>
+                <option value={9}>9+ Months</option>
+                <option value={12}>12+ Months</option>
+              </select>
+              <button type="button" onClick={load} className="nm-btn nm-btn-outline" disabled={loading}>
+                <FiRefreshCw className={loading ? 'spin' : ''} /> Refresh
+              </button>
+              <button type="button" onClick={handleDownloadPdf} className="nm-btn nm-btn-primary" disabled={filteredItems.length === 0}>
+                <FiDownload /> PDF
+              </button>
+              <button type="button" onClick={handleSendLine} className="nm-btn nm-btn-line" disabled={sendingLine || filteredItems.length === 0}>
+                <SiLine className="nm-btn-brand-icon" /> {sendingLine ? 'Sending...' : 'LINE'}
+              </button>
+              <button type="button" onClick={handleSendEmail} className="nm-btn nm-btn-gmail" disabled={sendingEmail || filteredItems.length === 0}>
+                <SiGmail className="nm-btn-brand-icon" /> {sendingEmail ? 'Sending...' : 'Gmail'}
+              </button>
+            </div>
+            <button type="button" onClick={handlePrint} className="nm-btn nm-btn-outline no-print" disabled={filteredItems.length === 0} title="Print report (current filters)">
+              <FiPrinter /> Print
             </button>
           </div>
         </div>
 
         {/* Search */}
-        <div className="nm-search-bar">
+        <div className="nm-search-bar no-print">
           <FiSearch className="nm-search-icon" />
           <input
             type="text"
@@ -198,7 +220,7 @@ export default function NoMovementStocks() {
         </div>
 
         {/* Summary cards */}
-        <div className="nm-summary">
+        <div className="nm-summary no-print">
           <div className="nm-card nm-card-total">
             <FiPackage />
             <div className="nm-card-info">
@@ -231,7 +253,16 @@ export default function NoMovementStocks() {
 
         {/* Report area (for PDF capture) */}
         <div ref={reportRef} className="nm-report">
-          <div className="nm-report-header">
+          <div className="nm-only-print">
+            <strong>WMS — No-Movement Stocks</strong>
+            <div>Printed: {new Date().toLocaleString()}</div>
+            <div>
+              CS-IN {months}+ months ago &nbsp;|&nbsp; {filteredItems.length} item(s)
+              {searchQuery.trim() ? ' (search filtered)' : ''}
+              &nbsp;|&nbsp; Total MC: {totalMC.toLocaleString()} &nbsp;|&nbsp; Total KG: {totalKG.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+            </div>
+          </div>
+          <div className="nm-report-header no-print">
             <h3>No-Movement Stocks Report</h3>
             <p>{today} &nbsp;|&nbsp; CS-IN Date {months}+ months ago &nbsp;|&nbsp; {filteredItems.length} item(s){searchQuery.trim() ? ' (filtered)' : ''}</p>
           </div>

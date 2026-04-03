@@ -2,12 +2,398 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { FiSearch, FiPackage, FiArrowDownCircle, FiArrowUpCircle, FiBox, FiChevronDown, FiChevronRight, FiDownload } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { getCustomers, getCustomerSummary, getDepositItemDetail } from '../services/api';
+import { registerThaiFont } from '../services/pdfFonts';
+import logoThai from '../images/logo-thai.png';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import autoTable from 'jspdf-autotable';
 
 const toDate = (d) => d ? (typeof d === 'string' ? d.split('T')[0] : new Date(d).toISOString().split('T')[0]) : '';
 const fmtNum = (v, dec = 2) => Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: dec, maximumFractionDigits: dec });
+
+/** DD/MM/YYYY for PDF (matches typical stock reports) */
+const toDMY = (d) => {
+  if (!d) return '';
+  const s = typeof d === 'string' ? d.split('T')[0] : new Date(d).toISOString().split('T')[0];
+  const [y, m, dd] = s.split('-');
+  if (!y || !m || !dd) return String(d);
+  return `${dd}/${m}/${y}`;
+};
+
+const PDF_MAX_WITHDRAWAL_COLS = 12;
+
+/** Shown as PDF main title (H1). */
+const PDF_COMPANY_NAME =
+  'บริษัท ซี.เค.โฟรเซน ฟิช แอนด์ ฟู้ด จำกัด สาขาฉะเชิงเทรา';
+
+/** Report name (H2 — smaller than company name). */
+const PDF_REPORT_TITLE = 'Customer Stock Summary';
+
+/** Fallback logos under `public/` if bundled `logo-thai.png` is missing. */
+const PDF_LOGO_CANDIDATE_PATHS = ['/logo-report.png', '/company-logo.png', '/logo.png'];
+
+/** PDF theme — green primary, warm “out” and mint “balance” accents */
+const PDF = {
+  banner: [21, 128, 61],
+  bannerAccent: [52, 211, 153],
+  headRow1: [22, 101, 52],
+  headText: [255, 255, 255],
+  headSubMuted: [209, 250, 229],
+  outBand: [254, 243, 199],
+  outBandText: [120, 53, 15],
+  balBand: [209, 250, 229],
+  balBandText: [6, 78, 59],
+  slate900: [15, 23, 42],
+  slate700: [51, 65, 85],
+  slate500: [100, 116, 139],
+  slate200: [226, 232, 240],
+  slate50: [248, 250, 252],
+  zebra: [252, 252, 254],
+  footBar: [6, 78, 59],
+  footText: [255, 255, 255],
+  warnBg: [254, 252, 232],
+  warnText: [146, 64, 14],
+  cardStroke: [226, 232, 240],
+};
+
+async function loadImageUrlAsLogo(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    if (!blob.type.startsWith('image/')) return null;
+    const dataUrl = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onloadend = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(blob);
+    });
+    const format =
+      blob.type.includes('jpeg') || blob.type.includes('jpg') ? 'JPEG' : 'PNG';
+    return { dataUrl, format };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchReportLogo() {
+  const bundled = await loadImageUrlAsLogo(logoThai);
+  if (bundled) return bundled;
+
+  const prefix = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
+  for (const path of PDF_LOGO_CANDIDATE_PATHS) {
+    const fromPublic = await loadImageUrlAsLogo(`${prefix}${path}`);
+    if (fromPublic) return fromPublic;
+  }
+  return null;
+}
+
+function measureLogoDrawMm(dataUrl, format, maxWMm, maxHMm) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const ratio = img.width / img.height;
+      let w = maxWMm;
+      let h = w / ratio;
+      if (h > maxHMm) {
+        h = maxHMm;
+        w = h * ratio;
+      }
+      resolve({ drawW: w, drawH: h });
+    };
+    img.onerror = () => resolve({ drawW: 0, drawH: 0 });
+    img.src = dataUrl;
+  });
+}
+
+function maxWithdrawalSlotsForItems(items, detailsById) {
+  let m = 0;
+  for (const it of items) {
+    const n = (detailsById[it.id] || []).length;
+    if (n > m) m = n;
+  }
+  return Math.min(Math.max(m, 1), PDF_MAX_WITHDRAWAL_COLS);
+}
+
+/**
+ * Full-bleed banner + customer card. Returns Y (mm) to start autoTable.
+ * @param {object} [info.logoDraw] — `{ dataUrl, format, drawW, drawH }` from measureLogoDrawMm
+ */
+function drawCustomerSummaryPdfHeader(doc, pageW, margin, info, { compact } = {}) {
+  if (compact) {
+    doc.setFillColor(...PDF.banner);
+    doc.rect(0, 0, pageW, 11, 'F');
+    doc.setFont('Sarabun', 'bold');
+    doc.setTextColor(...PDF.headText);
+    doc.setFontSize(10);
+    doc.text(`${info.customerName} · รายงานสต็อกลูกค้า (ต่อ)`, margin, 7);
+    doc.setFont('Sarabun', 'normal');
+    doc.setTextColor(...PDF.headSubMuted);
+    doc.setFontSize(7.5);
+    return 14;
+  }
+
+  const logoGap = 6;
+  const logoMaxW = 44;
+  const logoMaxH = 22;
+  const hasLogo = info.logoDraw && info.logoDraw.drawW > 0;
+  const textMaxW =
+    pageW - 2 * margin - (hasLogo ? info.logoDraw.drawW + logoGap : 0);
+
+  doc.setFont('Sarabun', 'bold');
+  doc.setFontSize(12.5);
+  const companyLines = doc.splitTextToSize(PDF_COMPANY_NAME, textMaxW);
+  const lineStep = 5.1;
+  const topPad = 5;
+  const yCompany = topPad + 4;
+  const yH2 = yCompany + companyLines.length * lineStep + 1;
+  const yMeta = yH2 + 5.5;
+  const contentBottom = yMeta + 5;
+  const bannerH = Math.max(
+    contentBottom,
+    hasLogo ? info.logoDraw.drawH + topPad * 2 : 26
+  );
+
+  doc.setFillColor(...PDF.banner);
+  doc.rect(0, 0, pageW, bannerH, 'F');
+  doc.setFillColor(...PDF.bannerAccent);
+  doc.rect(0, bannerH - 1.4, pageW, 1.4, 'F');
+
+  doc.setFont('Sarabun', 'bold');
+  doc.setTextColor(...PDF.headText);
+  doc.setFontSize(12.5);
+  doc.text(companyLines, margin, yCompany);
+
+  doc.setFont('Sarabun', 'bold');
+  doc.setFontSize(10.5);
+  doc.text(PDF_REPORT_TITLE, margin, yH2);
+
+  doc.setFont('Sarabun', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(167, 243, 208);
+  doc.text(
+    `WMS · ${info.viewLabel} · ${info.exportDMY} · ${info.lineCount} line(s)`,
+    margin,
+    yMeta
+  );
+
+  if (hasLogo) {
+    try {
+      const lx = pageW - margin - info.logoDraw.drawW;
+      const ly = Math.max(topPad, (bannerH - info.logoDraw.drawH) / 2);
+      doc.addImage(
+        info.logoDraw.dataUrl,
+        info.logoDraw.format,
+        lx,
+        ly,
+        info.logoDraw.drawW,
+        info.logoDraw.drawH
+      );
+    } catch {
+      /* ignore broken image */
+    }
+  }
+
+  let y = bannerH + 6;
+  const cardW = pageW - 2 * margin;
+  doc.setFont('Sarabun', 'normal');
+  doc.setFontSize(9);
+  const addrText = info.address || '—';
+  const addrLines = doc.splitTextToSize(addrText, cardW - 44);
+  const lh = 4.6;
+  const cardH = 10 + 7 + addrLines.length * lh + 8;
+
+  doc.setFillColor(...PDF.slate50);
+  doc.setDrawColor(...PDF.cardStroke);
+  doc.setLineWidth(0.35);
+  doc.roundedRect(margin, y, cardW, cardH, 2, 2, 'FD');
+
+  const lx = margin + 5;
+  const vx = margin + 42;
+  let ty = y + 7;
+
+  doc.setFont('Sarabun', 'bold');
+  doc.setTextColor(...PDF.slate500);
+  doc.setFontSize(7);
+  doc.text('CUSTOMER / ลูกค้า', lx, ty);
+  doc.setFont('Sarabun', 'bold');
+  doc.setTextColor(...PDF.slate900);
+  doc.setFontSize(11);
+  doc.text(info.customerName, vx, ty);
+  ty += 8;
+
+  doc.setFont('Sarabun', 'bold');
+  doc.setTextColor(...PDF.slate500);
+  doc.setFontSize(7);
+  doc.text('ADDRESS / ที่อยู่', lx, ty);
+  doc.setFont('Sarabun', 'normal');
+  doc.setTextColor(...PDF.slate700);
+  doc.setFontSize(9);
+  doc.text(addrLines, vx, ty);
+  ty += addrLines.length * lh + 1;
+
+  doc.setFont('Sarabun', 'bold');
+  doc.setTextColor(...PDF.slate500);
+  doc.setFontSize(7);
+  doc.text('PHONE / โทร', lx, ty);
+  doc.setFont('Sarabun', 'normal');
+  doc.setTextColor(...PDF.slate900);
+  doc.setFontSize(10);
+  doc.text(info.phone || '—', vx, ty);
+
+  return y + cardH + 6;
+}
+
+/** Unique withdrawal dates (DD/MM/YYYY) for Nth withdrawal column across all lines */
+function withdrawalSlotDatesDisplay(items, detailsById, slotIndex) {
+  const keys = new Set();
+  for (const it of items) {
+    const w = (detailsById[it.id] || [])[slotIndex];
+    if (w && w.withdraw_date) {
+      keys.add(toDate(w.withdraw_date));
+    }
+  }
+  const sorted = [...keys].sort();
+  if (sorted.length === 0) return '—';
+  return sorted.map((k) => toDMY(k)).join(', ');
+}
+
+function buildCustomerSummaryPdfTable(items, detailsById, maxW) {
+  const hGreen = {
+    fillColor: PDF.headRow1,
+    textColor: PDF.headText,
+    valign: 'middle',
+    fontStyle: 'bold',
+    halign: 'center',
+  };
+
+  const headRow0 = [
+    {
+      content: 'Information / ข้อมูล',
+      colSpan: 6,
+      rowSpan: 1,
+      styles: { ...hGreen, halign: 'center' },
+    },
+    {
+      content: 'วันที่ถอนเงิน',
+      colSpan: maxW * 2,
+      styles: { ...hGreen },
+    },
+    {
+      content: 'Balance / คงเหลือ',
+      colSpan: 2,
+      rowSpan: 2,
+      styles: { ...hGreen },
+    },
+  ];
+
+  const headRow1 = [
+    { content: 'No.', rowSpan: 2, styles: { ...hGreen, halign: 'center' } },
+    { content: 'CS IN Date', rowSpan: 2, styles: { ...hGreen, halign: 'center' } },
+    { content: 'Fish Name / รายการ', rowSpan: 2, styles: { ...hGreen, halign: 'left' } },
+    { content: 'Lot No.', rowSpan: 2, styles: { ...hGreen, halign: 'center' } },
+    { content: 'IN - กล่อง', rowSpan: 2, styles: { ...hGreen, halign: 'center' } },
+    { content: 'IN - KG', rowSpan: 2, styles: { ...hGreen, halign: 'center' } },
+  ];
+  for (let j = 0; j < maxW; j += 1) {
+    headRow1.push({
+      content: withdrawalSlotDatesDisplay(items, detailsById, j),
+      colSpan: 2,
+      rowSpan: 1,
+      styles: {
+        halign: 'center',
+        valign: 'middle',
+        fillColor: PDF.outBand,
+        textColor: PDF.outBandText,
+        fontStyle: 'bold',
+        fontSize: 6.5,
+      },
+    });
+  }
+
+  const headRow2 = [];
+  const outCell = (label) => ({
+    content: label,
+    styles: {
+      halign: 'center',
+      valign: 'middle',
+      fillColor: PDF.outBand,
+      textColor: PDF.outBandText,
+      fontStyle: 'bold',
+    },
+  });
+  const balCell = (label) => ({
+    content: label,
+    styles: {
+      halign: 'center',
+      valign: 'middle',
+      fillColor: PDF.balBand,
+      textColor: PDF.balBandText,
+      fontStyle: 'bold',
+    },
+  });
+  for (let j = 0; j < maxW; j += 1) {
+    headRow2.push(outCell('OUT - กล่อง'));
+    headRow2.push(outCell('OUT - KG'));
+  }
+  headRow2.push(balCell('กล่อง'));
+  headRow2.push(balCell('KG'));
+
+  const body = items.map((it, i) => {
+    const row = [
+      String(i + 1),
+      toDMY(it.receive_date),
+      it.item_name || '',
+      it.lot_no || '',
+      Number(it.boxes || 0).toLocaleString(),
+      fmtNum(it.weight_kg),
+    ];
+    const wd = detailsById[it.id] || [];
+    for (let j = 0; j < maxW; j += 1) {
+      const d = wd[j];
+      row.push(d ? Number(d.boxes_out || 0).toLocaleString() : '');
+      row.push(d ? fmtNum(d.weight_kg_out) : '');
+    }
+    row.push(Number(it.balance_boxes || 0).toLocaleString());
+    row.push(fmtNum(it.balance_kg));
+    return row;
+  });
+
+  const foot = [
+    {
+      content: 'Total / รวม',
+      colSpan: 4,
+      styles: {
+        fontStyle: 'bold',
+        halign: 'right',
+        fillColor: PDF.footBar,
+        textColor: PDF.footText,
+      },
+    },
+    items.reduce((s, it) => s + Number(it.boxes || 0), 0).toLocaleString(),
+    fmtNum(items.reduce((s, it) => s + Number(it.weight_kg || 0), 0)),
+  ];
+  for (let j = 0; j < maxW; j += 1) {
+    foot.push(
+      items.reduce((s, it) => {
+        const w = (detailsById[it.id] || [])[j];
+        return s + (w ? Number(w.boxes_out || 0) : 0);
+      }, 0).toLocaleString()
+    );
+    foot.push(
+      fmtNum(
+        items.reduce((s, it) => {
+          const w = (detailsById[it.id] || [])[j];
+          return s + (w ? Number(w.weight_kg_out || 0) : 0);
+        }, 0)
+      )
+    );
+  }
+  foot.push(items.reduce((s, it) => s + Number(it.balance_boxes || 0), 0).toLocaleString());
+  foot.push(fmtNum(items.reduce((s, it) => s + Number(it.balance_kg || 0), 0)));
+
+  return { head: [headRow0, headRow1, headRow2], body, foot: [foot] };
+}
 
 function CustomerSummary() {
   const [customers, setCustomers] = useState([]);
@@ -125,20 +511,194 @@ function CustomerSummary() {
   };
 
   const downloadPDF = async () => {
-    if (!printRef.current) return;
-    toast.info('Generating PDF...');
+    if (filtered.length === 0) {
+      toast.warn('No data to export');
+      return;
+    }
+
+    const customerMap = Object.fromEntries(customers.map((c) => [c.id, c]));
+    const sections = selectedCustomerId
+      ? [{ customerId: Number(selectedCustomerId), items: filtered }]
+      : (grouped || []).map((g) => ({ customerId: g.customer_id, items: g.items }));
+
+    toast.info('Preparing PDF (loading withdrawal lines)...');
     try {
-      const canvas = await html2canvas(printRef.current, { scale: 2, useCORS: true, backgroundColor: '#fff' });
-      const imgData = canvas.toDataURL('image/png');
-      const imgW = canvas.width;
-      const imgH = canvas.height;
-      const pdfW = 297;
-      const pdfH = (imgH * pdfW) / imgW;
-      const pdf = new jsPDF({ orientation: pdfW > pdfH ? 'landscape' : 'landscape', unit: 'mm', format: [pdfW, Math.max(pdfH, 210)] });
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfW, pdfH);
-      pdf.save(`Customer_Summary_${viewLabel.replace(/\s/g, '_')}_${toDate(new Date().toISOString())}.pdf`);
+      const merged = { ...detailCache };
+      const allIds = new Set();
+      for (const sec of sections) {
+        for (const it of sec.items) allIds.add(it.id);
+      }
+      await Promise.all(
+        [...allIds].map(async (id) => {
+          if (merged[id] != null) return;
+          try {
+            const res = await getDepositItemDetail(id);
+            merged[id] = res.data || [];
+          } catch {
+            merged[id] = [];
+          }
+        })
+      );
+      setDetailCache(merged);
+
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const fontReady = await registerThaiFont(doc);
+      if (!fontReady) {
+        toast.error('Could not load Thai font for PDF. Check network or public/fonts/Sarabun-*.ttf');
+        return;
+      }
+      const fontOpts = { font: 'Sarabun' };
+      const margin = 12;
+      const pageW = doc.internal.pageSize.getWidth();
+      const exportDMY = toDMY(new Date().toISOString());
+
+      let logoDraw = null;
+      const logoRaw = await fetchReportLogo();
+      if (logoRaw) {
+        const dims = await measureLogoDrawMm(logoRaw.dataUrl, logoRaw.format, 44, 22);
+        if (dims.drawW > 0) logoDraw = { ...logoRaw, ...dims };
+      }
+
+      sections.forEach((sec, si) => {
+        if (si > 0) {
+          doc.addPage();
+          doc.setFont('Sarabun', 'normal');
+        }
+        const cust = customerMap[sec.customerId] || {};
+        const customerName = cust.name || sec.items[0]?.customer_name || '—';
+        const addr = cust.address || '';
+        const phone = cust.phone || '';
+
+        let y = drawCustomerSummaryPdfHeader(
+          doc,
+          pageW,
+          margin,
+          {
+            customerName,
+            address: addr,
+            phone,
+            viewLabel,
+            lineCount: sec.items.length,
+            exportDMY,
+            logoDraw: si === 0 ? logoDraw : null,
+          },
+          { compact: si > 0 }
+        );
+
+        const truncated = sec.items.some((it) => (merged[it.id] || []).length > PDF_MAX_WITHDRAWAL_COLS);
+        if (truncated) {
+          const noteW = pageW - 2 * margin;
+          doc.setFillColor(...PDF.warnBg);
+          doc.setDrawColor(253, 230, 138);
+          doc.setLineWidth(0.25);
+          doc.roundedRect(margin, y, noteW, 12, 2, 2, 'FD');
+          doc.setFont('Sarabun', 'normal');
+          doc.setFontSize(7.5);
+          doc.setTextColor(...PDF.warnText);
+          doc.text(
+            `หมายเหตุ: แสดงการเบิกได้สูงสุด ${PDF_MAX_WITHDRAWAL_COLS} ครั้งต่อแถว — มีรายการเบิกเพิ่มเติมในระบบ`,
+            margin + 4,
+            y + 7.5
+          );
+          doc.setTextColor(...PDF.slate900);
+          y += 15;
+        }
+
+        const maxW = maxWithdrawalSlotsForItems(sec.items, merged);
+        const { head, body, foot } = buildCustomerSummaryPdfTable(sec.items, merged, maxW);
+
+        const lastCol = 6 + maxW * 2 + 1;
+        const columnStyles = {
+          0: { halign: 'center', cellWidth: 9 },
+          1: { halign: 'center', cellWidth: 18 },
+          2: { halign: 'left' },
+          3: { halign: 'center', cellWidth: 18 },
+        };
+        for (let c = 4; c <= lastCol; c += 1) {
+          columnStyles[c] = { halign: 'right' };
+        }
+
+        autoTable(doc, {
+          startY: y,
+          head,
+          body,
+          foot,
+          theme: 'grid',
+          styles: {
+            fontSize: 7,
+            cellPadding: { top: 1.8, bottom: 1.8, left: 2, right: 2 },
+            lineColor: PDF.slate200,
+            lineWidth: 0.12,
+            textColor: PDF.slate900,
+            ...fontOpts,
+          },
+          headStyles: {
+            fontStyle: 'bold',
+            ...fontOpts,
+          },
+          bodyStyles: { ...fontOpts },
+          alternateRowStyles: { fillColor: PDF.zebra },
+          footStyles: {
+            fontStyle: 'bold',
+            fillColor: PDF.footBar,
+            textColor: PDF.footText,
+            ...fontOpts,
+          },
+          columnStyles,
+          showHead: 'everyPage',
+          showFoot: 'lastPage',
+          horizontalPageBreak: true,
+          margin: { left: margin, right: margin },
+          didParseCell: (data) => {
+            const st = data.cell.styles;
+            st.font = 'Sarabun';
+            if (data.section === 'foot') {
+              st.fillColor = PDF.footBar;
+              st.textColor = PDF.footText;
+              st.fontStyle = 'bold';
+              return;
+            }
+            if (data.section === 'head') {
+              const ri = data.row.index;
+              const ci = data.column.index;
+              if (ri === 0) {
+                st.fillColor = PDF.headRow1;
+                st.textColor = PDF.headText;
+                st.fontStyle = 'bold';
+              } else if (ri === 1) {
+                if (ci < 6) {
+                  st.fillColor = PDF.headRow1;
+                  st.textColor = PDF.headText;
+                  st.fontStyle = 'bold';
+                } else if (ci < 6 + maxW * 2) {
+                  st.fillColor = PDF.outBand;
+                  st.textColor = PDF.outBandText;
+                  st.fontStyle = 'bold';
+                  st.fontSize = 6.5;
+                }
+              } else if (ri === 2) {
+                if (ci >= 6 && ci < 6 + maxW * 2) {
+                  st.fillColor = PDF.outBand;
+                  st.textColor = PDF.outBandText;
+                  st.fontStyle = 'bold';
+                } else if (ci >= 6 + maxW * 2) {
+                  st.fillColor = PDF.balBand;
+                  st.textColor = PDF.balBandText;
+                  st.fontStyle = 'bold';
+                }
+              }
+              return;
+            }
+            if (!st.fontStyle) st.fontStyle = 'normal';
+          },
+        });
+      });
+
+      doc.save(`Customer_Summary_${viewLabel.replace(/\s/g, '_')}_${toDate(new Date().toISOString())}.pdf`);
       toast.success('PDF downloaded');
-    } catch { toast.error('Failed to generate PDF'); }
+    } catch {
+      toast.error('Failed to generate PDF');
+    }
   };
 
   return (

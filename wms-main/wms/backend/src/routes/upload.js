@@ -1,9 +1,69 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
+const crypto = require('crypto');
 const XLSX = require('xlsx');
 const path = require('path');
 const pool = require('../config/db');
+
+/**
+ * Parse MC / integer quantities from Excel. Fixes "1,277" → 1277 (parseInt alone yields 1).
+ */
+function parseExcelInt(raw) {
+  if (raw == null || raw === '') return 0;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return Math.trunc(raw);
+  let s = String(raw).trim();
+  if (!s) return 0;
+  s = s.replace(/[\s\u00a0]/g, '').replace(/,/g, '');
+  const n = parseFloat(s);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n);
+}
+
+/**
+ * Parse KG / decimals from Excel (commas as thousands or decimal depending on pattern).
+ */
+function parseExcelFloat(raw) {
+  if (raw == null || raw === '') return 0;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  let s = String(raw).trim();
+  if (!s) return 0;
+  s = s.replace(/[\s\u00a0]/g, '');
+  const lastComma = s.lastIndexOf(',');
+  const lastDot = s.lastIndexOf('.');
+  if (lastComma > -1 && lastDot > -1) {
+    if (lastComma > lastDot) s = s.replace(/\./g, '').replace(',', '.');
+    else s = s.replace(/,/g, '');
+  } else {
+    s = s.replace(/,/g, '');
+  }
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Excel serial day number → YYYY-MM-DD (for sheet_to_json raw: true) */
+function excelSerialToISODate(serial) {
+  if (typeof serial !== 'number' || !Number.isFinite(serial)) return null;
+  const utcMs = (serial - 25569) * 86400 * 1000;
+  const d = new Date(utcMs);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().split('T')[0];
+}
+
+function makeUniqueLotNo(prefix, rowIndex) {
+  const suffix = crypto.randomBytes(3).toString('hex');
+  return `${prefix}-${Date.now()}-${rowIndex}-${suffix}`;
+}
+
+/** Normalize warehouse line codes from Excel (trim, unicode, case) so lookup matches DB rows */
+function normalizeLocationCode(linePlace) {
+  if (linePlace == null || linePlace === '') return '';
+  let s = String(linePlace).normalize('NFKC').trim();
+  s = s.replace(/[\u200B-\u200D\uFEFF]/g, '');
+  s = s.replace(/[\u2013\u2014\u2212]/g, '-');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s.toUpperCase();
+}
 
 // Configure multer for file upload
 const storage = multer.diskStorage({
@@ -28,14 +88,21 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB max
 });
 
-// Helper: find or create product (skip if duplicate)
+// Helper: find or create product (match inactive rows too — avoids duplicate key on unique index)
 async function findOrCreateProduct(conn, fishName, size, bulkWeight, type, glazing, stockType = 'BULK', orderCode = null) {
   const [existing] = await conn.query(
-    `SELECT id FROM products WHERE fish_name = ? AND size = ? AND COALESCE(type,'') = COALESCE(?,'') AND COALESCE(glazing,'') = COALESCE(?,'') AND stock_type = ? AND COALESCE(order_code,'') = COALESCE(?,'') AND is_active = 1`,
+    `SELECT id, is_active FROM products WHERE fish_name = ? AND size = ? AND COALESCE(type,'') = COALESCE(?,'') AND COALESCE(glazing,'') = COALESCE(?,'') AND stock_type = ? AND COALESCE(order_code,'') = COALESCE(?,'') LIMIT 1`,
     [fishName, size, type || '', glazing || '', stockType, orderCode || '']
   );
   if (existing.length > 0) {
-    return { id: existing[0].id, isNew: false };
+    const row = existing[0];
+    if (!row.is_active) {
+      await conn.query(
+        'UPDATE products SET is_active = 1, bulk_weight_kg = ? WHERE id = ?',
+        [bulkWeight, row.id]
+      );
+    }
+    return { id: row.id, isNew: false };
   }
   const [result] = await conn.query(
     'INSERT INTO products (fish_name, size, bulk_weight_kg, type, glazing, stock_type, order_code) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -44,20 +111,32 @@ async function findOrCreateProduct(conn, fishName, size, bulkWeight, type, glazi
   return { id: result.insertId, isNew: true };
 }
 
-// Helper: find or create location by line_place only (one location code = one location)
-// e.g. A03r-2 appears 5 times in Excel for different products, but is ONE location
+// Helper: find or create location by line_place only (one code = one location).
+// Must not filter is_active: inactive rows still hold UNIQUE(line_place); skipping them caused INSERT duplicate errors.
 async function findOrCreateLocation(conn, linePlace, stackNo, stackTotal) {
-  const code = linePlace.toUpperCase().trim();
+  const code = normalizeLocationCode(linePlace);
+  const stack = parseExcelInt(stackNo) || 1;
+  const total = parseExcelInt(stackTotal) || 1;
+  if (!code) {
+    throw new Error('Missing location / Lines-Place');
+  }
   const [existing] = await conn.query(
-    'SELECT id FROM locations WHERE line_place = ? AND is_active = 1',
+    'SELECT id, is_active FROM locations WHERE line_place = ? LIMIT 1',
     [code]
   );
   if (existing.length > 0) {
-    return { id: existing[0].id, isNew: false };
+    const loc = existing[0];
+    if (!loc.is_active) {
+      await conn.query(
+        'UPDATE locations SET is_active = 1, stack_no = ?, stack_total = ? WHERE id = ?',
+        [stack, total, loc.id]
+      );
+    }
+    return { id: loc.id, isNew: false };
   }
   const [result] = await conn.query(
-    'INSERT INTO locations (line_place, stack_no, stack_total) VALUES (?, ?, ?)',
-    [code, stackNo, stackTotal]
+    'INSERT INTO locations (line_place, stack_no, stack_total, is_active) VALUES (?, ?, ?, 1)',
+    [code, stack, total]
   );
   return { id: result.insertId, isNew: true };
 }
@@ -75,7 +154,8 @@ router.post('/', upload.single('file'), async (req, res) => {
     const workbook = XLSX.readFile(req.file.path);
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    // raw: true preserves numeric cells as numbers (avoids losing precision); dates may be serial numbers
+    const data = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
 
     if (data.length === 0) {
       return res.status(400).json({ error: 'Excel file is empty' });
@@ -87,6 +167,7 @@ router.post('/', upload.single('file'), async (req, res) => {
     let productsReused = 0;
     let locationsCreated = 0;
     let locationsReused = 0;
+    let totalMcImported = 0;
     const errors = [];
 
     for (let i = 0; i < data.length; i++) {
@@ -94,22 +175,35 @@ router.post('/', upload.single('file'), async (req, res) => {
       try {
         // Map Excel columns to our fields (flexible column name matching)
         const fishName = (row['Fish Name'] || row['fish_name'] || row['Fish'] || '').toString().trim();
-        const size = (row['Size'] || row['size'] || '').toString().trim();
-        const bulkWeightRaw = (row['Bulk Weight (KG)'] || row['Bulk weight'] || row['bulk_weight_kg'] || row['Bulk Weight'] || '').toString().trim();
-        const bulkWeight = parseFloat(bulkWeightRaw) || 0;
+        const size = (row['Size'] || row['size'] || '').toString().trim() || '-';
+        const bulkWeightRaw = row['Bulk Weight (KG)'] ?? row['Bulk weight'] ?? row['bulk_weight_kg'] ?? row['Bulk Weight'] ?? '';
+        const bulkWeight = parseExcelFloat(bulkWeightRaw);
         const type = (row['Type'] || row['type'] || '').toString().trim();
         const glazing = (row['Glazing'] || row['glazing'] || '').toString().trim();
-        const csInDate = row['CS-INDATE'] || row['CS In Date'] || row['CS-IN DATE'] || row['CSINDATE'] || row['cs_in_date'] || row['Date'] || '';
+        const csInDate = row['CS-INDATE'] ?? row['CS In Date'] ?? row['CS-IN DATE'] ?? row['CSINDATE'] ?? row['cs_in_date'] ?? row['Date'] ?? '';
         const sticker = (row['Sticker'] || row['sticker'] || '').toString().trim();
         const linePlace = (row['Lines / Place'] || row['Lines/Place'] || row['line_place'] || row['Location'] || '').toString().trim();
-        const stackNo = parseInt(row['Stack No'] || row['stack_no'] || 1) || 1;
-        const stackTotal = parseInt(row['Stack Total'] || row['stack_total'] || 1) || 1;
-        const hobRaw = (row['Hand - on Balance'] || row['Hand On Balance'] || row['Hand-on Balance'] || row['hand_on_balance'] || row['Balance'] || row['Qty'] || '0').toString().trim();
-        const handOnBalance = parseInt(hobRaw) || 0;
+        const stackNo = parseExcelInt(row['Stack No'] ?? row['stack_no'] ?? 1) || 1;
+        const stackTotal = parseExcelInt(row['Stack Total'] ?? row['stack_total'] ?? 1) || 1;
+        const hobRaw =
+          row['Hand - on Balance'] ??
+          row['Hand On Balance'] ??
+          row['Hand-on Balance'] ??
+          row['HAND ON BALANCE'] ??
+          row['hand_on_balance'] ??
+          row['Hand on Balance'] ??
+          row['Balance MC'] ??
+          row['Balance'] ??
+          row['MC'] ??
+          row['Qty'] ??
+          row['Qty MC'] ??
+          row['QTY'] ??
+          0;
+        const handOnBalance = parseExcelInt(hobRaw);
 
-        if (!fishName || !size) {
+        if (!fishName) {
           skipped++;
-          errors.push(`Row ${i + 2}: Skipped — missing Fish Name or Size`);
+          errors.push(`Row ${i + 2}: Skipped — missing Fish Name`);
           continue;
         }
 
@@ -124,21 +218,23 @@ router.post('/', upload.single('file'), async (req, res) => {
         if (location.isNew) locationsCreated++;
         else locationsReused++;
 
-        // 3. Create lot (LOT prefix: IMP-BULK for bulk Excel import)
-        const lotNo = `IMP-BULK-${Date.now()}-${i}`;
+        // 3. Create lot (unique lot_no — avoids collisions if many rows share same millisecond)
+        const lotNo = makeUniqueLotNo('IMP-BULK', i);
         let parsedDate = null;
-        if (csInDate) {
-          if (csInDate instanceof Date) {
+        if (csInDate !== '' && csInDate != null) {
+          if (csInDate instanceof Date && !Number.isNaN(csInDate.getTime())) {
             parsedDate = csInDate.toISOString().split('T')[0];
+          } else if (typeof csInDate === 'number') {
+            parsedDate = excelSerialToISODate(csInDate);
           } else {
             const ds = csInDate.toString().trim();
             const ddmm = ds.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
             if (ddmm) {
               const [, dd, mm, yyyy] = ddmm;
-              parsedDate = `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+              parsedDate = `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
             } else {
               const d = new Date(ds);
-              if (!isNaN(d.getTime())) parsedDate = d.toISOString().split('T')[0];
+              if (!Number.isNaN(d.getTime())) parsedDate = d.toISOString().split('T')[0];
             }
           }
         }
@@ -157,6 +253,7 @@ router.post('/', upload.single('file'), async (req, res) => {
              VALUES (?, ?, ?, ?, 'IN', 'EXCEL-IMPORT', 'excel-import')`,
             [lotId, location.id, handOnBalance, handOnBalance * bulkWeight]
           );
+          totalMcImported += handOnBalance;
         }
 
         imported++;
@@ -173,6 +270,7 @@ router.post('/', upload.single('file'), async (req, res) => {
       total_rows: data.length,
       imported,
       skipped,
+      total_mc_imported: totalMcImported,
       products_created: productsCreated,
       products_reused: productsReused,
       locations_created: locationsCreated,
@@ -222,10 +320,10 @@ router.post('/container-extra', upload.single('file'), async (req, res) => {
         const orderCode = (row['Order'] || row['order'] || row['Order Code'] || '').toString().trim();
         const fishName = (row['Fish Name'] || row['fish_name'] || row['Fish'] || '').toString().trim();
         const size = (row['Size'] || row['size'] || '').toString().trim() || '-';
-        const packedSize = parseFloat(row['Packed size'] || row['Packed Size'] || row['packed_size'] || row['Packed size (KG)'] || 0);
+        const packedSize = parseExcelFloat(row['Packed size'] || row['Packed Size'] || row['packed_size'] || row['Packed size (KG)'] || 0);
         const productionDateRaw = row['Production/Packed Date'] || row['Production Date'] || row['production_date'] || '';
         const expirationDateRaw = row['Expiration Date'] || row['expiration_date'] || row['Exp Date'] || '';
-        const balanceMC = parseInt(row['Balance MC'] || row['Balance'] || row['Hand On Balance'] || row['Qty'] || 0) || 0;
+        const balanceMC = parseExcelInt(row['Balance MC'] || row['Balance'] || row['Hand On Balance'] || row['Qty'] || row['MC'] || 0);
         const stNo = (row['St No'] || row['st_no'] || row['Stock No'] || '').toString().trim();
         const linePlace = (row['Line'] || row['Lines / Place'] || row['line_place'] || row['Location'] || '').toString().trim();
         const remark = (row['Remark'] || row['remark'] || row['Remarks'] || '').toString().trim();
@@ -286,7 +384,7 @@ router.post('/container-extra', upload.single('file'), async (req, res) => {
         }
 
         // 4. Create lot with extra fields
-        const lotNo = `CE-${Date.now()}-${i}`;
+        const lotNo = makeUniqueLotNo('CE', i);
         const csInDate = productionDate || new Date().toISOString().split('T')[0];
 
         const [lotResult] = await conn.query(
@@ -366,8 +464,8 @@ router.post('/import', upload.single('file'), async (req, res) => {
       try {
         const fishName = (row['Fish Name'] || row['fish_name'] || row['Fish'] || '').toString().trim();
         const size = (row['Size'] || row['size'] || '').toString().trim() || '-';
-        const kgWeight = parseFloat(row['KG'] || row['Bulk Weight (KG)'] || row['bulk_weight_kg'] || 0);
-        const mc = parseInt(row['MC'] || row['Balance MC'] || row['Balance'] || row['Hand On Balance'] || row['Qty'] || 0) || 0;
+        const kgWeight = parseExcelFloat(row['KG'] || row['Bulk Weight (KG)'] || row['bulk_weight_kg'] || 0);
+        const mc = parseExcelInt(row['MC'] || row['Balance MC'] || row['Balance'] || row['Hand On Balance'] || row['Qty'] || 0);
         const invoiceNo = (row['Invoice No'] || row['Invoice'] || row['invoice_no'] || row['Order'] || '').toString().trim();
         const arrivalDateRaw = row['Arrival Date'] || row['CS In Date'] || row['Date'] || row['arrival_date'] || '';
         const country = (row['Country'] || row['country'] || '').toString().trim() || null;
@@ -411,7 +509,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
         }
         if (!arrivalDate) arrivalDate = new Date().toISOString().split('T')[0];
 
-        const lotNo = `IMP-${Date.now()}-${i}`;
+        const lotNo = makeUniqueLotNo('IMP', i);
         const [lotResult] = await conn.query(
           'INSERT INTO lots (lot_no, cs_in_date, product_id, remark, country) VALUES (?, ?, ?, ?, ?)',
           [lotNo, arrivalDate, product.id, remark || null, country]

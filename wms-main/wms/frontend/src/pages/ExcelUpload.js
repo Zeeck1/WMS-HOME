@@ -140,6 +140,9 @@ function ExcelUpload() {
                   <div>
                     <strong>Import Successful!</strong><br/>
                     Total Rows: {result.total_rows} | Imported: {result.imported} | Skipped: {result.skipped}
+                    {result.total_mc_imported != null && (
+                      <><br/>Total MC in stock (this file): {Number(result.total_mc_imported).toLocaleString()}</>
+                    )}
                     {(result.products_created > 0 || result.products_reused > 0) && (
                       <><br/>Products — New: {result.products_created}, Existing (reused): {result.products_reused}</>
                     )}

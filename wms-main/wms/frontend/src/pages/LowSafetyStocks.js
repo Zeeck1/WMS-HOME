@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { toast } from 'react-toastify';
-import { FiPackage, FiRefreshCw, FiTrendingDown, FiSearch } from 'react-icons/fi';
+import { FiPackage, FiRefreshCw, FiTrendingDown, FiSearch, FiPrinter } from 'react-icons/fi';
 import { getLowStockStocks } from '../services/api';
 
 const THRESHOLD_OPTIONS = [1000, 2000, 3000, 5000];
@@ -38,35 +38,74 @@ export default function LowSafetyStocks() {
 
   const totalMC = items.reduce((s, i) => s + Number(i.hand_on_balance_mc || 0), 0);
   const totalKG = items.reduce((s, i) => s + Number(i.hand_on_balance_kg || 0), 0);
+  const filteredMC = useMemo(
+    () => filteredItems.reduce((s, i) => s + Number(i.hand_on_balance_mc || 0), 0),
+    [filteredItems]
+  );
+  const filteredKG = useMemo(
+    () => filteredItems.reduce((s, i) => s + Number(i.hand_on_balance_kg || 0), 0),
+    [filteredItems]
+  );
+
+  /** Same text as the “Below … KG” dropdown option (screen + print) */
+  const belowKgLabel = `Below ${thresholdKg.toLocaleString()} KG`;
+
+  const handlePrint = () => {
+    if (filteredItems.length === 0) {
+      toast.warn('No rows to print for the current filters.');
+      return;
+    }
+    const style = document.createElement('style');
+    style.id = 'nm-ls-print-page-style';
+    style.textContent = '@page { size: A4 landscape; margin: 10mm; }';
+    document.head.appendChild(style);
+    const onAfterPrint = () => {
+      document.getElementById('nm-ls-print-page-style')?.remove();
+      window.removeEventListener('afterprint', onAfterPrint);
+    };
+    window.addEventListener('afterprint', onAfterPrint);
+    window.print();
+  };
 
   return (
     <div className="page-container">
       <div className="ls-page">
-        <div className="ls-header">
+        <div className="ls-header no-print">
           <div className="ls-header-left">
             <FiTrendingDown className="ls-header-icon" />
             <div>
               <h2 className="ls-title">Low / Safety Stocks</h2>
-              <p className="ls-subtitle">Stock below {thresholdKg.toLocaleString()} KG (from Stock Summary)</p>
+              <p className="ls-subtitle">{belowKgLabel} (from Stock Summary)</p>
             </div>
           </div>
           <div className="ls-header-actions">
-            <select
-              value={thresholdKg}
-              onChange={e => setThresholdKg(Number(e.target.value))}
-              className="ls-threshold-select"
+            <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <select
+                value={thresholdKg}
+                onChange={e => setThresholdKg(Number(e.target.value))}
+                className="ls-threshold-select"
+              >
+                {THRESHOLD_OPTIONS.map(k => (
+                  <option key={k} value={k}>{`Below ${k.toLocaleString()} KG`}</option>
+                ))}
+              </select>
+              <button type="button" onClick={load} className="ls-btn ls-btn-outline" disabled={loading}>
+                <FiRefreshCw className={loading ? 'spin' : ''} /> Refresh
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="ls-btn ls-btn-outline no-print"
+              disabled={filteredItems.length === 0}
+              title="Print report (current filters)"
             >
-              {THRESHOLD_OPTIONS.map(k => (
-                <option key={k} value={k}>Below {k.toLocaleString()} KG</option>
-              ))}
-            </select>
-            <button type="button" onClick={load} className="ls-btn ls-btn-outline" disabled={loading}>
-              <FiRefreshCw className={loading ? 'spin' : ''} /> Refresh
+              <FiPrinter /> Print
             </button>
           </div>
         </div>
 
-        <div className="ls-search-bar">
+        <div className="ls-search-bar no-print">
           <FiSearch className="ls-search-icon" />
           <input
             type="text"
@@ -82,7 +121,7 @@ export default function LowSafetyStocks() {
           )}
         </div>
 
-        <div className="ls-summary">
+        <div className="ls-summary no-print">
           <div className="ls-card ls-card-items">
             <FiPackage />
             <div className="ls-card-info">
@@ -107,9 +146,24 @@ export default function LowSafetyStocks() {
         </div>
 
         <div className="ls-report">
-          <div className="ls-report-header">
+          <div className="ls-only-print">
+            <strong>WMS — Low / Safety Stocks</strong>
+            <div className="ls-print-below-band">{belowKgLabel}</div>
+            <div className="ls-print-meta">
+              Printed: {new Date().toLocaleString()}
+              <br />
+              {filteredItems.length} line item(s) in this report
+              {searchQuery.trim() ? ' (after search filter)' : ''}
+              <br />
+              Totals — MC: {filteredMC.toLocaleString()} &nbsp;|&nbsp; KG: {filteredKG.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+            </div>
+          </div>
+          <div className="ls-report-header no-print">
             <h3>Low / Safety Stocks Report</h3>
-            <p>Threshold: below {thresholdKg.toLocaleString()} KG &nbsp;|&nbsp; {filteredItems.length} item(s){searchQuery.trim() ? ' (filtered)' : ''}</p>
+            <p>
+              <span className="ls-report-filter-pill">{belowKgLabel}</span>
+              {' '}&nbsp;|&nbsp; {filteredItems.length} item(s){searchQuery.trim() ? ' (filtered)' : ''}
+            </p>
           </div>
           {loading ? (
             <div className="ls-loading">Loading...</div>

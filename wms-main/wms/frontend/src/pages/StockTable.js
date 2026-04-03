@@ -391,10 +391,28 @@ function StockTable() {
     return filteredInventory.slice(0, rowLimit);
   }, [filteredInventory, rowLimit]);
 
-  // Totals from full filtered set (user's search + column filters), not the displayed slice
+  // Upper stat cards: full filtered set (search + column filters), all rows
   const totalMC = filteredInventory.reduce((sum, r) => sum + Number(r.hand_on_balance_mc), 0);
   const totalKG = filteredInventory.reduce((sum, r) => sum + Number(r.hand_on_balance_kg), 0);
   const totalStacks = new Set(filteredInventory.map(r => `${r.line_place}-${r.stack_no}`)).size;
+
+  // Table footer TOTALS row: only rows shown under "Show rows" (displayRows)
+  const visibleTotalMC = useMemo(
+    () => displayRows.reduce((sum, r) => sum + Number(r.hand_on_balance_mc || 0), 0),
+    [displayRows]
+  );
+  const visibleTotalKG = useMemo(
+    () => displayRows.reduce((sum, r) => sum + Number(r.hand_on_balance_kg || 0), 0),
+    [displayRows]
+  );
+  const visibleOldBalanceSum = useMemo(
+    () => displayRows.reduce((s, r) => s + Number(r.old_balance_mc || 0), 0),
+    [displayRows]
+  );
+  const visibleNewIncomeSum = useMemo(
+    () => displayRows.reduce((s, r) => s + Number(r.new_income_mc || 0), 0),
+    [displayRows]
+  );
 
   const exportExcel = () => {
     let data;
@@ -936,14 +954,14 @@ function StockTable() {
                       if (col.key === 'hand_on_balance_kg') {
                         return (
                           <td key={col.key} className="num-cell">
-                            {totalKG.toFixed(0)} KG
+                            {visibleTotalKG.toFixed(0)} KG
                           </td>
                         );
                       }
                       if (col.key === 'hand_on_balance_mc') {
                         return (
                           <td key={col.key} className="num-cell" style={{ fontSize: '0.95rem' }}>
-                            {totalMC}
+                            {visibleTotalMC}
                           </td>
                         );
                       }
@@ -1008,28 +1026,28 @@ function StockTable() {
                       if (col.key === 'old_balance_mc') {
                         return (
                           <td key={col.key} className="num-cell">
-                            {filteredInventory.reduce((s, r) => s + Number(r.old_balance_mc), 0)}
+                            {visibleOldBalanceSum}
                           </td>
                         );
                       }
                       if (col.key === 'new_income_mc') {
                         return (
                           <td key={col.key} className="num-cell">
-                            {filteredInventory.reduce((s, r) => s + Number(r.new_income_mc), 0)}
+                            {visibleNewIncomeSum}
                           </td>
                         );
                       }
                       if (col.key === 'hand_on_balance_mc') {
                         return (
                           <td key={col.key} className="num-cell" style={{ fontSize: '0.95rem' }}>
-                            {totalMC}
+                            {visibleTotalMC}
                           </td>
                         );
                       }
                       if (col.key === 'hand_on_balance_kg') {
                         return (
                           <td key={col.key} className="num-cell">
-                            {totalKG.toFixed(2)}
+                            {visibleTotalKG.toFixed(2)}
                           </td>
                         );
                       }

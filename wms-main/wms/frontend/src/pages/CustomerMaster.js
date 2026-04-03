@@ -1,15 +1,26 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { FiPlus, FiEdit2, FiTrash2, FiSearch, FiUsers, FiPhone, FiMapPin, FiFileText } from 'react-icons/fi';
+import { FiPlus, FiEdit2, FiTrash2, FiSearch, FiUsers, FiPhone, FiMapPin, FiFileText, FiX } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { getCustomers, createCustomer, updateCustomer, deleteCustomer } from '../services/api';
 
 const EMPTY = { name: '', address: '', document_no: '', phone: '' };
 
+function BilingualLabel({ en, th, required }) {
+  return (
+    <label className="cm-bilingual-label">
+      <span className="cm-label-en">{en}</span>
+      <span className="cm-label-slash"> / </span>
+      <span className="cm-label-th">{th}</span>
+      {required ? <span className="cm-label-req"> *</span> : null}
+    </label>
+  );
+}
+
 function CustomerMaster() {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [modalOpen, setModalOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ ...EMPTY });
 
@@ -29,23 +40,56 @@ function CustomerMaster() {
     return c.name.toLowerCase().includes(q) || (c.phone || '').includes(q) || (c.document_no || '').toLowerCase().includes(q);
   });
 
-  const openAdd = () => { setEditing(null); setForm({ ...EMPTY }); setModalOpen(true); };
-  const openEdit = (c) => { setEditing(c); setForm({ name: c.name, address: c.address || '', document_no: c.document_no || '', phone: c.phone || '' }); setModalOpen(true); };
+  const closeDrawer = useCallback(() => {
+    setDrawerOpen(false);
+    setEditing(null);
+  }, []);
+
+  const openAdd = () => {
+    setEditing(null);
+    setForm({ ...EMPTY });
+    setDrawerOpen(true);
+  };
+
+  const openEdit = (c) => {
+    setEditing(c);
+    setForm({
+      name: c.name,
+      address: c.address || '',
+      document_no: c.document_no || '',
+      phone: c.phone || '',
+    });
+    setDrawerOpen(true);
+  };
 
   const handleSave = async () => {
-    if (!form.name.trim()) return toast.error('ชื่อลูกค้าจำเป็น');
+    if (!form.name.trim()) {
+      toast.error('Customer name is required / ต้องระบุชื่อลูกค้า');
+      return;
+    }
     try {
       if (editing) {
         await updateCustomer(editing.id, form);
-        toast.success('อัปเดตแล้ว');
+        toast.success('Updated / อัปเดตแล้ว');
       } else {
         await createCustomer(form);
-        toast.success('เพิ่มลูกค้าแล้ว');
+        toast.success('Customer added / เพิ่มลูกค้าแล้ว');
       }
-      setModalOpen(false);
+      closeDrawer();
       load();
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed');
+    }
   };
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') closeDrawer();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [drawerOpen, closeDrawer]);
 
   const handleDelete = async (c) => {
     if (!window.confirm(`ลบลูกค้า "${c.name}"?`)) return;
@@ -96,24 +140,78 @@ function CustomerMaster() {
         </div>
       </div>
 
-      {modalOpen && (
-        <div className="modal-overlay" onClick={() => setModalOpen(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
-            <h3>{editing ? 'แก้ไขลูกค้า' : 'เพิ่มลูกค้าใหม่'}</h3>
-            <div className="form-group"><label>ลูกค้า (ชื่อ) *</label>
-              <input className="form-control" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} autoFocus /></div>
-            <div className="form-group"><label>ที่อยู่</label>
-              <textarea className="form-control" rows={2} value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
-            <div className="form-group"><label>เลขที่เอกสาร</label>
-              <input className="form-control" value={form.document_no} onChange={e => setForm(f => ({ ...f, document_no: e.target.value }))} /></div>
-            <div className="form-group"><label>เบอร์โทร</label>
-              <input className="form-control" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-              <button className="btn btn-outline" onClick={() => setModalOpen(false)}>ยกเลิก</button>
-              <button className="btn btn-primary" onClick={handleSave}>{editing ? 'บันทึก' : 'เพิ่ม'}</button>
+      {drawerOpen && (
+        <>
+          <button
+            type="button"
+            className="cm-drawer-backdrop"
+            aria-label="Close panel"
+            onClick={closeDrawer}
+          />
+          <aside className="cm-drawer" role="dialog" aria-modal="true" aria-labelledby="cm-drawer-title">
+            <div className="cm-drawer-header">
+              <div>
+                <h3 id="cm-drawer-title" className="cm-drawer-title-en">
+                  {editing ? 'Edit customer' : 'Add customer'}
+                </h3>
+                <p className="cm-drawer-title-th">
+                  {editing ? 'แก้ไขข้อมูลลูกค้า' : 'เพิ่มลูกค้าใหม่'}
+                </p>
+              </div>
+              <button type="button" className="cm-drawer-close" onClick={closeDrawer} aria-label="Close">
+                <FiX />
+              </button>
             </div>
-          </div>
-        </div>
+            <div className="cm-drawer-body">
+              <div className="form-group">
+                <BilingualLabel en="Customer name" th="ชื่อลูกค้า" required />
+                <input
+                  className="form-control"
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  autoFocus
+                />
+              </div>
+              <div className="form-group">
+                <BilingualLabel en="Address" th="ที่อยู่" />
+                <textarea
+                  className="form-control"
+                  rows={3}
+                  value={form.address}
+                  onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                  placeholder="Street, district, province… / บ้านเลขที่ แขวง จังหวัด…"
+                />
+              </div>
+              <div className="form-group">
+                <BilingualLabel en="Document no." th="เลขที่เอกสาร" />
+                <input
+                  className="form-control"
+                  value={form.document_no}
+                  onChange={(e) => setForm((f) => ({ ...f, document_no: e.target.value }))}
+                />
+              </div>
+              <div className="form-group">
+                <BilingualLabel en="Phone" th="เบอร์โทรศัพท์" />
+                <input
+                  className="form-control"
+                  type="tel"
+                  value={form.phone}
+                  onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="cm-drawer-footer">
+              <button type="button" className="btn btn-outline" onClick={closeDrawer}>
+                <span className="cm-btn-bi">Cancel</span>
+                <span className="cm-btn-bi-sub">ยกเลิก</span>
+              </button>
+              <button type="button" className="btn btn-primary" onClick={handleSave}>
+                <span className="cm-btn-bi">{editing ? 'Save changes' : 'Add customer'}</span>
+                <span className="cm-btn-bi-sub">{editing ? 'บันทึก' : 'เพิ่มลูกค้า'}</span>
+              </button>
+            </div>
+          </aside>
+        </>
       )}
     </>
   );
