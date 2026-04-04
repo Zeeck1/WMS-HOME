@@ -20,6 +20,7 @@ const toDMY = (d) => {
   return `${dd}/${m}/${y}`;
 };
 
+/** Max distinct withdrawal dates as column groups in PDF (each date = OUT กล่อง + OUT KG). */
 const PDF_MAX_WITHDRAWAL_COLS = 12;
 
 /** Shown as PDF main title (H1). */
@@ -106,13 +107,29 @@ function measureLogoDrawMm(dataUrl, format, maxWMm, maxHMm) {
   });
 }
 
-function maxWithdrawalSlotsForItems(items, detailsById) {
-  let m = 0;
+/** All distinct withdrawal dates in the section (YYYY-MM-DD), sorted ascending */
+function uniqueSortedWithdrawalDates(items, detailsById) {
+  const set = new Set();
   for (const it of items) {
-    const n = (detailsById[it.id] || []).length;
-    if (n > m) m = n;
+    for (const w of detailsById[it.id] || []) {
+      if (w && w.withdraw_date) set.add(toDate(w.withdraw_date));
+    }
   }
-  return Math.min(Math.max(m, 1), PDF_MAX_WITHDRAWAL_COLS);
+  return [...set].sort();
+}
+
+/** Sum boxes / kg for one deposit line on a given calendar date (multiple lines same day add up). */
+function outTotalsForWithdrawalDate(item, detailsById, dateKey) {
+  if (dateKey == null) return { boxes: 0, kg: 0 };
+  let boxes = 0;
+  let kg = 0;
+  for (const w of detailsById[item.id] || []) {
+    if (w && toDate(w.withdraw_date) === dateKey) {
+      boxes += Number(w.boxes_out || 0);
+      kg += Number(w.weight_kg_out || 0);
+    }
+  }
+  return { boxes, kg };
 }
 
 /**
@@ -244,21 +261,19 @@ function drawCustomerSummaryPdfHeader(doc, pageW, margin, info, { compact } = {}
   return y + cardH + 6;
 }
 
-/** Unique withdrawal dates (DD/MM/YYYY) for Nth withdrawal column across all lines */
-function withdrawalSlotDatesDisplay(items, detailsById, slotIndex) {
-  const keys = new Set();
-  for (const it of items) {
-    const w = (detailsById[it.id] || [])[slotIndex];
-    if (w && w.withdraw_date) {
-      keys.add(toDate(w.withdraw_date));
-    }
-  }
-  const sorted = [...keys].sort();
-  if (sorted.length === 0) return '—';
-  return sorted.map((k) => toDMY(k)).join(', ');
+/**
+ * Column keys for PDF withdrawal section: one OUT pair per unique date (capped).
+ * Uses `null` as a single placeholder when there are no withdrawals anywhere.
+ */
+function pdfWithdrawalDateColumnKeys(items, detailsById) {
+  const all = uniqueSortedWithdrawalDates(items, detailsById);
+  const capped = all.slice(0, PDF_MAX_WITHDRAWAL_COLS);
+  if (capped.length > 0) return capped;
+  return [null];
 }
 
-function buildCustomerSummaryPdfTable(items, detailsById, maxW) {
+function buildCustomerSummaryPdfTable(items, detailsById, dateKeys) {
+  const n = dateKeys.length;
   const hGreen = {
     fillColor: PDF.headRow1,
     textColor: PDF.headText,
@@ -276,7 +291,7 @@ function buildCustomerSummaryPdfTable(items, detailsById, maxW) {
     },
     {
       content: 'วันที่ถอนเงิน',
-      colSpan: maxW * 2,
+      colSpan: n * 2,
       styles: { ...hGreen },
     },
     {
@@ -295,9 +310,10 @@ function buildCustomerSummaryPdfTable(items, detailsById, maxW) {
     { content: 'IN - กล่อง', rowSpan: 2, styles: { ...hGreen, halign: 'center' } },
     { content: 'IN - KG', rowSpan: 2, styles: { ...hGreen, halign: 'center' } },
   ];
-  for (let j = 0; j < maxW; j += 1) {
+  for (let j = 0; j < n; j += 1) {
+    const dk = dateKeys[j];
     headRow1.push({
-      content: withdrawalSlotDatesDisplay(items, detailsById, j),
+      content: dk ? toDMY(dk) : '—',
       colSpan: 2,
       rowSpan: 1,
       styles: {
@@ -332,7 +348,7 @@ function buildCustomerSummaryPdfTable(items, detailsById, maxW) {
       fontStyle: 'bold',
     },
   });
-  for (let j = 0; j < maxW; j += 1) {
+  for (let j = 0; j < n; j += 1) {
     headRow2.push(outCell('OUT - กล่อง'));
     headRow2.push(outCell('OUT - KG'));
   }
@@ -348,11 +364,10 @@ function buildCustomerSummaryPdfTable(items, detailsById, maxW) {
       Number(it.boxes || 0).toLocaleString(),
       fmtNum(it.weight_kg),
     ];
-    const wd = detailsById[it.id] || [];
-    for (let j = 0; j < maxW; j += 1) {
-      const d = wd[j];
-      row.push(d ? Number(d.boxes_out || 0).toLocaleString() : '');
-      row.push(d ? fmtNum(d.weight_kg_out) : '');
+    for (let j = 0; j < n; j += 1) {
+      const { boxes, kg } = outTotalsForWithdrawalDate(it, detailsById, dateKeys[j]);
+      row.push(boxes ? Number(boxes).toLocaleString() : '');
+      row.push(kg ? fmtNum(kg) : '');
     }
     row.push(Number(it.balance_boxes || 0).toLocaleString());
     row.push(fmtNum(it.balance_kg));
@@ -373,20 +388,15 @@ function buildCustomerSummaryPdfTable(items, detailsById, maxW) {
     items.reduce((s, it) => s + Number(it.boxes || 0), 0).toLocaleString(),
     fmtNum(items.reduce((s, it) => s + Number(it.weight_kg || 0), 0)),
   ];
-  for (let j = 0; j < maxW; j += 1) {
+  for (let j = 0; j < n; j += 1) {
+    const dk = dateKeys[j];
     foot.push(
-      items.reduce((s, it) => {
-        const w = (detailsById[it.id] || [])[j];
-        return s + (w ? Number(w.boxes_out || 0) : 0);
-      }, 0).toLocaleString()
+      items
+        .reduce((s, it) => s + outTotalsForWithdrawalDate(it, detailsById, dk).boxes, 0)
+        .toLocaleString()
     );
     foot.push(
-      fmtNum(
-        items.reduce((s, it) => {
-          const w = (detailsById[it.id] || [])[j];
-          return s + (w ? Number(w.weight_kg_out || 0) : 0);
-        }, 0)
-      )
+      fmtNum(items.reduce((s, it) => s + outTotalsForWithdrawalDate(it, detailsById, dk).kg, 0))
     );
   }
   foot.push(items.reduce((s, it) => s + Number(it.balance_boxes || 0), 0).toLocaleString());
@@ -585,7 +595,8 @@ function CustomerSummary() {
           { compact: si > 0 }
         );
 
-        const truncated = sec.items.some((it) => (merged[it.id] || []).length > PDF_MAX_WITHDRAWAL_COLS);
+        const allWdDates = uniqueSortedWithdrawalDates(sec.items, merged);
+        const truncated = allWdDates.length > PDF_MAX_WITHDRAWAL_COLS;
         if (truncated) {
           const noteW = pageW - 2 * margin;
           doc.setFillColor(...PDF.warnBg);
@@ -596,7 +607,7 @@ function CustomerSummary() {
           doc.setFontSize(7.5);
           doc.setTextColor(...PDF.warnText);
           doc.text(
-            `หมายเหตุ: แสดงการเบิกได้สูงสุด ${PDF_MAX_WITHDRAWAL_COLS} ครั้งต่อแถว — มีรายการเบิกเพิ่มเติมในระบบ`,
+            `หมายเหตุ: แสดงได้สูงสุด ${PDF_MAX_WITHDRAWAL_COLS} วันที่ถอน — มีวันที่อื่นในระบบที่ไม่แสดงในตารางนี้`,
             margin + 4,
             y + 7.5
           );
@@ -604,8 +615,9 @@ function CustomerSummary() {
           y += 15;
         }
 
-        const maxW = maxWithdrawalSlotsForItems(sec.items, merged);
-        const { head, body, foot } = buildCustomerSummaryPdfTable(sec.items, merged, maxW);
+        const dateKeys = pdfWithdrawalDateColumnKeys(sec.items, merged);
+        const maxW = dateKeys.length;
+        const { head, body, foot } = buildCustomerSummaryPdfTable(sec.items, merged, dateKeys);
 
         const lastCol = 6 + maxW * 2 + 1;
         const columnStyles = {
@@ -693,6 +705,19 @@ function CustomerSummary() {
           },
         });
       });
+
+      const lt = doc.lastAutoTable;
+      if (lt && typeof lt.finalY === 'number') {
+        doc.setFont('Sarabun', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(140, 140, 140);
+        doc.text(
+          'Powered by CK Intelligence',
+          pageW / 2,
+          lt.finalY + 6,
+          { align: 'center' }
+        );
+      }
 
       doc.save(`Customer_Summary_${viewLabel.replace(/\s/g, '_')}_${toDate(new Date().toISOString())}.pdf`);
       toast.success('PDF downloaded');

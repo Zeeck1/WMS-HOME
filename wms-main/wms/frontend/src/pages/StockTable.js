@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import ReactDOM from 'react-dom';
 import { FiDownload, FiSearch, FiPackage, FiBox, FiTrash2, FiAnchor, FiChevronDown, FiCheck, FiX, FiCopy, FiPrinter, FiImage } from 'react-icons/fi';
 import { toast } from 'react-toastify';
+import { useAuth } from '../context/AuthContext';
 import { getInventory, deleteAllStockData } from '../services/api';
 import * as XLSX from 'xlsx';
 import html2canvas from 'html2canvas';
@@ -218,6 +219,8 @@ function ColumnFilterDropdown({ columnKey, allValues, selected, onApply, onClear
 
 // ─── Main Component ────────────────────────────────────────────────────
 function StockTable() {
+  const { user } = useAuth();
+  const isSuperadmin = user?.role === 'superadmin';
   const [activeTab, setActiveTab] = useState('BULK');
   const [inventory, setInventory] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -371,6 +374,7 @@ function StockTable() {
 
 
   const handleDeleteAll = async () => {
+    if (!isSuperadmin) return;
     const label = isCE ? 'Container Extra' : isImport ? 'Import' : 'Bulk';
     if (!window.confirm(`Delete ALL ${label} stock data? (${inventory.length} items)\n\nThis will remove all movements and lots for ${label} stock. Products will remain.`)) return;
     if (!window.confirm('This is irreversible. Confirm again to proceed.')) return;
@@ -753,7 +757,7 @@ function StockTable() {
       <div className="page-header no-print">
         <h2>Stock Summary</h2>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {inventory.length > 0 && (
+          {isSuperadmin && inventory.length > 0 && (
             <button className="btn btn-danger" onClick={handleDeleteAll}>
               <FiTrash2 /> Delete All Data
             </button>

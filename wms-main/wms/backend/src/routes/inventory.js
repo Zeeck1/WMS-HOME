@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
+const { authMiddleware, superadminOnly } = require('../middleware/auth');
 
 async function fetchImportShipmentRows(filters = {}) {
   const { fish_name, location } = filters;
@@ -140,8 +141,8 @@ router.get('/dashboard', async (req, res) => {
   }
 });
 
-// DELETE all stock data for a given stock_type (movements + lots)
-router.delete('/all', async (req, res) => {
+// DELETE all stock data for a given stock_type (movements + lots) — superadmin only
+router.delete('/all', authMiddleware, superadminOnly, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const { stock_type } = req.query;
