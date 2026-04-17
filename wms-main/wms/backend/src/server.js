@@ -38,6 +38,7 @@ app.use('/api/imports', require('./routes/imports'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/backup', require('./routes/backup'));
 app.use('/api/gemini', require('./routes/geminiChat'));
+app.use('/api/ck-intelligence/knowledge', require('./routes/ckKnowledge'));
 
 // Health check
 app.get('/api/health', (req, res) => {

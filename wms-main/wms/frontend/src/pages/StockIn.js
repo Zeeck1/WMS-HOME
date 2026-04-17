@@ -53,6 +53,7 @@ function StockIn() {
   const [showNewLot, setShowNewLot] = useState(false);
   const [newLot, setNewLot] = useState({
     lot_no: '',
+    lot_no_numeric: '',
     cs_in_date: new Date().toISOString().split('T')[0],
     sticker: '',
     product_id: '',
@@ -114,7 +115,8 @@ function StockIn() {
     ? filteredByAttrs.filter(l => {
         const lotNo = (l.lot_no || '').toLowerCase();
         const date = (l.cs_in_date || '').toString();
-        return lotNo.includes(lotSearchLower) || date.includes(lotSearchLower);
+        const numLot = String(l.lot_no_numeric ?? '').toLowerCase();
+        return lotNo.includes(lotSearchLower) || date.includes(lotSearchLower) || numLot.includes(lotSearchLower);
       })
     : filteredByAttrs;
 
@@ -126,8 +128,14 @@ function StockIn() {
       toast.warning('Lot No, Date, and Product are required');
       return;
     }
+    const lnn = String(newLot.lot_no_numeric || '').trim();
+    if (lnn && !/^\d+$/.test(lnn)) {
+      toast.warning('Lot No (numeric) must contain only digits');
+      return;
+    }
     try {
-      const res = await createLot(newLot);
+      const payload = { ...newLot, lot_no_numeric: lnn || null };
+      const res = await createLot(payload);
       toast.success('Lot created');
       const lotRes = await getLots();
       setLots(lotRes.data);
@@ -142,7 +150,7 @@ function StockIn() {
       });
       setLotSearch(getLotLabel(newLotWithProduct));
       setShowNewLot(false);
-      setNewLot({ lot_no: '', cs_in_date: new Date().toISOString().split('T')[0], sticker: '', product_id: '', notes: '', production_date: '', expiration_date: '', st_no: '', remark: '' });
+      setNewLot({ lot_no: '', lot_no_numeric: '', cs_in_date: new Date().toISOString().split('T')[0], sticker: '', product_id: '', notes: '', production_date: '', expiration_date: '', st_no: '', remark: '' });
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to create lot');
     }
@@ -277,6 +285,17 @@ function StockIn() {
                     <div className="form-group">
                       <label>Lot No *</label>
                       <input className="form-control" value={newLot.lot_no} onChange={e => setNewLot({ ...newLot, lot_no: e.target.value })} placeholder="e.g. LOT-2026-001" required />
+                    </div>
+                    <div className="form-group">
+                      <label>Lot No (numbers only)</label>
+                      <input
+                        className="form-control"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={newLot.lot_no_numeric}
+                        onChange={e => setNewLot({ ...newLot, lot_no_numeric: e.target.value.replace(/\D/g, '') })}
+                        placeholder="Optional, digits only"
+                      />
                     </div>
                     <div className="form-group">
                       <label>CS In Date *</label>

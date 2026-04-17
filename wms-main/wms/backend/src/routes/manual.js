@@ -5,6 +5,14 @@ const pool = require('../config/db');
 const PRODUCT_FIELDS = ['fish_name', 'size', 'bulk_weight_kg', 'type', 'glazing', 'order_code'];
 const LOT_FIELDS = ['cs_in_date', 'sticker', 'remark', 'st_no', 'production_date', 'expiration_date'];
 
+function parseLotNoNumeric(raw) {
+  if (raw == null || raw === '') return { value: null };
+  const s = String(raw).trim();
+  if (!s) return { value: null };
+  if (!/^\d+$/.test(s)) return { error: 'Lot No (numeric) must contain only digits' };
+  return { value: s };
+}
+
 // ── PATCH /cell — update a single cell value ─────────────────────────
 router.patch('/cell', async (req, res) => {
   const conn = await pool.getConnection();
@@ -30,6 +38,13 @@ router.patch('/cell', async (req, res) => {
       await conn.query(`UPDATE products SET \`${field}\` = ? WHERE id = ?`,
         [value === '' ? null : value, row.product_id]);
       return res.json({ ok: true, product_id: row.product_id });
+    }
+
+    if (field === 'lot_no_numeric') {
+      const parsed = parseLotNoNumeric(value);
+      if (parsed.error) return res.status(400).json({ error: parsed.error });
+      await conn.query('UPDATE lots SET lot_no_numeric = ? WHERE id = ?', [parsed.value, lot_id]);
+      return res.json({ ok: true });
     }
 
     if (LOT_FIELDS.includes(field)) {
@@ -115,6 +130,8 @@ router.post('/row', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const { stock_type = 'BULK', initial = {} } = req.body;
+    const lnn = parseLotNoNumeric(initial.lot_no_numeric);
+    if (lnn.error) return res.status(400).json({ error: lnn.error });
     await conn.beginTransaction();
 
     const [pr] = await conn.query(
@@ -140,8 +157,8 @@ router.post('/row', async (req, res) => {
     const productionDate = initial.production_date || csIn;
     const expirationDate = initial.expiration_date || null;
     const [lt] = await conn.query(
-      'INSERT INTO lots (lot_no, cs_in_date, sticker, product_id, remark, st_no, production_date, expiration_date) VALUES (?,?,?,?,?,?,?,?)',
-      [lotNo, csIn, initial.sticker || null, productId, initial.remark || null, initial.st_no || null, productionDate, expirationDate]);
+      'INSERT INTO lots (lot_no, lot_no_numeric, cs_in_date, sticker, product_id, remark, st_no, production_date, expiration_date) VALUES (?,?,?,?,?,?,?,?,?)',
+      [lotNo, lnn.value, csIn, initial.sticker || null, productId, initial.remark || null, initial.st_no || null, productionDate, expirationDate]);
     const lotId = lt.insertId;
 
     const mc = initial.hand_on_balance_mc != null ? (parseInt(initial.hand_on_balance_mc) || 1) : 1;

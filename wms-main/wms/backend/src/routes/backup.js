@@ -28,6 +28,7 @@ const DATA_TABLES = [
   'app_settings',
   'oac_checks',
   'oac_check_items',
+  'ck_knowledge_entries',
 ];
 
 const NUMERIC_TYPES = new Set([

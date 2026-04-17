@@ -100,7 +100,7 @@ function LocationLayout() {
   }, [wh]);
 
   useEffect(() => {
-    getInventory()
+    getInventory({ merge_import_shipments: '1' })
       .then((res) => setInventory(res.data))
       .catch(() => toast.error('Failed to load inventory'))
       .finally(() => setLoading(false));

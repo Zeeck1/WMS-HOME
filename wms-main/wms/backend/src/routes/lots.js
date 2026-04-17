@@ -2,6 +2,14 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 
+function normalizeLotNoNumeric(raw) {
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  if (!/^\d+$/.test(s)) return { error: 'Lot No (numeric) must contain only digits' };
+  return { value: s };
+}
+
 // GET all lots with product info (optional ?stock_type= filter)
 router.get('/', async (req, res) => {
   try {
@@ -47,13 +55,15 @@ router.get('/:id', async (req, res) => {
 // POST create lot
 router.post('/', async (req, res) => {
   try {
-    const { lot_no, cs_in_date, sticker, product_id, notes, production_date, expiration_date, st_no, remark } = req.body;
+    const { lot_no, lot_no_numeric, cs_in_date, sticker, product_id, notes, production_date, expiration_date, st_no, remark } = req.body;
     if (!lot_no || !cs_in_date || !product_id) {
       return res.status(400).json({ error: 'Lot number, CS In Date, and product are required' });
     }
+    const lnn = normalizeLotNoNumeric(lot_no_numeric);
+    if (lnn && lnn.error) return res.status(400).json({ error: lnn.error });
     const [result] = await pool.query(
-      'INSERT INTO lots (lot_no, cs_in_date, sticker, product_id, notes, production_date, expiration_date, st_no, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [lot_no, cs_in_date, sticker || null, product_id, notes || null, production_date || null, expiration_date || null, st_no || null, remark || null]
+      'INSERT INTO lots (lot_no, lot_no_numeric, cs_in_date, sticker, product_id, notes, production_date, expiration_date, st_no, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [lot_no, lnn ? lnn.value : null, cs_in_date, sticker || null, product_id, notes || null, production_date || null, expiration_date || null, st_no || null, remark || null]
     );
     const [newLot] = await pool.query('SELECT * FROM lots WHERE id = ?', [result.insertId]);
     res.status(201).json(newLot[0]);
@@ -69,11 +79,24 @@ router.post('/', async (req, res) => {
 // PUT update lot
 router.put('/:id', async (req, res) => {
   try {
-    const { lot_no, cs_in_date, sticker, product_id, notes } = req.body;
-    await pool.query(
-      'UPDATE lots SET lot_no=?, cs_in_date=?, sticker=?, product_id=?, notes=? WHERE id=?',
-      [lot_no, cs_in_date, sticker || null, product_id, notes || null, req.params.id]
-    );
+    const { lot_no, lot_no_numeric, cs_in_date, sticker, product_id, notes } = req.body;
+    let lnnVal;
+    if (Object.prototype.hasOwnProperty.call(req.body, 'lot_no_numeric')) {
+      const lnn = normalizeLotNoNumeric(lot_no_numeric);
+      if (lnn && lnn.error) return res.status(400).json({ error: lnn.error });
+      lnnVal = lnn ? lnn.value : null;
+    }
+    if (lnnVal !== undefined) {
+      await pool.query(
+        'UPDATE lots SET lot_no=?, lot_no_numeric=?, cs_in_date=?, sticker=?, product_id=?, notes=? WHERE id=?',
+        [lot_no, lnnVal, cs_in_date, sticker || null, product_id, notes || null, req.params.id]
+      );
+    } else {
+      await pool.query(
+        'UPDATE lots SET lot_no=?, cs_in_date=?, sticker=?, product_id=?, notes=? WHERE id=?',
+        [lot_no, cs_in_date, sticker || null, product_id, notes || null, req.params.id]
+      );
+    }
     const [updated] = await pool.query('SELECT * FROM lots WHERE id = ?', [req.params.id]);
     res.json(updated[0]);
   } catch (error) {

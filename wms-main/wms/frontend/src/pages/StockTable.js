@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import ReactDOM from 'react-dom';
-import { FiDownload, FiSearch, FiPackage, FiBox, FiTrash2, FiAnchor, FiChevronDown, FiCheck, FiX, FiCopy, FiPrinter, FiImage } from 'react-icons/fi';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { FiDownload, FiSearch, FiPackage, FiBox, FiTrash2, FiAnchor, FiX, FiCopy, FiPrinter, FiImage } from 'react-icons/fi';
+import ColumnFilterDropdown from '../components/ColumnFilterDropdown';
 import { toast } from 'react-toastify';
 import { useAuth } from '../context/AuthContext';
 import { getInventory, deleteAllStockData } from '../services/api';
@@ -22,6 +23,7 @@ const BULK_COLUMNS = [
   { key: 'glazing', label: 'Glazing' },
   { key: 'cs_in_date', label: 'CS In Date' },
   { key: 'sticker', label: 'Sticker' },
+  { key: 'lot_no_numeric', label: 'Lot No' },
   { key: 'line_place', label: 'Lines / Place' },
   { key: 'stack_no', label: 'Stack No' },
   { key: 'stack_total', label: 'Stack Total' },
@@ -33,6 +35,7 @@ const BULK_COLUMNS = [
 
 const CE_COLUMNS = [
   { key: 'order_code', label: 'Order' },
+  { key: 'lot_no_numeric', label: 'Lot No' },
   { key: 'fish_name', label: 'Fish Name' },
   { key: 'size', label: 'Size' },
   { key: 'bulk_weight_kg', label: 'KG' },
@@ -102,126 +105,23 @@ const formatISODateToDMY = (v) => {
   return `${dd}/${mm}/${yyyy}`;
 };
 
-// ─── Google Sheets–style column filter dropdown ────────────────────────
-function ColumnFilterDropdown({ columnKey, allValues, selected, onApply, onClear }) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const [localSelected, setLocalSelected] = useState(new Set(selected));
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  const btnRef = useRef(null);
-  const popupRef = useRef(null);
-  const uniqueCount = new Set(allValues.map(v => v != null ? String(v) : '(Blank)')).size;
-  const isFiltered = selected.size < uniqueCount;
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e) => {
-      if (popupRef.current && popupRef.current.contains(e.target)) return;
-      if (btnRef.current && btnRef.current.contains(e.target)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
-  useEffect(() => { if (open) setLocalSelected(new Set(selected)); }, [open, selected]);
-
-  const handleOpen = () => {
-    if (open) { setOpen(false); return; }
-    if (btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      let left = rect.left;
-      const popW = 300;
-      if (left + popW > window.innerWidth - 12) left = window.innerWidth - popW - 12;
-      if (left < 8) left = 8;
-      setPos({ top: rect.bottom + 4, left });
-    }
-    setOpen(true);
-  };
-
-  const uniqueValues = useMemo(() => {
-    const vals = [...new Set(allValues.map(v => v != null ? String(v) : '(Blank)'))];
-    vals.sort((a, b) => a === '(Blank)' ? 1 : b === '(Blank)' ? -1 : a.localeCompare(b, undefined, { numeric: true }));
-    return vals;
-  }, [allValues]);
-
-  const displayValues = useMemo(() => {
-    if (!search.trim()) return uniqueValues;
-    const q = search.toLowerCase();
-    return uniqueValues.filter(v => v.toLowerCase().includes(q));
-  }, [uniqueValues, search]);
-
-  const allDisplaySelected = displayValues.length > 0 && displayValues.every(v => localSelected.has(v));
-
-  const toggleValue = (val) => {
-    setLocalSelected(prev => {
-      const next = new Set(prev);
-      next.has(val) ? next.delete(val) : next.add(val);
-      return next;
-    });
-  };
-
-  const handleSelectAll = () => {
-    setLocalSelected(prev => {
-      const next = new Set(prev);
-      if (allDisplaySelected) { displayValues.forEach(v => next.delete(v)); }
-      else { displayValues.forEach(v => next.add(v)); }
-      return next;
-    });
-  };
-
-  const handleApply = () => { onApply(localSelected); setOpen(false); setSearch(''); };
-  const handleClearFilter = () => { onClear(); setOpen(false); setSearch(''); };
-
-  const popup = open ? ReactDOM.createPortal(
-    <div className="gs-filter-popup" ref={popupRef} style={{ top: pos.top, left: pos.left }}>
-      <div className="gs-filter-search">
-        <FiSearch size={13} />
-        <input type="text" placeholder="Search..." value={search}
-          onChange={e => setSearch(e.target.value)} autoFocus />
-        {search && <button className="gs-filter-clear-search" onClick={() => setSearch('')}><FiX size={12} /></button>}
-      </div>
-      <div className="gs-filter-actions-top">
-        <button onClick={handleSelectAll}>{allDisplaySelected ? 'Deselect All' : 'Select All'}</button>
-        {isFiltered && <button onClick={handleClearFilter} className="gs-filter-clear-btn">Clear Filter</button>}
-      </div>
-      <div className="gs-filter-list">
-        {displayValues.length === 0 ? (
-          <div className="gs-filter-empty">No matches</div>
-        ) : displayValues.map(val => (
-          <div key={val} className="gs-filter-item" onClick={() => toggleValue(val)}>
-            <div className={`gs-checkbox ${localSelected.has(val) ? 'gs-checked' : ''}`}>
-              {localSelected.has(val) && <FiCheck size={11} />}
-            </div>
-            <span className="gs-filter-val">{val}</span>
-          </div>
-        ))}
-      </div>
-      <div className="gs-filter-footer">
-        <button className="gs-filter-cancel" onClick={() => { setOpen(false); setSearch(''); }}>Cancel</button>
-        <button className="gs-filter-ok" onClick={handleApply}>OK</button>
-      </div>
-    </div>,
-    document.body
-  ) : null;
-
-  return (
-    <div className="gs-filter-wrap">
-      <button ref={btnRef}
-        className={`gs-filter-btn ${isFiltered ? 'gs-filter-active' : ''}`}
-        onClick={handleOpen} title="Filter this column">
-        <FiChevronDown size={12} />
-      </button>
-      {popup}
-    </div>
-  );
+function filterInventoryRowsByTab(rows, tab) {
+  const t = String(tab || '').toUpperCase();
+  return (rows || []).filter((r) => String(r.stock_type || '').toUpperCase() === t);
 }
 
 // ─── Main Component ────────────────────────────────────────────────────
+const STOCK_SUMMARY_TABS = new Set(['BULK', 'CONTAINER_EXTRA', 'IMPORT']);
+
 function StockTable() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const isSuperadmin = user?.role === 'superadmin';
-  const [activeTab, setActiveTab] = useState('BULK');
+  const [activeTab, setActiveTab] = useState(() => {
+    const t = location.state?.stockSummaryTab;
+    return STOCK_SUMMARY_TABS.has(t) ? t : 'BULK';
+  });
   const [inventory, setInventory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -241,14 +141,17 @@ function StockTable() {
   // BULK: Old Balance / New Income — default OFF (same as Lines/Place, Stack, etc.)
   const [showBulkOldBalance, setShowBulkOldBalance] = useState(false);
   const [showBulkNewIncome, setShowBulkNewIncome] = useState(false);
+  const [showBulkLotNo, setShowBulkLotNo] = useState(false);
 
   // Container Extra: show/hide optional columns (default OFF)
   const [showCElinePlace, setShowCElinePlace] = useState(false);
   const [showCEstNo, setShowCEstNo] = useState(false);
+  const [showCELotNo, setShowCELotNo] = useState(false);
 
   const bulkTableColumns = useMemo(() => {
     if (activeTab !== 'BULK') return columns;
     return BULK_COLUMNS.filter(col => {
+      if (col.key === 'lot_no_numeric') return showBulkLotNo;
       if (col.key === 'line_place') return showBulkLinesPlace;
       if (col.key === 'stack_no') return showBulkStackNo;
       if (col.key === 'stack_total') return showBulkStackTotal;
@@ -256,7 +159,7 @@ function StockTable() {
       if (col.key === 'new_income_mc') return showBulkNewIncome;
       return true;
     });
-  }, [activeTab, columns, showBulkLinesPlace, showBulkStackNo, showBulkStackTotal, showBulkOldBalance, showBulkNewIncome]);
+  }, [activeTab, columns, showBulkLotNo, showBulkLinesPlace, showBulkStackNo, showBulkStackTotal, showBulkOldBalance, showBulkNewIncome]);
 
   const bulkFirstAggregateIndex = useMemo(() => {
     if (activeTab !== 'BULK') return -1;
@@ -269,25 +172,28 @@ function StockTable() {
   const visibleColumns = useMemo(() => {
     if (activeTab !== 'CONTAINER_EXTRA') return columns;
     return CE_COLUMNS.filter(col => {
+      if (col.key === 'lot_no_numeric') return showCELotNo;
       if (col.key === 'line_place') return showCElinePlace;
       if (col.key === 'st_no') return showCEstNo;
       return true;
     });
-  }, [activeTab, columns, showCElinePlace, showCEstNo]);
+  }, [activeTab, columns, showCELotNo, showCElinePlace, showCEstNo]);
 
   useEffect(() => {
     if (activeTab !== 'CONTAINER_EXTRA') {
       setShowCElinePlace(false);
       setShowCEstNo(false);
+      setShowCELotNo(false);
       return;
     }
     setColumnFilters(prev => {
       const next = { ...prev };
       if (!showCElinePlace) delete next.line_place;
       if (!showCEstNo) delete next.st_no;
+      if (!showCELotNo) delete next.lot_no_numeric;
       return next;
     });
-  }, [activeTab, showCElinePlace, showCEstNo]);
+  }, [activeTab, showCElinePlace, showCEstNo, showCELotNo]);
 
   useEffect(() => {
     if (activeTab !== 'BULK') return;
@@ -295,14 +201,16 @@ function StockTable() {
       const next = { ...prev };
       if (!showBulkOldBalance) delete next.old_balance_mc;
       if (!showBulkNewIncome) delete next.new_income_mc;
+      if (!showBulkLotNo) delete next.lot_no_numeric;
       return next;
     });
-  }, [activeTab, showBulkOldBalance, showBulkNewIncome]);
+  }, [activeTab, showBulkOldBalance, showBulkNewIncome, showBulkLotNo]);
 
   const fetchInventory = useCallback(async () => {
     try {
       const res = await getInventory({ stock_type: activeTab });
-      const normalized = (res.data || []).map(r => ({
+      const filtered = filterInventoryRowsByTab(res.data, activeTab);
+      const normalized = filtered.map(r => ({
         ...r,
         cs_in_date: isImport ? formatISODateToDMY(r.cs_in_date) : r.cs_in_date,
         production_date: formatMonthYearDisplay(r.production_date),
@@ -318,23 +226,18 @@ function StockTable() {
 
   useEffect(() => {
     setLoading(true);
+    setInventory([]);
     setSearchQuery('');
     setColumnFilters({});
     fetchInventory();
   }, [activeTab, fetchInventory]);
 
-  const allColumnValues = useMemo(() => {
-    const map = {};
-    columns.forEach(({ key }) => {
-      map[key] = inventory.map(r => {
-        const v = r[key];
-        return v != null && v !== '' ? String(v) : null;
-      });
-    });
-    return map;
-  }, [inventory, columns]);
+  const rowStrForColumnFilter = (row, key) => {
+    const v = row[key];
+    return v != null && v !== '' ? String(v) : '(Blank)';
+  };
 
-  const filteredInventory = useMemo(() => {
+  const rowsAfterSearch = useMemo(() => {
     let list = inventory;
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
@@ -346,16 +249,35 @@ function StockTable() {
         })
       );
     }
-    return list.filter(row =>
-      columns.every(({ key }) => {
-        const selected = columnFilters[key];
-        if (!selected) return true;
-        const v = row[key];
-        const str = v != null && v !== '' ? String(v) : '(Blank)';
-        return selected.has(str);
-      })
-    );
-  }, [inventory, columnFilters, columns, searchQuery]);
+    return list;
+  }, [inventory, columns, searchQuery]);
+
+  /** Skip `excludeColumnKey` so its filter dropdown shows only values still allowed by search + other column filters. */
+  const rowMatchesColumnFiltersExcept = useCallback((row, excludeColumnKey) =>
+    columns.every(({ key }) => {
+      if (key === excludeColumnKey) return true;
+      const selected = columnFilters[key];
+      if (!selected) return true;
+      return selected.has(rowStrForColumnFilter(row, key));
+    }),
+  [columns, columnFilters]);
+
+  const filteredInventory = useMemo(
+    () => rowsAfterSearch.filter(row => rowMatchesColumnFiltersExcept(row, null)),
+    [rowsAfterSearch, rowMatchesColumnFiltersExcept]
+  );
+
+  const allColumnValues = useMemo(() => {
+    const map = {};
+    columns.forEach(({ key }) => {
+      const subset = rowsAfterSearch.filter(row => rowMatchesColumnFiltersExcept(row, key));
+      map[key] = subset.map(r => {
+        const v = r[key];
+        return v != null && v !== '' ? String(v) : null;
+      });
+    });
+    return map;
+  }, [columns, rowsAfterSearch, rowMatchesColumnFiltersExcept]);
 
   const applyColumnFilter = (key, selected) => {
     const allVals = new Set(allColumnValues[key].map(v => v != null ? v : '(Blank)'));
@@ -738,7 +660,6 @@ function StockTable() {
         <div className="gs-th-inner">
           <span>{headerLabel}</span>
           <ColumnFilterDropdown
-            columnKey={col.key}
             allValues={allVals}
             selected={currentSelected}
             onApply={(sel) => applyColumnFilter(col.key, sel)}
@@ -830,7 +751,7 @@ function StockTable() {
           <div className="st-bulk-col-toggles no-print">
             <div className="st-bulk-col-left">
               <span className="st-bulk-col-label">Columns (BULK)</span>
-              <span className="st-bulk-col-hint">Lines/Stack and Old/New Balance normally OFF — toggle to show</span>
+              <span className="st-bulk-col-hint">Lot No, Lines/Stack, Old/New Balance — normally OFF</span>
             </div>
             <div className="st-bulk-col-right">
               <button
@@ -868,6 +789,13 @@ function StockTable() {
               >
                 New Income
               </button>
+              <button
+                type="button"
+                className={`st-bulk-pill ${showBulkLotNo ? 'active' : ''}`}
+                onClick={() => setShowBulkLotNo(v => !v)}
+              >
+                Lot No
+              </button>
             </div>
           </div>
         )}
@@ -876,7 +804,7 @@ function StockTable() {
           <div className="st-bulk-col-toggles no-print">
             <div className="st-bulk-col-left">
               <span className="st-bulk-col-label">Columns (Container Extra)</span>
-              <span className="st-bulk-col-hint">Normally OFF</span>
+              <span className="st-bulk-col-hint">LINE, ST NO, Lot No — normally OFF</span>
             </div>
             <div className="st-bulk-col-right">
               <button
@@ -892,6 +820,13 @@ function StockTable() {
                 onClick={() => setShowCEstNo(v => !v)}
               >
                 ST NO
+              </button>
+              <button
+                type="button"
+                className={`st-bulk-pill ${showCELotNo ? 'active' : ''}`}
+                onClick={() => setShowCELotNo(v => !v)}
+              >
+                Lot No
               </button>
             </div>
           </div>
@@ -943,7 +878,22 @@ function StockTable() {
                       const isStNo = col.key === 'st_no';
                       return (
                         <td key={col.key} className={isKg || isMC ? 'num-cell' : ''} style={isMC ? { background: '#fef2f2', fontWeight: 700, fontSize: '0.9rem' } : {}}>
-                          {isOrder || isLine || isStNo ? <strong>{val ?? '-'}</strong> : isKg ? `${Number(val || 0).toFixed(0)} KG` : (val != null && val !== '' ? String(val) : '-')}
+                          {isOrder && isImport && r._imp_shipment_id ? (
+                            <button
+                              type="button"
+                              className="st-invoice-link"
+                              onClick={() => navigate(`/imports/${r._imp_shipment_id}`, { state: { from: 'stock-summary' } })}
+                              title="Open import shipment"
+                            >
+                              {val != null && val !== '' ? String(val) : '-'}
+                            </button>
+                          ) : isOrder || isLine || isStNo ? (
+                            <strong>{val ?? '-'}</strong>
+                          ) : isKg ? (
+                            `${Number(val || 0).toFixed(0)} KG`
+                          ) : (
+                            val != null && val !== '' ? String(val) : '-'
+                          )}
                         </td>
                       );
                     })}

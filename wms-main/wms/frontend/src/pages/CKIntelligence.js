@@ -81,14 +81,16 @@ function CKIntelligence() {
           </div>
         </div>
 
-        <button
-          type="button"
-          className="cki-explore-btn"
-          onClick={() => navigate('/ck-intelligence-chat')}
-        >
-          <span className="cki-coming-glow" aria-hidden="true" />
-          <span className="cki-coming-text">Explore Now</span>
-        </button>
+        <div className="cki-actions-row">
+          <button
+            type="button"
+            className="cki-explore-btn"
+            onClick={() => navigate('/ck-intelligence-chat')}
+          >
+            <span className="cki-coming-glow" aria-hidden="true" />
+            <span className="cki-coming-text">Explore Now</span>
+          </button>
+        </div>
 
         <p className="cki-footnote">We&apos;re building something stellar for your operations.</p>
       </div>

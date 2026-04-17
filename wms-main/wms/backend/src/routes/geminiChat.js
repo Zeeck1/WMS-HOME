@@ -1,8 +1,29 @@
 const express = require('express');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { authMiddleware } = require('../middleware/auth');
+const pool = require('../config/db');
 
 const router = express.Router();
+
+const KNOWLEDGE_APPEND_MAX_CHARS = 45000;
+
+async function loadKnowledgeAppendix() {
+  try {
+    const [rows] = await pool.query(
+      `SELECT category, title, content FROM ck_knowledge_entries ORDER BY sort_order ASC, id ASC`
+    );
+    if (!rows.length) return '';
+    const parts = rows.map((r) => `### ${r.title} [${r.category}]\n${r.content}`);
+    let block = parts.join('\n\n');
+    if (block.length > KNOWLEDGE_APPEND_MAX_CHARS) {
+      block = block.slice(0, KNOWLEDGE_APPEND_MAX_CHARS) + '\n\n[Knowledge truncated for length]';
+    }
+    return `\n\n--- Trained knowledge (company & site-specific — use when relevant) ---\n${block}`;
+  } catch (e) {
+    console.error('loadKnowledgeAppendix:', e?.message || e);
+    return '';
+  }
+}
 
 const MAX_MESSAGES = 40;
 const MAX_TOTAL_CHARS = 80000;
@@ -74,10 +95,13 @@ router.post('/chat', authMiddleware, async (req, res) => {
   const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
 
   try {
+    const knowledgeAppendix = await loadKnowledgeAppendix();
+    const systemInstruction = SYSTEM_INSTRUCTION + knowledgeAppendix;
+
     const genAI = new GoogleGenerativeAI(apiKey.trim());
     const model = genAI.getGenerativeModel({
       model: modelName,
-      systemInstruction: SYSTEM_INSTRUCTION,
+      systemInstruction,
     });
 
     const chat = model.startChat({ history });

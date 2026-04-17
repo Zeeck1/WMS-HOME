@@ -141,6 +141,7 @@ async function initDatabase() {
       CREATE TABLE IF NOT EXISTS lots (
         id INT AUTO_INCREMENT PRIMARY KEY,
         lot_no VARCHAR(50) NOT NULL UNIQUE,
+        lot_no_numeric BIGINT UNSIGNED DEFAULT NULL,
         cs_in_date DATE NOT NULL,
         sticker VARCHAR(100) DEFAULT NULL,
         product_id INT NOT NULL,
@@ -166,6 +167,22 @@ async function initDatabase() {
       if (countryCols.length === 0) {
         await connection.query('ALTER TABLE lots ADD COLUMN country VARCHAR(100) DEFAULT NULL AFTER remark');
         console.log('  Migration: added country to lots');
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // Migration: numeric Lot No for Stock Summary / Manual (digits only)
+    try {
+      const [lnnCols] = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'lots' AND COLUMN_NAME = 'lot_no_numeric'
+      `, [dbName]);
+      if (lnnCols.length === 0) {
+        await connection.query(
+          "ALTER TABLE lots ADD COLUMN lot_no_numeric BIGINT UNSIGNED DEFAULT NULL COMMENT 'Lot No digits only' AFTER lot_no"
+        );
+        console.log('  Migration: added lot_no_numeric to lots');
       }
     } catch (e) {
       // ignore
@@ -224,6 +241,7 @@ async function initDatabase() {
         p.order_code,
         l.id AS lot_id,
         l.lot_no,
+        l.lot_no_numeric,
         l.cs_in_date,
         l.sticker,
         l.production_date,
@@ -535,6 +553,22 @@ async function initDatabase() {
         console.log('  Migration: added amount_usd_kgs_expr to import_expenses');
       }
     } catch (e) { /* ignore */ }
+
+    // CK Intelligence — trained knowledge (company info, policies, etc.)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS ck_knowledge_entries (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        category VARCHAR(64) NOT NULL DEFAULT 'general',
+        title VARCHAR(512) NOT NULL,
+        content TEXT NOT NULL,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        KEY idx_ck_cat (category),
+        KEY idx_ck_sort (sort_order)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('  Table created: ck_knowledge_entries');
 
     // ── Auth: users & permissions ────────────────────────────────────
     await connection.query(`

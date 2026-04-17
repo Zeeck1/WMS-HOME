@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS locations (
 CREATE TABLE IF NOT EXISTS lots (
     id INT AUTO_INCREMENT PRIMARY KEY,
     lot_no VARCHAR(50) NOT NULL UNIQUE,
+    lot_no_numeric BIGINT UNSIGNED DEFAULT NULL COMMENT 'Lot No digits only for reports',
     cs_in_date DATE NOT NULL,
     sticker VARCHAR(100) DEFAULT NULL,
     product_id INT NOT NULL,
@@ -97,6 +98,7 @@ SELECT
     p.order_code,
     l.id AS lot_id,
     l.lot_no,
+    l.lot_no_numeric,
     l.cs_in_date,
     l.sticker,
     l.production_date,

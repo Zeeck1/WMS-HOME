@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { FiSearch, FiPackage, FiBox, FiAnchor, FiPlus, FiTrash2, FiRotateCcw, FiCopy, FiSave, FiAlertTriangle } from 'react-icons/fi';
+import { FiSearch, FiPackage, FiBox, FiAnchor, FiPlus, FiTrash2, FiRotateCcw, FiCopy, FiSave, FiAlertTriangle, FiX, FiCheck } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { getInventory, manualUpdateCell, manualDeleteRow, manualAddRow } from '../services/api';
 import { parseLocationCode } from '../config/warehouseConfig';
+import ColumnFilterDropdown from '../components/ColumnFilterDropdown';
+
+const normLotNoNumeric = (v) => String(v ?? '').replace(/\D/g, '');
 
 // ─── Column Definitions ────────────────────────────────────────────────
 const BULK_COLS = [
@@ -13,6 +16,7 @@ const BULK_COLS = [
   { key: 'glazing', field: 'glazing', label: 'Glazing', editable: true, type: 'text', w: 70 },
   { key: 'cs_in_date', field: 'cs_in_date', label: 'CS In Date', editable: true, type: 'date', w: 120 },
   { key: 'sticker', field: 'sticker', label: 'Sticker', editable: true, type: 'text', w: 80 },
+  { key: 'lot_no_numeric', field: 'lot_no_numeric', label: 'Lot No', editable: true, type: 'text', w: 85 },
   { key: 'line_place', field: 'line_place', label: 'Lines / Place', editable: true, type: 'text', w: 100 },
   { key: 'stack_no', field: 'stack_no', label: 'Stack No', editable: true, type: 'number', w: 70 },
   { key: 'stack_total', field: 'stack_total', label: 'Stack Total', editable: true, type: 'number', w: 80 },
@@ -24,6 +28,7 @@ const BULK_COLS = [
 
 const nonBulkCols = (isImport) => [
   { key: 'order_code', field: 'order_code', label: isImport ? 'Invoice No' : 'Order', editable: true, type: 'text', w: 130 },
+  ...(!isImport ? [{ key: 'lot_no_numeric', field: 'lot_no_numeric', label: 'Lot No', editable: true, type: 'text', w: 85 }] : []),
   { key: 'fish_name', field: 'fish_name', label: 'Fish Name', editable: true, type: 'text', w: 140 },
   { key: 'size', field: 'size', label: 'Size', editable: true, type: 'text', w: 90 },
   { key: 'bulk_weight_kg', field: 'bulk_weight_kg', label: 'KG', editable: true, type: 'number', w: 70 },
@@ -57,6 +62,12 @@ const LINE_OPTIONS = [
 
 const rk = (r) => `${r.lot_id}-${r.location_id}`;
 const MANUAL_FETCH_LIMIT = 2000;
+
+/** Ensures each tab only shows rows for that stock type (API must match; this guards stale UI or bad responses). */
+function filterInventoryRowsByTab(rows, tab) {
+  const t = String(tab || '').toUpperCase();
+  return (rows || []).filter((r) => String(r.stock_type || '').toUpperCase() === t);
+}
 const ROW_WINDOW_SIZE = 150;
 const toDateOnly = (d) => {
   if (d == null || d === '') return '';
@@ -119,8 +130,117 @@ const getCellDisplay = (row, col) => {
   const v = row[col.key];
   if (col.type === 'date') return toDateOnly(v);
   if (col.type === 'month_year') return toMonthYearDisplay(v);
+  if (col.field === 'lot_no_numeric') return normLotNoNumeric(v);
   return v ?? '';
 };
+
+/** Display string per cell for column filters (matches visible formatting where relevant). */
+function manualCellFilterValue(row, col) {
+  if (!col?.key || col.formula) return null;
+  const v = row[col.key];
+  if (col.type === 'date') {
+    const d = toDateOnly(v);
+    return d || null;
+  }
+  if (col.type === 'month_year') {
+    const d = toMonthYearDisplay(v);
+    return d || null;
+  }
+  if (col.field === 'lot_no_numeric') {
+    const n = normLotNoNumeric(v);
+    return n || null;
+  }
+  if (v == null || v === '') return null;
+  return String(v);
+}
+
+const todayISO = () => new Date().toISOString().split('T')[0];
+
+function buildEmptyDraft(activeTab) {
+  const t = todayISO();
+  if (activeTab === 'BULK') {
+    return {
+      fish_name: '', size: '', bulk_weight_kg: '0', type: '', glazing: '',
+      cs_in_date: t, sticker: '', lot_no_numeric: '', line_place: '', stack_no: '1', stack_total: '1',
+      hand_on_balance_mc: '1', remark: '',
+    };
+  }
+  if (activeTab === 'CONTAINER_EXTRA') {
+    return {
+      order_code: '', lot_no_numeric: '', fish_name: '', size: '', bulk_weight_kg: '0',
+      production_date: '', expiration_date: '', st_no: '', cs_in_date: t, remark: '',
+      hand_on_balance_mc: '1', line_place: '', stack_no: '1',
+    };
+  }
+  return {
+    order_code: '', fish_name: '', size: '', bulk_weight_kg: '0', cs_in_date: t, remark: '',
+    hand_on_balance_mc: '1', line_place: '', stack_no: '1',
+  };
+}
+
+function buildInitialFromDraft(activeTab, d) {
+  const line = (d.line_place || '').toUpperCase().trim();
+  const t = todayISO();
+  if (activeTab === 'IMPORT') {
+    return {
+      fish_name: d.fish_name?.trim() || '(new)',
+      size: d.size?.trim() || '-',
+      bulk_weight_kg: parseFloat(d.bulk_weight_kg) || 0,
+      type: null,
+      glazing: null,
+      order_code: d.order_code?.trim() || null,
+      production_date: toDateOnly(d.cs_in_date) || t,
+      expiration_date: null,
+      st_no: null,
+      cs_in_date: toDateOnly(d.cs_in_date) || t,
+      sticker: null,
+      remark: d.remark?.trim() || null,
+      hand_on_balance_mc: parseInt(d.hand_on_balance_mc, 10) || 1,
+      line_place: line || undefined,
+      stack_no: parseInt(d.stack_no, 10) || 1,
+      stack_total: 1,
+    };
+  }
+  if (activeTab === 'CONTAINER_EXTRA') {
+    const cs = toDateOnly(d.cs_in_date) || t;
+    return {
+      fish_name: d.fish_name?.trim() || '(new)',
+      size: d.size?.trim() || '-',
+      bulk_weight_kg: parseFloat(d.bulk_weight_kg) || 0,
+      type: null,
+      glazing: null,
+      order_code: d.order_code?.trim() || null,
+      production_date: toDateOnly(d.production_date) || cs,
+      expiration_date: toDateOnly(d.expiration_date) || null,
+      st_no: d.st_no?.trim() || null,
+      cs_in_date: cs,
+      sticker: null,
+      remark: d.remark?.trim() || null,
+      lot_no_numeric: d.lot_no_numeric || null,
+      hand_on_balance_mc: parseInt(d.hand_on_balance_mc, 10) || 1,
+      line_place: line || undefined,
+      stack_no: parseInt(d.stack_no, 10) || 1,
+      stack_total: 1,
+    };
+  }
+  return {
+    fish_name: d.fish_name?.trim() || '(new)',
+    size: d.size?.trim() || '-',
+    bulk_weight_kg: parseFloat(d.bulk_weight_kg) || 0,
+    type: d.type?.trim() || null,
+    glazing: d.glazing?.trim() || null,
+    order_code: null,
+    cs_in_date: toDateOnly(d.cs_in_date) || t,
+    sticker: d.sticker?.trim() || null,
+    remark: d.remark?.trim() || null,
+    st_no: null,
+    lot_no_numeric: d.lot_no_numeric || null,
+    hand_on_balance_mc: parseInt(d.hand_on_balance_mc, 10) || 1,
+    line_place: line || undefined,
+    stack_no: parseInt(d.stack_no, 10) || 1,
+    stack_total: parseInt(d.stack_total, 10) || 1,
+  };
+}
 
 // ─── Component ─────────────────────────────────────────────────────────
 function Manual() {
@@ -130,6 +250,11 @@ function Manual() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [filters, setFilters] = useState({ fish_name: '', line: '', line_detail: '', stack_no: '' });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [columnFilters, setColumnFilters] = useState({});
+  /** Staging row at top — fill in, then confirm to create in DB (sorted by Line / Place). */
+  const [draftRow, setDraftRow] = useState(null);
+  const [draftSaving, setDraftSaving] = useState(false);
 
   const [selectedCell, setSelectedCell] = useState(null);
   const [undoStack, setUndoStack] = useState([]);
@@ -144,10 +269,12 @@ function Manual() {
   const dragRef = useRef(null);
   const windowStartRef = useRef(0);
   useEffect(() => { windowStartRef.current = windowStart; }, [windowStart]);
+  const draftRowRef = useRef(null);
+  useEffect(() => { draftRowRef.current = draftRow; }, [draftRow]);
 
   const isNonBulk = activeTab !== 'BULK';
   const isImport = activeTab === 'IMPORT';
-  const columns = useMemo(() => isNonBulk ? nonBulkCols(isImport) : BULK_COLS, [isNonBulk, isImport]);
+  const columns = useMemo(() => (isNonBulk ? nonBulkCols(isImport) : BULK_COLS), [isNonBulk, isImport]);
   const columnsRef = useRef(columns);
   useEffect(() => { columnsRef.current = columns; }, [columns]);
 
@@ -187,15 +314,25 @@ function Manual() {
     setPendingEditsMap({});
     setWindowStart(0);
     try {
-      const res = await getInventory({ stock_type: activeTab, limit: MANUAL_FETCH_LIMIT, ...params });
-      setRows(res.data);
-      setOriginalRows(res.data.map(r => ({ ...r })));
+      const res = await getInventory({
+        ...params,
+        limit: MANUAL_FETCH_LIMIT,
+        stock_type: activeTab,
+      });
+      const list = filterInventoryRowsByTab(res.data, activeTab);
+      setRows(list);
+      setOriginalRows(list.map(r => ({ ...r })));
     } catch { toast.error('Failed to load data'); }
     finally { setLoading(false); }
   }, [activeTab]);
 
   useEffect(() => {
+    setRows([]);
+    setOriginalRows([]);
     setFilters(f => ({ ...f, fish_name: '', line_detail: '' }));
+    setSearchQuery('');
+    setColumnFilters({});
+    setDraftRow(null);
     setUndoStack([]);
     setCopiedRow(null);
     setSelectedCell(null);
@@ -212,8 +349,8 @@ function Manual() {
     loadData(p);
   };
 
-  // ─── Client-side filters ─────────────────────────────────────────────
-  const filteredRows = useMemo(() => {
+  // ─── Client-side filters (L/R, stack) then Stock Summary–style search + column filters ─
+  const afterSidebar = useMemo(() => {
     let list = rows;
     if (filters.line) {
       list = list.filter(r => {
@@ -227,6 +364,76 @@ function Manual() {
     }
     return list;
   }, [rows, filters.line, filters.stack_no]);
+
+  const filterableColumns = useMemo(
+    () => columns.filter(c => c.key && !c.formula),
+    [columns]
+  );
+
+  const rowsAfterSearch = useMemo(() => {
+    let list = afterSidebar;
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter(row =>
+        filterableColumns.some((col) => {
+          const s = manualCellFilterValue(row, col);
+          const str = s != null && s !== '' ? String(s) : '';
+          return str.toLowerCase().includes(q);
+        })
+      );
+    }
+    return list;
+  }, [afterSidebar, filterableColumns, searchQuery]);
+
+  /** Column filters only; skip `excludeColumnKey` so its dropdown lists values allowed by other filters (cascading). */
+  const rowMatchesColumnFiltersExcept = useCallback((row, excludeColumnKey) =>
+    filterableColumns.every((col) => {
+      if (col.key === excludeColumnKey) return true;
+      const selected = columnFilters[col.key];
+      if (!selected) return true;
+      const s = manualCellFilterValue(row, col);
+      const str = s != null && s !== '' ? String(s) : '(Blank)';
+      return selected.has(str);
+    }),
+  [filterableColumns, columnFilters]);
+
+  const filteredRows = useMemo(
+    () => rowsAfterSearch.filter(row => rowMatchesColumnFiltersExcept(row, null)),
+    [rowsAfterSearch, rowMatchesColumnFiltersExcept]
+  );
+
+  const allColumnValues = useMemo(() => {
+    const map = {};
+    filterableColumns.forEach((col) => {
+      const subset = rowsAfterSearch.filter(row => rowMatchesColumnFiltersExcept(row, col.key));
+      map[col.key] = subset.map(r => manualCellFilterValue(r, col));
+    });
+    return map;
+  }, [filterableColumns, rowsAfterSearch, rowMatchesColumnFiltersExcept]);
+
+  const applyColumnFilter = (key, selected) => {
+    const allVals = new Set((allColumnValues[key] || []).map(v => v != null ? v : '(Blank)'));
+    if (selected.size === allVals.size) {
+      setColumnFilters(prev => { const next = { ...prev }; delete next[key]; return next; });
+    } else {
+      setColumnFilters(prev => ({ ...prev, [key]: selected }));
+    }
+  };
+
+  const clearColumnFilter = (key) => {
+    setColumnFilters(prev => { const next = { ...prev }; delete next[key]; return next; });
+  };
+
+  const handleClearAllFilters = () => {
+    setColumnFilters({});
+    setSearchQuery('');
+  };
+
+  const activeFilterCount = Object.keys(columnFilters).length;
+
+  useEffect(() => {
+    setWindowStart(0);
+  }, [searchQuery, columnFilters, afterSidebar.length]);
 
   const useWindow = filteredRows.length > ROW_WINDOW_SIZE;
   const displayRows = useMemo(() => {
@@ -251,13 +458,17 @@ function Manual() {
           ? toDateOnly(orig[col.key])
           : col.type === 'month_year'
             ? parseMonthYearInput(orig[col.key])
-            : String(orig[col.key] ?? ''))
+            : col.field === 'lot_no_numeric'
+              ? normLotNoNumeric(orig[col.key])
+              : String(orig[col.key] ?? ''))
       : '';
     const normNew = col.type === 'date'
       ? toDateOnly(newVal)
       : col.type === 'month_year'
         ? parseMonthYearInput(newVal)
-        : String(newVal ?? '');
+        : col.field === 'lot_no_numeric'
+          ? normLotNoNumeric(newVal)
+          : String(newVal ?? '');
     const editKey = `${rowKey}-${col.field}`;
     setRows(prev => prev.map((r, i) => i !== rowIdx ? r : { ...r, [col.key]: normNew }));
     setPendingEditsMap(prev => {
@@ -299,16 +510,64 @@ function Manual() {
     toast.info('Changes discarded');
   };
 
-  // ─── Row Operations ──────────────────────────────────────────────────
-  const handleAddRow = async () => {
+  // ─── Draft row (staging) + Row Operations ────────────────────────────
+  const handleDraftFieldChange = (col, rawVal) => {
+    setDraftRow(prev => {
+      if (!prev) return prev;
+      let v = rawVal;
+      if (col.type === 'date') v = toDateOnly(rawVal);
+      else if (col.type === 'month_year') v = parseMonthYearInput(rawVal);
+      else if (col.field === 'lot_no_numeric') v = normLotNoNumeric(rawVal);
+      else if (col.type === 'number') v = String(rawVal ?? '');
+      else v = String(rawVal ?? '');
+      return { ...prev, [col.key]: v };
+    });
+  };
+
+  const handleCancelDraft = () => {
+    setDraftRow(null);
+    toast.info('New row cancelled');
+  };
+
+  const handleCommitDraft = async () => {
+    if (!draftRow) return;
+    if (isDirty) {
+      toast.warning('Save or discard edits on other rows before adding this row to the table.');
+      return;
+    }
+    if (!draftRow.fish_name?.trim()) {
+      toast.warning('Enter a Fish Name before adding the row.');
+      return;
+    }
+    if (!draftRow.line_place?.trim()) {
+      toast.warning('Enter Line / Place (e.g. B01R-1) so the row can be placed in the sorted list.');
+      return;
+    }
+    setDraftSaving(true);
     try {
-      const res = await manualAddRow({ stock_type: activeTab });
-      if (res.data.row) {
-        setRows(prev => [...prev, res.data.row]);
-        setOriginalRows(prev => [...prev, { ...res.data.row }]);
-        toast.success('New row added');
+      const initial = buildInitialFromDraft(activeTab, draftRow);
+      const res = await manualAddRow({ stock_type: activeTab, initial });
+      setDraftRow(null);
+      if (res.data?.row) {
+        toast.success('Row added — it appears in the list sorted by Line / Place.');
+      } else {
+        toast.success('Row added.');
       }
-    } catch { toast.error('Failed to add row'); }
+      await loadData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to add row');
+    } finally {
+      setDraftSaving(false);
+    }
+  };
+
+  const handleAddRow = () => {
+    if (draftRow) {
+      toast.info('Finish or cancel the new row at the top first.');
+      return;
+    }
+    setDraftRow(buildEmptyDraft(activeTab));
+    setSelectedCell(null);
   };
 
   const handleDeleteRow = async (rowIdx) => {
@@ -325,6 +584,10 @@ function Manual() {
   };
 
   const handleDuplicateRow = async (rowIdx) => {
+    if (draftRow) {
+      toast.info('Finish or cancel the new row at the top first.');
+      return;
+    }
     const src = filteredRows[rowIdx];
     if (!src) return;
     try {
@@ -338,6 +601,7 @@ function Manual() {
         // backend manual row creation still requires cs_in_date
         cs_in_date: toDateOnly(src.cs_in_date || src.production_date),
         sticker: src.sticker,
+        lot_no_numeric: src.lot_no_numeric,
         remark: src.remark,
         hand_on_balance_mc: src.hand_on_balance_mc,
         line_place: `${src.line_place}-CPY`, stack_no: src.stack_no, stack_total: src.stack_total,
@@ -368,12 +632,16 @@ function Manual() {
           ? toDateOnly(origRow[col.key])
           : col.type === 'month_year'
             ? parseMonthYearInput(origRow[col.key])
-            : String(origRow[col.key] ?? '');
+            : col.field === 'lot_no_numeric'
+              ? normLotNoNumeric(origRow[col.key])
+              : String(origRow[col.key] ?? '');
         const reverted = col.type === 'date'
           ? toDateOnly(action.oldValue)
           : col.type === 'month_year'
             ? parseMonthYearInput(action.oldValue)
-            : String(action.oldValue ?? '');
+            : col.field === 'lot_no_numeric'
+              ? normLotNoNumeric(action.oldValue)
+              : String(action.oldValue ?? '');
         setPendingEditsMap(prev => {
           const next = { ...prev };
           if (reverted === origVal) delete next[editKey]; else next[editKey] = { lot_id: origRow.lot_id, location_id: origRow.location_id, field: col.field, value: reverted };
@@ -398,10 +666,13 @@ function Manual() {
     const onMove = (me) => {
       if (!dragRef.current || !tableRef.current) return;
       const trs = Array.from(tableRef.current.querySelectorAll('tbody tr'));
+      const offset = draftRowRef.current ? 1 : 0;
       for (let i = 0; i < trs.length; i++) {
         const rect = trs[i].getBoundingClientRect();
         if (me.clientY >= rect.top && me.clientY <= rect.bottom) {
-          dragRef.current.targetRowIdx = windowStartRef.current + i;
+          const vi = i - offset;
+          if (vi < 0) continue;
+          dragRef.current.targetRowIdx = windowStartRef.current + vi;
           setDragTarget(i);
           return;
         }
@@ -423,6 +694,7 @@ function Manual() {
       const col = columnsRef.current.find(c => c.key === cKey);
       if (!col || !col.editable) return;
 
+      const fillVal = col.field === 'lot_no_numeric' ? normLotNoNumeric(val) : val;
       const editsToAdd = {};
       for (let i = startI; i <= endI; i++) {
         if (i === sIdx) continue;
@@ -430,9 +702,9 @@ function Manual() {
         if (!r) continue;
         const key = rk(r);
         const oldVal = r[cKey];
-        setRows(prev => prev.map(row => rk(row) === key ? { ...row, [cKey]: val } : row));
-        setUndoStack(prev => [...prev, { type: 'edit', rowKey: key, colKey: cKey, oldValue: oldVal, newValue: val }]);
-        if (col?.field) editsToAdd[`${key}-${col.field}`] = { lot_id: r.lot_id, location_id: r.location_id, field: col.field, value: val };
+        setRows(prev => prev.map(row => rk(row) === key ? { ...row, [cKey]: fillVal } : row));
+        setUndoStack(prev => [...prev, { type: 'edit', rowKey: key, colKey: cKey, oldValue: oldVal, newValue: fillVal }]);
+        if (col?.field) editsToAdd[`${key}-${col.field}`] = { lot_id: r.lot_id, location_id: r.location_id, field: col.field, value: fillVal };
       }
       if (Object.keys(editsToAdd).length > 0) setPendingEditsMap(prev => ({ ...prev, ...editsToAdd }));
     };
@@ -461,6 +733,10 @@ function Manual() {
 
   const handlePaste = async () => {
     if (!copiedRow) return;
+    if (draftRow) {
+      toast.info('Finish or cancel the new row at the top first.');
+      return;
+    }
     try {
       const src = copiedRow;
       const isImportTab = activeTab === 'IMPORT';
@@ -475,6 +751,7 @@ function Manual() {
           // backend manual row creation still requires cs_in_date
           cs_in_date: toDateOnly(isImportTab ? src.cs_in_date : src.production_date),
           sticker: src.sticker,
+          lot_no_numeric: src.lot_no_numeric,
           remark: src.remark,
           hand_on_balance_mc: src.hand_on_balance_mc,
           line_place: `${src.line_place}-CPY`, stack_no: src.stack_no, stack_total: src.stack_total,
@@ -566,10 +843,39 @@ function Manual() {
             <div className="form-group manual-search-actions">
               <button type="submit" className="btn btn-primary"><FiSearch /> Search</button>
               <button type="button" className="btn btn-outline"
-                onClick={() => setFilters({ fish_name: '', line: '', line_detail: '', stack_no: '' })}>Clear</button>
+                onClick={() => {
+                  setFilters({ fish_name: '', line: '', line_detail: '', stack_no: '' });
+                  setColumnFilters({});
+                  setSearchQuery('');
+                }}>Clear</button>
             </div>
           </div>
         </form>
+
+        <div className="filter-bar no-print" style={{ marginBottom: 12 }}>
+          <div className="filter-bar-search-single">
+            <FiSearch className="filter-bar-search-icon" />
+            <input
+              type="text"
+              className="form-control"
+              placeholder="Search all columns (same as Stock Summary)..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {(activeFilterCount > 0 || searchQuery.trim()) && (
+          <div className="gs-active-filters-bar" style={{ marginBottom: 12 }}>
+            {activeFilterCount > 0 && (
+              <span>{activeFilterCount} column filter{activeFilterCount > 1 ? 's' : ''} active</span>
+            )}
+            <span className="gs-filtered-count">{filteredRows.length} of {afterSidebar.length} rows</span>
+            <button type="button" className="btn btn-outline btn-sm" onClick={handleClearAllFilters}>
+              <FiX /> Clear table filters
+            </button>
+          </div>
+        )}
 
         <div className="dashboard-grid" style={{ marginBottom: 12 }}>
           <div className="stat-card"><div className="stat-info"><h4>Total MC</h4><div className="stat-value" style={{ fontSize: '1.3rem' }}>{totalMC.toLocaleString()}</div></div></div>
@@ -578,7 +884,7 @@ function Manual() {
         </div>
 
         <div className="ms-hint">
-          Click any cell to edit · <b>Ctrl+S</b> Save · <b>Ctrl+Z</b> Undo · <b>Ctrl+C</b> Copy row · <b>Ctrl+V</b> Paste · Drag blue handle to fill down
+          <b>Add Row</b> opens a highlighted row at the top — confirm to insert (sorted by Line / Place). · Click any cell to edit · <b>Ctrl+S</b> Save · <b>Ctrl+Z</b> Undo · <b>Ctrl+C</b> Copy row · <b>Ctrl+V</b> Paste · Drag blue handle to fill down
           {rows.length >= MANUAL_FETCH_LIMIT && (
             <span className="ms-hint-limit"> · Showing up to {MANUAL_FETCH_LIMIT} rows (use Search to narrow)</span>
           )}
@@ -600,17 +906,96 @@ function Manual() {
             <thead>
               <tr>
                 <th className="ms-th-num">#</th>
-                {columns.map(col => (
-                  <th key={col.key} style={{ minWidth: col.w, ...(col.headerStyle || {}) }}>
-                    {col.label}
-                    {col.formula && <span className="ms-fx"> ƒ</span>}
-                  </th>
-                ))}
+                {columns.map(col => {
+                  const isFilterable = filterableColumns.some(c => c.key === col.key);
+                  if (!isFilterable) {
+                    return (
+                      <th key={col.key} style={{ minWidth: col.w, ...(col.headerStyle || {}) }}>
+                        {col.label}
+                        {col.formula && <span className="ms-fx"> ƒ</span>}
+                      </th>
+                    );
+                  }
+                  const allVals = allColumnValues[col.key] || [];
+                  const allUnique = [...new Set(allVals.map(v => v != null ? v : '(Blank)'))];
+                  const currentSelected = columnFilters[col.key] || new Set(allUnique);
+                  return (
+                    <th key={col.key} style={{ minWidth: col.w, ...(col.headerStyle || {}) }}>
+                      <div className="gs-th-inner">
+                        <span>{col.label}</span>
+                        <ColumnFilterDropdown
+                          allValues={allVals}
+                          selected={currentSelected}
+                          onApply={(sel) => applyColumnFilter(col.key, sel)}
+                          onClear={() => clearColumnFilter(col.key)}
+                        />
+                      </div>
+                    </th>
+                  );
+                })}
                 <th className="ms-th-act"></th>
               </tr>
             </thead>
             <tbody>
-              {displayRows.length === 0 ? (
+              {draftRow && (
+                <tr key="__draft__" className="ms-draft-row">
+                  <td className="ms-num ms-draft-num">
+                    <span className="ms-draft-badge">New</span>
+                    <span className="ms-draft-sub">Staging</span>
+                  </td>
+                  {columns.map(col => {
+                    if (!col.editable) {
+                      if (col.formula) {
+                        const kg = (Number(draftRow.bulk_weight_kg) || 0) * (Number(draftRow.hand_on_balance_mc) || 0);
+                        return (
+                          <td key={col.key} className="ms-cell ms-cell-ro ms-draft-cell">
+                            {kg.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          </td>
+                        );
+                      }
+                      return (
+                        <td key={col.key} className="ms-cell ms-cell-ro ms-draft-cell">—</td>
+                      );
+                    }
+                    const valNormalized = col.type === 'date'
+                      ? toDateOnly(draftRow[col.key])
+                      : col.type === 'month_year'
+                        ? parseMonthYearInput(draftRow[col.key])
+                        : col.field === 'lot_no_numeric'
+                          ? normLotNoNumeric(draftRow[col.key])
+                          : (draftRow[col.key] ?? '');
+                    const inputDisplayVal = col.type === 'month_year'
+                      ? toMonthYearDisplay(draftRow[col.key])
+                      : col.field === 'lot_no_numeric'
+                        ? normLotNoNumeric(draftRow[col.key])
+                        : valNormalized;
+                    return (
+                      <td key={col.key} className="ms-cell ms-cell-ed ms-draft-cell">
+                        <input
+                          className={`ms-input ${col.type === 'number' || col.field === 'lot_no_numeric' ? 'ms-input-num' : ''}`}
+                          type={col.type === 'month_year' ? 'text' : col.type === 'date' ? 'date' : col.type === 'number' ? 'number' : 'text'}
+                          inputMode={col.field === 'lot_no_numeric' ? 'numeric' : undefined}
+                          value={inputDisplayVal}
+                          onChange={e => handleDraftFieldChange(col, e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Tab' || e.key === 'Enter') e.currentTarget.blur();
+                          }}
+                          placeholder={col.key === 'line_place' ? 'e.g. B01R-1' : undefined}
+                        />
+                      </td>
+                    );
+                  })}
+                  <td className="ms-act ms-draft-act">
+                    <button type="button" className="ms-draft-confirm" onClick={handleCommitDraft} disabled={draftSaving} title="Create row and place in sorted list">
+                      <FiCheck size={16} /> {draftSaving ? 'Adding…' : 'Add to table'}
+                    </button>
+                    <button type="button" className="ms-draft-cancel" onClick={handleCancelDraft} disabled={draftSaving}>
+                      Cancel
+                    </button>
+                  </td>
+                </tr>
+              )}
+              {displayRows.length === 0 && !draftRow ? (
                 <tr><td colSpan={columns.length + 2} style={{ textAlign: 'center', padding: 60, color: '#999' }}>
                   No data. Click "Add Row" or upload via Excel Upload.
                 </td></tr>
@@ -640,21 +1025,30 @@ function Manual() {
                         ? toDateOnly(row[col.key])
                         : col.type === 'month_year'
                           ? parseMonthYearInput(row[col.key])
-                          : (row[col.key] ?? '');
+                          : col.field === 'lot_no_numeric'
+                            ? normLotNoNumeric(row[col.key])
+                            : (row[col.key] ?? '');
                       const origValNormalized = orig
                         ? (col.type === 'date'
                             ? toDateOnly(orig[col.key])
                             : col.type === 'month_year'
                               ? parseMonthYearInput(orig[col.key])
-                              : String(orig[col.key] ?? ''))
+                              : col.field === 'lot_no_numeric'
+                                ? normLotNoNumeric(orig[col.key])
+                                : String(orig[col.key] ?? ''))
                         : valNormalized;
                       const isChanged = String(valNormalized) !== String(origValNormalized);
-                      const inputDisplayVal = col.type === 'month_year' ? toMonthYearDisplay(row[col.key]) : valNormalized;
+                      const inputDisplayVal = col.type === 'month_year'
+                        ? toMonthYearDisplay(row[col.key])
+                        : col.field === 'lot_no_numeric'
+                          ? normLotNoNumeric(row[col.key])
+                          : valNormalized;
                       return (
                         <td key={col.key} className={`ms-cell ms-cell-ed ${isActive ? 'ms-cell-active' : ''} ${isChanged ? 'ms-cell-dirty' : ''}`}>
                           <input
-                            className={`ms-input ${col.type === 'number' ? 'ms-input-num' : ''}`}
+                            className={`ms-input ${col.type === 'number' || col.field === 'lot_no_numeric' ? 'ms-input-num' : ''}`}
                             type={col.type === 'month_year' ? 'text' : col.type === 'date' ? 'date' : col.type === 'number' ? 'number' : 'text'}
+                            inputMode={col.field === 'lot_no_numeric' ? 'numeric' : undefined}
                             value={inputDisplayVal}
                             onChange={e => handleCellChange(fullIdx, col, e.target.value)}
                             onKeyDown={e => {

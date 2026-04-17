@@ -20,7 +20,7 @@ function StockChart() {
 
   const fetchInventory = async () => {
     try {
-      const res = await getInventory(filters);
+      const res = await getInventory({ ...filters, merge_import_shipments: '1' });
       setInventory(res.data);
     } catch (err) {
       toast.error('Failed to load inventory');

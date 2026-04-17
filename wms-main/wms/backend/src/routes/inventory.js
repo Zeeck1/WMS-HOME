@@ -14,6 +14,7 @@ async function fetchImportShipmentRows(filters = {}) {
       ii.wet_mc AS bulk_weight_kg,
       s.inv_no AS order_code,
       s.inv_no AS lot_no,
+      NULL AS lot_no_numeric,
       s.eta AS cs_in_date,
       s.production_date,
       s.expiry_date AS expiration_date,
@@ -67,7 +68,15 @@ router.get('/', async (req, res) => {
 
     const [rows] = await pool.query(sql, params);
 
-    if (!stock_type || stock_type === 'IMPORT') {
+    // Import-shipment rows (Excel import_items): only merge when explicitly requesting IMPORT,
+    // or when ?merge_import_shipments=1 (e.g. layout / charts that need all sources).
+    // Do NOT merge when stock_type is BULK or CONTAINER_EXTRA — avoids wrong data on those tabs.
+    const stUpper = String(stock_type || '').toUpperCase();
+    const mergeImportShipments =
+      stUpper === 'IMPORT' ||
+      ['1', 'true', 'yes'].includes(String(req.query.merge_import_shipments || '').toLowerCase());
+
+    if (mergeImportShipments) {
       try {
         const impRows = await fetchImportShipmentRows({ fish_name, location });
         rows.push(...impRows);

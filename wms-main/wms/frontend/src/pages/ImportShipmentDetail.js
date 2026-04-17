@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   FiArrowLeft, FiSave, FiPlus, FiTrash2, FiPackage, FiDollarSign,
   FiTruck, FiEdit2, FiDownload
@@ -71,6 +71,15 @@ const EMPTY_EXPENSE = { expense_name: '', total_baht: '', amount_usd_kgs: '', am
 function ImportShipmentDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const handleImportBack = () => {
+    if (location.state?.from === 'stock-summary') {
+      navigate('/stock-table', { state: { stockSummaryTab: 'IMPORT' } });
+    } else {
+      navigate('/imports');
+    }
+  };
   const isNew = !id || id === 'new';
 
   const [loading, setLoading] = useState(!isNew);
@@ -202,6 +211,26 @@ function ImportShipmentDetail() {
   useEffect(() => { if (anyLinesData) setShowLinesCol(true); }, [anyLinesData]);
   const hasLines = showLinesCol || anyLinesData;
 
+  /** Optional note included at bottom of Stock Items PDF only (browser localStorage per shipment). */
+  const [stockPdfRemark, setStockPdfRemark] = useState('');
+  useEffect(() => {
+    if (!id || isNew) {
+      setStockPdfRemark('');
+      return;
+    }
+    try {
+      setStockPdfRemark(localStorage.getItem(`importStockPdfRemark:${id}`) ?? '');
+    } catch {
+      setStockPdfRemark('');
+    }
+  }, [id, isNew]);
+  const persistStockPdfRemark = () => {
+    if (!id || isNew) return;
+    try {
+      localStorage.setItem(`importStockPdfRemark:${id}`, stockPdfRemark);
+    } catch { /* ignore */ }
+  };
+
   // Save
   const handleSave = async () => {
     if (!shipment.inv_no.trim()) return toast.warning('INV NO is required');
@@ -328,64 +357,387 @@ function ImportShipmentDetail() {
     XLSX.writeFile(wb, `Import_Stock_${invLabel}_${dateStr()}.xlsx`);
   };
 
-  const exportStockItemsPDF = async () => {
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    await registerThaiFont(pdf);
+  /** Renders header + meta + stock table + remark on `pdf` (landscape). Caller must create doc and register fonts. */
+  const renderStockItemsPdfContent = async (pdf) => {
     const fontOpts = { font: 'Sarabun' };
 
-    pdf.setFontSize(14);
-    pdf.text(`STOCK — ${invLabel}`, 14, 15);
-    pdf.setFontSize(9);
-    pdf.text(`INV NO: ${shipment.inv_no}  |  FROM: ${shipment.origin_country}  |  Container: ${shipment.container_no}/${shipment.seal_no}  |  ETA: ${shipment.eta}`, 14, 22);
+    const margin = 10;
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const contentW = pageW - 2 * margin;
 
-    const pdfHead = ['No.', 'ITEM', 'SIZE'];
-    if (hasLines) pdfHead.push('LINES');
-    pdfHead.push('PACK', 'WET/MC', 'INV MC', 'INV N/W', 'FAC MC', 'FAC N/W', 'BAL MC', 'BAL N/W', 'REMARK', 'PRICE');
+    const PDF_MAIN_TITLE = 'Stock - CK TH (Chachoengsao)';
+    const titleGreen = [5, 150, 105];
+    const slate900 = [15, 23, 42];
+    const slate500 = [100, 116, 139];
+    const slate200 = [226, 232, 240];
+    const slate50 = [248, 250, 252];
+
+    let y = margin;
+    pdf.setTextColor(...titleGreen);
+    pdf.setFont('Sarabun', 'bold');
+    pdf.setFontSize(14);
+    pdf.text(PDF_MAIN_TITLE, pageW / 2, y + 5, { align: 'center' });
+    y += 10;
+
+    const metaPad = 4;
+    const metaRowH = 12;
+    const metaBoxH = metaPad * 2 + metaRowH * 2 + 1;
+    pdf.setDrawColor(...slate200);
+    pdf.setLineWidth(0.2);
+    pdf.setFillColor(...slate50);
+    pdf.roundedRect(margin, y, contentW, metaBoxH, 2.5, 2.5, 'FD');
+
+    const drawMetaLabelValue = (x, rowY, cellW, label, value) => {
+      const display = (value && String(value).trim()) ? String(value) : '—';
+      pdf.setFont('Sarabun', 'normal');
+      pdf.setFontSize(6.2);
+      pdf.setTextColor(...slate500);
+      pdf.text(label, x + 3, rowY + 4);
+      pdf.setFont('Sarabun', 'bold');
+      pdf.setFontSize(8);
+      pdf.setTextColor(...slate900);
+      const lines = pdf.splitTextToSize(display, cellW - 6);
+      let ly = rowY + 8.5;
+      lines.forEach((ln) => {
+        pdf.text(ln, x + 3, ly);
+        ly += 3.6;
+      });
+    };
+
+    const col4 = contentW / 4;
+    const col3 = contentW / 3;
+    const r1 = y + metaPad;
+    const r2 = r1 + metaRowH;
+    drawMetaLabelValue(margin, r1, col4, 'INV NO', shipment.inv_no);
+    drawMetaLabelValue(margin + col4, r1, col4, 'CONTAINER NO', shipment.container_no);
+    drawMetaLabelValue(margin + col4 * 2, r1, col4, 'SEAL NO', shipment.seal_no);
+    drawMetaLabelValue(margin + col4 * 3, r1, col4, 'ETA', fmtDate(shipment.eta));
+    drawMetaLabelValue(margin, r2, col3, 'FROM', shipment.origin_country);
+    drawMetaLabelValue(margin + col3, r2, col3, 'PRODUCTION DATE', fmtDate(shipment.production_date));
+    drawMetaLabelValue(margin + col3 * 2, r2, col3, 'EXPIRY DATE', fmtDate(shipment.expiry_date));
+
+    pdf.setDrawColor(...slate200);
+    pdf.setLineWidth(0.12);
+    const metaBottom = y + metaBoxH;
+    for (let c = 1; c <= 3; c += 1) {
+      pdf.line(margin + col4 * c, y + 2, margin + col4 * c, r2 - 1.5);
+    }
+    for (let c = 1; c <= 2; c += 1) {
+      pdf.line(margin + col3 * c, r2 + 1, margin + col3 * c, metaBottom - 2);
+    }
+    pdf.line(margin + 2, r2 - 1, margin + contentW - 2, r2 - 1);
+
+    y += metaBoxH + 7;
+    pdf.setTextColor(...slate900);
+
+    const hPurple = {
+      fillColor: [79, 70, 229],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      halign: 'center',
+      valign: 'middle',
+    };
+    const hInv = { fillColor: [219, 234, 254], textColor: [30, 64, 175], fontStyle: 'bold', halign: 'center', valign: 'middle', fontSize: 6.5 };
+    const hFac = { fillColor: [209, 250, 229], textColor: [4, 120, 87], fontStyle: 'bold', halign: 'center', valign: 'middle', fontSize: 6.5 };
+    const hBal = { fillColor: [254, 226, 226], textColor: [185, 28, 28], fontStyle: 'bold', halign: 'center', valign: 'middle', fontSize: 6.5 };
+
+    const baseCols = hasLines ? 6 : 5;
+    const headRow0 = [
+      { content: 'No.', rowSpan: 2, styles: hPurple },
+      { content: 'ITEM', rowSpan: 2, styles: { ...hPurple, halign: 'left' } },
+      { content: 'SIZE', rowSpan: 2, styles: { ...hPurple, halign: 'left' } },
+    ];
+    if (hasLines) headRow0.push({ content: 'LINES', rowSpan: 2, styles: { ...hPurple, halign: 'left' } });
+    headRow0.push(
+      { content: 'PACK', rowSpan: 2, styles: { ...hPurple, halign: 'left' } },
+      { content: 'WET/MC', rowSpan: 2, styles: hPurple },
+      { content: 'TOTAL FROM INV.', colSpan: 2, styles: hInv },
+      { content: 'TOTAL FACTORY REC.', colSpan: 2, styles: hFac },
+      { content: 'BALANCE STOCK', colSpan: 2, styles: hBal },
+      { content: 'REMARK', rowSpan: 2, styles: { ...hPurple, halign: 'left' } },
+      { content: 'UNIT PRICE', rowSpan: 2, styles: hPurple }
+    );
+
+    const headRow1 = [
+      { content: 'MC', styles: hInv },
+      { content: 'N/W QTY (KGS)', styles: hInv },
+      { content: 'MC', styles: hFac },
+      { content: 'N/W QTY (KGS)', styles: hFac },
+      { content: 'MC', styles: hBal },
+      { content: 'N/W QTY (KGS)', styles: hBal },
+    ];
+
     const body = items.filter(it => it.item_name).map((it, i) => {
       const bal = getBalanceForItem(it);
-      const row = [i + 1, it.item_name, it.size];
+      const row = [String(i + 1), it.item_name || '', it.size || ''];
       if (hasLines) row.push(it.lines || '');
-      row.push(it.pack, num(it.wet_mc), num(it.inv_mc), num(it.inv_nw_kgs).toFixed(2), num(it.factory_mc), num(it.factory_nw_kgs).toFixed(2), bal.mc, bal.nw.toFixed(2), it.remark, num(it.unit_price));
+      row.push(
+        it.pack || '',
+        num(it.wet_mc).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        String(num(it.inv_mc)),
+        num(it.inv_nw_kgs).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        String(num(it.factory_mc)),
+        num(it.factory_nw_kgs).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        String(bal.mc),
+        bal.nw.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        it.remark || '',
+        num(it.unit_price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      );
       return row;
     });
-    const totalPdfRow = ['', 'TOTAL', ''];
-    if (hasLines) totalPdfRow.push('');
-    totalPdfRow.push('', '', totals.inv_mc, totals.inv_nw.toFixed(2), totals.fac_mc, totals.fac_nw.toFixed(2), totals.bal_mc, totals.bal_nw.toFixed(2), '', '');
-    body.push(totalPdfRow);
+
+    const foot = [[
+      {
+        content: 'TOTAL',
+        colSpan: baseCols,
+        styles: {
+          fontStyle: 'bold',
+          halign: 'right',
+          fillColor: [248, 250, 252],
+          textColor: [15, 23, 42],
+        },
+      },
+      String(totals.inv_mc),
+      totals.inv_nw.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      String(totals.fac_mc),
+      totals.fac_nw.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      String(totals.bal_mc),
+      totals.bal_nw.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      '',
+      '',
+    ]];
+
+    const invBg = [239, 246, 255];
+    const facBg = [236, 253, 245];
+    const balBg = [254, 242, 242];
 
     autoTable(pdf, {
-      startY: 26,
-      head: [pdfHead],
+      startY: y,
+      head: [headRow0, headRow1],
       body,
-      styles: { fontSize: 7, cellPadding: 1.5, ...fontOpts },
-      headStyles: { fillColor: [79, 70, 229], ...fontOpts }
+      foot,
+      theme: 'grid',
+      styles: {
+        fontSize: 6.8,
+        cellPadding: { top: 1.4, bottom: 1.4, left: 1.6, right: 1.6 },
+        lineColor: [226, 232, 240],
+        lineWidth: 0.1,
+        textColor: [15, 23, 42],
+        ...fontOpts,
+      },
+      headStyles: { fontStyle: 'bold', ...fontOpts },
+      footStyles: {
+        fontStyle: 'bold',
+        fillColor: [241, 245, 249],
+        textColor: [15, 23, 42],
+        ...fontOpts,
+      },
+      showHead: 'everyPage',
+      showFoot: 'lastPage',
+      horizontalPageBreak: true,
+      margin: { left: margin, right: margin },
+      didParseCell: (data) => {
+        data.cell.styles.font = 'Sarabun';
+        if (data.section === 'head') return;
+        const ci = data.column.index;
+        const remarkCol = baseCols + 6;
+        const priceCol = baseCols + 7;
+        const packCol = hasLines ? 4 : 3;
+        const wetCol = hasLines ? 5 : 4;
+        if (data.section === 'body' || data.section === 'foot') {
+          if (ci >= baseCols && ci <= baseCols + 1) data.cell.styles.fillColor = invBg;
+          else if (ci >= baseCols + 2 && ci <= baseCols + 3) data.cell.styles.fillColor = facBg;
+          else if (ci >= baseCols + 4 && ci <= baseCols + 5) data.cell.styles.fillColor = balBg;
+
+          if (ci === 0) data.cell.styles.halign = 'center';
+          else if (ci === 1 || ci === 2 || (hasLines && ci === 3) || ci === packCol || ci === remarkCol) data.cell.styles.halign = 'left';
+          else if (ci === wetCol || (ci >= baseCols && ci <= baseCols + 5) || ci === priceCol) data.cell.styles.halign = 'right';
+          else data.cell.styles.halign = 'left';
+
+          if (ci >= baseCols && ci <= baseCols + 5 && data.section === 'foot') data.cell.styles.fontStyle = 'bold';
+        }
+      },
     });
 
-    pdf.addPage();
-    pdf.setFontSize(12);
-    pdf.text('EXPENSES — SHIPPING IMPORT', 14, 15);
-    pdf.setFontSize(9);
-    pdf.text(`INV NO: ${shipment.inv_no}  |  Container: ${shipment.container_no}  |  Seal: ${shipment.seal_no}  |  From: ${shipment.origin_country}`, 14, 22);
+    const remarkText = (stockPdfRemark || '').trim();
+    if (remarkText) {
+      let ry = (pdf.lastAutoTable?.finalY || y) + 8;
+      pdf.setFont('Sarabun', 'bold');
+      pdf.setFontSize(9);
+      pdf.setTextColor(15, 23, 42);
+      pdf.text('Remark', margin, ry);
+      ry += 5;
+      pdf.setFont('Sarabun', 'normal');
+      pdf.setFontSize(8);
+      const lines = pdf.splitTextToSize(remarkText, contentW);
+      const lineH = 4;
+      lines.forEach((line) => {
+        if (ry > pageH - margin - 8) {
+          pdf.addPage();
+          ry = margin + 6;
+        }
+        pdf.text(line, margin, ry);
+        ry += lineH;
+      });
+    }
+  };
 
-    const expBody = expenses.filter(e => e.expense_name).map((e, i) => {
+  /** Portrait appendix: expenses table + totals (matches Expenses tab data). */
+  const renderExpensesAppendixPdf = (pdf) => {
+    pdf.addPage('a4', 'portrait');
+    const fontOpts = { font: 'Sarabun' };
+    const margin = 14;
+    const pageW = pdf.internal.pageSize.getWidth();
+    const contentW = pageW - 2 * margin;
+
+    const PDF_MAIN_TITLE = 'Stock - CK TH (Chachoengsao)';
+    const titleGreen = [5, 150, 105];
+    const emerald = [16, 185, 129];
+    const slate900 = [15, 23, 42];
+    const slate500 = [100, 116, 139];
+    const slate200 = [226, 232, 240];
+    const slate50 = [248, 250, 252];
+
+    let y = margin;
+    const barH = 11;
+    pdf.setFillColor(...emerald);
+    pdf.roundedRect(margin, y, contentW, barH, 2, 2, 'F');
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont('Sarabun', 'bold');
+    pdf.setFontSize(12.5);
+    pdf.text('EXPENSES — SHIPPING IMPORT', pageW / 2, y + 7.5, { align: 'center' });
+    y += barH + 4;
+    pdf.setFont('Sarabun', 'bold');
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(...titleGreen);
+    pdf.text(PDF_MAIN_TITLE, pageW / 2, y, { align: 'center' });
+    y += 6;
+
+    const metaPad = 3;
+    const metaRowH = 11;
+    const metaBoxH = metaPad * 2 + metaRowH * 2 + 1;
+    pdf.setDrawColor(...slate200);
+    pdf.setLineWidth(0.2);
+    pdf.setFillColor(...slate50);
+    pdf.roundedRect(margin, y, contentW, metaBoxH, 2.5, 2.5, 'FD');
+
+    const drawField = (x, rowY, cellW, label, value) => {
+      const display = (value !== undefined && value !== null && String(value).trim() !== '') ? String(value) : '—';
+      pdf.setFont('Sarabun', 'normal');
+      pdf.setFontSize(6);
+      pdf.setTextColor(...slate500);
+      pdf.text(label, x + 3, rowY + 4);
+      pdf.setFont('Sarabun', 'bold');
+      pdf.setFontSize(8);
+      pdf.setTextColor(...slate900);
+      const lines = pdf.splitTextToSize(display, cellW - 6);
+      let ly = rowY + 8;
+      lines.forEach((ln) => {
+        pdf.text(ln, x + 3, ly);
+        ly += 3.5;
+      });
+    };
+
+    const col4 = contentW / 4;
+    const col2 = contentW / 2;
+    const r1 = y + metaPad;
+    const r2 = r1 + metaRowH;
+    drawField(margin, r1, col4, 'INV NO', shipment.inv_no);
+    drawField(margin + col4, r1, col4, 'CONTAINER NO', shipment.container_no);
+    drawField(margin + col4 * 2, r1, col4, 'SEAL NO', shipment.seal_no);
+    drawField(margin + col4 * 3, r1, col4, 'ETA', fmtDate(shipment.eta));
+    drawField(margin, r2, col2, 'FROM', shipment.origin_country);
+    drawField(margin + col2, r2, col2, 'TOTAL NET WEIGHT (KGS)', totalNetWeight > 0 ? totalNetWeight.toFixed(2) : '—');
+
+    const metaBottom = y + metaBoxH;
+    pdf.setDrawColor(...slate200);
+    pdf.setLineWidth(0.12);
+    for (let c = 1; c <= 3; c += 1) {
+      pdf.line(margin + col4 * c, y + 2, margin + col4 * c, r2 - 1.5);
+    }
+    pdf.line(margin + col2, r2 + 1, margin + col2, metaBottom - 2);
+    pdf.line(margin + 2, r2 - 1, margin + contentW - 2, r2 - 1);
+
+    y += metaBoxH + 8;
+    pdf.setTextColor(...slate900);
+
+    const dataRows = expenses.filter(e => e.expense_name).map((e, i) => {
       const val = evalFormula(e.amount_usd_kgs_expr || e.amount_usd_kgs);
-      return [i + 1, e.expense_name, num(e.total_baht).toFixed(2), (isNaN(val) ? 0 : val).toFixed(2)];
+      return [
+        String(i + 1),
+        e.expense_name || '',
+        num(e.total_baht).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        (isNaN(val) ? 0 : val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }),
+      ];
     });
-    expBody.push(['', 'Total Net Weight: ' + totalNetWeight.toFixed(2) + ' KGS', '', '']);
-    expBody.push(['', 'Total Amount Import Expenses:', expenseTotals.total_baht.toFixed(2), expenseTotals.amount_usd_kgs.toFixed(2)]);
+    const summaryStart = dataRows.length;
+    const body = [...dataRows];
+    body.push(['', `Total Net Weight: ${totalNetWeight.toFixed(2)} KGS`, '', '']);
+    body.push(['', 'Total Amount Import Expenses:', expenseTotals.total_baht.toFixed(2), expenseTotals.amount_usd_kgs.toFixed(4)]);
     if (totalNetWeight > 0) {
-      expBody.push(['', 'Total Amount Import Expenses/Kg:', (expenseTotals.total_baht / totalNetWeight).toFixed(2), (expenseTotals.amount_usd_kgs / totalNetWeight).toFixed(4)]);
+      body.push([
+        '',
+        'Total Amount Import Expenses/Kg:',
+        (expenseTotals.total_baht / totalNetWeight).toFixed(2),
+        (expenseTotals.amount_usd_kgs / totalNetWeight).toFixed(4),
+      ]);
     }
 
+    const sumFill = [236, 253, 245];
     autoTable(pdf, {
-      startY: 26,
+      startY: y,
       head: [['No.', 'DETAILS OF EXPENSES', 'TOTAL (฿)', 'AMOUNT (USD/KGS.)']],
-      body: expBody,
-      styles: { fontSize: 8, cellPadding: 2, ...fontOpts },
-      headStyles: { fillColor: [79, 70, 229], ...fontOpts }
+      body,
+      theme: 'grid',
+      styles: {
+        fontSize: 8,
+        cellPadding: { top: 2.2, bottom: 2.2, left: 3, right: 3 },
+        lineColor: slate200,
+        lineWidth: 0.1,
+        textColor: slate900,
+        ...fontOpts,
+      },
+      headStyles: {
+        fillColor: emerald,
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        ...fontOpts,
+      },
+      columnStyles: {
+        0: { halign: 'center', cellWidth: 14 },
+        1: { halign: 'left' },
+        2: { halign: 'right' },
+        3: { halign: 'right' },
+      },
+      alternateRowStyles: { fillColor: [252, 252, 253] },
+      margin: { left: margin, right: margin },
+      didParseCell: (data) => {
+        data.cell.styles.font = 'Sarabun';
+        if (data.section === 'body' && data.row.index >= summaryStart) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = sumFill;
+          data.cell.styles.textColor = slate900;
+        }
+      },
     });
+  };
 
+  const exportStockItemsPDF = async () => {
+    persistStockPdfRemark();
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    await registerThaiFont(pdf);
+    await renderStockItemsPdfContent(pdf);
     pdf.save(`Import_Stock_${invLabel}_${dateStr()}.pdf`);
+  };
+
+  const exportStockItemsWithExpensesPDF = async () => {
+    persistStockPdfRemark();
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    await registerThaiFont(pdf);
+    await renderStockItemsPdfContent(pdf);
+    renderExpensesAppendixPdf(pdf);
+    pdf.save(`Import_Stock_with_Expenses_${invLabel}_${dateStr()}.pdf`);
   };
 
   const exportStockOutExcel = () => {
@@ -476,7 +828,7 @@ function ImportShipmentDetail() {
     <div className="imp-page">
       {/* Header */}
       <div className="imp-detail-header">
-        <button className="imp-btn imp-btn-ghost" onClick={() => navigate('/imports')}>
+        <button className="imp-btn imp-btn-ghost" onClick={handleImportBack}>
           <FiArrowLeft /> Back
         </button>
         <h2>{isNew ? 'Create New Import' : `STOCK — ${shipment.inv_no}`}</h2>
@@ -559,8 +911,15 @@ function ImportShipmentDetail() {
                   <button className="imp-btn imp-btn-sm imp-btn-ghost" onClick={exportStockItemsExcel} title="Export Stock Items + Expenses to Excel">
                     <FiDownload /> Excel
                   </button>
-                  <button className="imp-btn imp-btn-sm imp-btn-ghost" onClick={exportStockItemsPDF} title="Export Stock Items + Expenses to PDF">
+                  <button className="imp-btn imp-btn-sm imp-btn-ghost" onClick={exportStockItemsPDF} title="Export Stock Items table to PDF (no Stock OUT / expenses)">
                     <FiDownload /> PDF
+                  </button>
+                  <button
+                    className="imp-btn imp-btn-sm imp-btn-ghost"
+                    onClick={exportStockItemsWithExpensesPDF}
+                    title="Download PDF: Stock Items then Expenses on a new page"
+                  >
+                    <FiDownload /> Download with Expenses
                   </button>
                 </>
               )}
@@ -676,6 +1035,19 @@ function ImportShipmentDetail() {
               </tbody>
             </table>
           </div>
+          {!isNew && (
+            <div className="imp-stock-pdf-remark">
+              <label htmlFor="imp-stock-pdf-remark">Remark (PDF)</label>
+              <textarea
+                id="imp-stock-pdf-remark"
+                value={stockPdfRemark}
+                onChange={e => setStockPdfRemark(e.target.value)}
+                onBlur={persistStockPdfRemark}
+                placeholder="Optional notes — included below the table when you download Stock Items PDF."
+                rows={3}
+              />
+            </div>
+          )}
         </div>
       )}
 

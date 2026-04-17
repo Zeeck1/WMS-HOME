@@ -38,7 +38,7 @@ function LinesReformat() {
     setLoading(true);
     setLoaded(false);
     try {
-      const res = await getInventory({ location: line });
+      const res = await getInventory({ location: line, merge_import_shipments: '1' });
       const filtered = res.data.filter(r => {
         const p = parseLocationCode(r.line_place);
         return p && p.line === line && p.side === side;
