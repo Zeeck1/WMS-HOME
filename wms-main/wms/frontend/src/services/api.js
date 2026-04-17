@@ -18,6 +18,19 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' }
 });
 
+/** Merge Bearer token from localStorage so secured routes work even if defaults are not set yet. */
+function withAuth(config = {}) {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('wms_token') : null;
+  if (!token) return config;
+  return {
+    ...config,
+    headers: {
+      ...(config.headers || {}),
+      Authorization: `Bearer ${token}`,
+    },
+  };
+}
+
 // ─── Products ─────────────────────────────────────────
 export const getProducts = (params) => api.get('/products', { params });
 export const getProduct = (id) => api.get(`/products/${id}`);
@@ -126,9 +139,12 @@ export const deleteImportStockOut = (outId) => api.delete(`/imports/stock-out/${
 // ─── Settings ────────────────────────────────────────
 export const getSettings = () => api.get('/settings');
 export const saveSettings = (data) => api.put('/settings', data);
+export const getSettingsUploads = () => api.get('/settings/uploads', withAuth());
+export const deleteSettingsUploads = (filenames) =>
+  api.delete('/settings/uploads', withAuth({ data: { filenames } }));
 
 // ─── Backup / Restore ───────────────────────────────
-export const exportBackup = () => api.get('/backup/export', { responseType: 'blob' });
+export const exportBackup = () => api.get('/backup/export', withAuth({ responseType: 'blob' }));
 export const importBackup = (file) => {
   const formData = new FormData();
   formData.append('file', file);
