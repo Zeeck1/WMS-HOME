@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { FiArrowDownCircle, FiPlus, FiUpload, FiFile, FiCheckCircle, FiAlertCircle } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { getProducts, getLocations, getLots, createLot, stockIn, uploadExcel } from '../services/api';
+import { bangkokYYYYMMDD } from '../utils/bangkokTime';
 
 function getLotLabel(lot) {
   if (!lot) return '';
@@ -54,7 +55,7 @@ function StockIn() {
   const [newLot, setNewLot] = useState({
     lot_no: '',
     lot_no_numeric: '',
-    cs_in_date: new Date().toISOString().split('T')[0],
+    cs_in_date: bangkokYYYYMMDD(),
     sticker: '',
     product_id: '',
     notes: '',
@@ -150,7 +151,7 @@ function StockIn() {
       });
       setLotSearch(getLotLabel(newLotWithProduct));
       setShowNewLot(false);
-      setNewLot({ lot_no: '', lot_no_numeric: '', cs_in_date: new Date().toISOString().split('T')[0], sticker: '', product_id: '', notes: '', production_date: '', expiration_date: '', st_no: '', remark: '' });
+      setNewLot({ lot_no: '', lot_no_numeric: '', cs_in_date: bangkokYYYYMMDD(), sticker: '', product_id: '', notes: '', production_date: '', expiration_date: '', st_no: '', remark: '' });
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to create lot');
     }

@@ -6,6 +6,7 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { getWithdrawal } from '../services/api';
 import { sortLocationsNearestFirst } from '../config/warehouseConfig';
+import { bangkokLocaleDateString } from '../utils/bangkokTime';
 
 function WithdrawReport() {
   const { id } = useParams();
@@ -104,7 +105,7 @@ function WithdrawReport() {
             <div className="wr-meta">
               <span><strong>Request No:</strong> {data.request_no}</span>
               <span><strong>Department:</strong> {data.department}</span>
-              <span><strong>Date:</strong> {new Date(data.withdraw_date || data.created_at).toLocaleDateString('en-GB')}</span>
+              <span><strong>Date:</strong> {bangkokLocaleDateString(new Date(data.withdraw_date || data.created_at), { day: '2-digit', month: '2-digit', year: 'numeric' })}</span>
               <span><strong>Status:</strong> {data.status}</span>
             </div>
           </div>

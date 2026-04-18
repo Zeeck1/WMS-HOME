@@ -5,7 +5,35 @@ import {
   FiCheckCircle, FiXCircle, FiChevronDown, FiChevronUp, FiRefreshCw, FiPrinter, FiFileText
 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
-import { getWithdrawals, getWithdrawal, updateWithdrawalStatus, updateWithdrawalItems, cancelWithdrawal } from '../services/api';
+import { getWithdrawals, getWithdrawal, updateWithdrawalStatus, updateWithdrawalItems, cancelWithdrawal, sendLineNotification } from '../services/api';
+import {
+  bangkokYYYYMMDD,
+  bangkokYMDYesterday,
+  bangkokLocaleDateString,
+  bangkokLocaleString,
+  dateToYYYYMMDDInBangkok,
+} from '../utils/bangkokTime';
+
+/** Text for LINE — same endpoint as No Movement page (`/reports/no-movement/send-line`). */
+function buildWithdrawalQtyChangeLineMessage(expandedData, editedQty) {
+  const rows = expandedData?.items || [];
+  const lines = [];
+  for (const it of rows) {
+    const edited = editedQty[it.id];
+    if (edited === undefined) continue;
+    const newQty = Number(edited);
+    const oldActual = Number(it.quantity_mc);
+    if (newQty === oldActual) continue;
+    const requested = Number(it.requested_mc ?? it.quantity_mc);
+    const label = `${it.fish_name || ''} ${it.size || ''} @ ${it.line_place || '—'}`.replace(/\s+/g, ' ').trim();
+    lines.push(`• ${label}\n  Requested (MC): ${requested} → Actual (MC): ${newQty}`);
+  }
+  if (lines.length === 0) return null;
+  let text = '📦 Withdrawal — Actual (MC) updated (Manage)\n';
+  text += `Request: ${expandedData.request_no || '—'}\nDept: ${expandedData.department || '—'}\n\n`;
+  text += lines.join('\n\n');
+  return text;
+}
 
 const STATUS_FLOW = ['PENDING', 'TAKING_OUT', 'READY', 'FINISHED'];
 
@@ -85,8 +113,18 @@ function Manage() {
         .map(([itemId, qty]) => ({ id: Number(itemId), quantity_mc: Number(qty) }));
 
       if (items.length === 0) return;
+      const lineMessage = buildWithdrawalQtyChangeLineMessage(expandedData, editedQty);
       await updateWithdrawalItems(requestId, { items });
       toast.success('Quantities updated successfully');
+
+      if (lineMessage) {
+        try {
+          await sendLineNotification({ message: lineMessage });
+          toast.success('Change details sent to LINE');
+        } catch (lineErr) {
+          toast.error(lineErr.response?.data?.error || 'Failed to send change to LINE (check Settings → LINE)');
+        }
+      }
 
       // Refresh data
       const res = await getWithdrawal(requestId);
@@ -167,8 +205,8 @@ function Manage() {
     filtered.forEach(req => {
       const raw = req.withdraw_date || req.created_at;
       const d = raw ? new Date(raw) : new Date();
-      const dateKey = d.toISOString().slice(0, 10);
-      const dateLabel = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+      const dateKey = dateToYYYYMMDDInBangkok(d);
+      const dateLabel = bangkokLocaleDateString(d, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
       if (!groups[dateKey]) groups[dateKey] = { dateKey, dateLabel, requests: [] };
       groups[dateKey].requests.push(req);
     });
@@ -236,9 +274,8 @@ function Manage() {
           />
           <div className="mg-date-quick">
             {(() => {
-              const todayStr = new Date().toISOString().slice(0, 10);
-              const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
-              const yesterdayStr = yesterday.toISOString().slice(0, 10);
+              const todayStr = bangkokYYYYMMDD();
+              const yesterdayStr = bangkokYMDYesterday();
               return (
                 <>
                   <button type="button" className={`mg-date-btn ${!dateFilter ? 'active' : ''}`} onClick={() => setDateFilter('')}>All</button>
@@ -278,7 +315,7 @@ function Manage() {
                       <span className={`mg-dept-badge mg-dept-${req.department}`}>{req.department}</span>
                       <div className="mg-req-info">
                         <span className="mg-req-no">{req.request_no}</span>
-                        <span className="mg-req-date">{new Date(req.created_at).toLocaleString()}</span>
+                        <span className="mg-req-date">{bangkokLocaleString(new Date(req.created_at))}</span>
                       </div>
                     </div>
                     <div className="mg-req-right">

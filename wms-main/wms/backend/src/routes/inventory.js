@@ -18,7 +18,11 @@ async function fetchImportShipmentRows(filters = {}) {
       s.eta AS cs_in_date,
       s.production_date,
       s.expiry_date AS expiration_date,
-      COALESCE(NULLIF(TRIM(ii.lines), ''), s.origin_country) AS line_place,
+      CASE
+        WHEN NULLIF(TRIM(ii.lines), '') IS NULL THEN NULL
+        WHEN NULLIF(TRIM(ii.lines), '') = NULLIF(TRIM(IFNULL(s.origin_country, '')), '') THEN NULL
+        ELSE NULLIF(TRIM(ii.lines), '')
+      END AS line_place,
       ii.lines AS stack_no,
       ii.remark,
       NULLIF(TRIM(s.origin_country), '') AS country,

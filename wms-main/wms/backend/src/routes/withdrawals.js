@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
+const { bangkokYYYYMMDDCompact } = require('../utils/bangkokTime');
 
 // ─── GET all withdrawal requests ─────────────────────
 router.get('/', async (req, res) => {
@@ -80,7 +81,7 @@ router.post('/', async (req, res) => {
     }
 
     // Generate request number: WD-PK-20260209-001
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const today = bangkokYYYYMMDDCompact();
     const [countRows] = await conn.query(
       `SELECT COUNT(*) AS cnt FROM withdraw_requests WHERE DATE(created_at) = CURDATE() AND department = ?`,
       [department]
@@ -169,17 +170,21 @@ router.put('/:id/items', async (req, res) => {
         return res.status(400).json({ error: 'Each item must have id and quantity_mc >= 0' });
       }
 
+      const [wiRows] = await conn.query('SELECT * FROM withdraw_items WHERE id = ? AND request_id = ?', [item.id, req.params.id]);
+      if (wiRows.length === 0) continue;
+
+      const wi = wiRows[0];
+      const oldActual = Number(wi.quantity_mc);
+      const newQty = Number(item.quantity_mc);
+
       // If quantity is 0, remove the item
       if (item.quantity_mc === 0) {
         await conn.query('DELETE FROM withdraw_items WHERE id = ? AND request_id = ?', [item.id, req.params.id]);
         continue;
       }
 
-      // Check current balance for the item
-      const [wiRows] = await conn.query('SELECT * FROM withdraw_items WHERE id = ? AND request_id = ?', [item.id, req.params.id]);
-      if (wiRows.length === 0) continue;
+      if (oldActual === newQty) continue;
 
-      const wi = wiRows[0];
       const [balance] = await conn.query(`
         SELECT
           COALESCE(SUM(CASE WHEN movement_type = 'IN' THEN quantity_mc ELSE 0 END), 0) -
@@ -194,7 +199,6 @@ router.put('/:id/items', async (req, res) => {
         });
       }
 
-      // Get bulk weight for recalculating weight_kg
       const [prodRows] = await conn.query(`
         SELECT p.bulk_weight_kg FROM lots l JOIN products p ON l.product_id = p.id WHERE l.id = ?
       `, [wi.lot_id]);
@@ -207,6 +211,7 @@ router.put('/:id/items', async (req, res) => {
     }
 
     await conn.commit();
+
     res.json({ message: 'Items updated successfully' });
   } catch (error) {
     await conn.rollback();

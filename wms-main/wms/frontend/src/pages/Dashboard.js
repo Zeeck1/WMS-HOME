@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { FiBox, FiTruck, FiMapPin, FiCheckCircle, FiAlertTriangle, FiTool, FiArrowDownCircle, FiClock } from 'react-icons/fi';
 import { getDashboard } from '../services/api';
+import { bangkokLocaleString } from '../utils/bangkokTime';
 
 function Dashboard() {
   const [data, setData] = useState(null);
@@ -197,7 +198,7 @@ function Dashboard() {
                       <span>Location: {m.line_place}</span>
                       <span>{m.quantity_mc} MC / {Number(m.weight_kg).toFixed(2)} KG</span>
                       <span className="movement-time">
-                        {new Date(m.created_at).toLocaleString()}
+                        {bangkokLocaleString(new Date(m.created_at))}
                       </span>
                     </div>
                   ))}

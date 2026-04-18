@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const mysql = require('mysql2/promise');
 const pool = require('../config/db');
+const { bangkokYYYYMMDD, bangkokHHMM, bangkokLocaleString } = require('../utils/bangkokTime');
 const multer = require('multer');
 const { authMiddleware, superadminOnly } = require('../middleware/auth');
 
@@ -100,12 +101,12 @@ router.get('/export', authMiddleware, superadminOnly, async (req, res) => {
   try {
     conn = await pool.getConnection();
     const dbName = (await conn.query('SELECT DATABASE() AS db'))[0][0].db;
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const timestamp = `${bangkokYYYYMMDD()}_${bangkokHHMM().replace(':', '')}`;
 
     const parts = [];
     parts.push(`-- WMS Database Backup`);
     parts.push(`-- Database: ${dbName}`);
-    parts.push(`-- Generated: ${new Date().toISOString()}`);
+    parts.push(`-- Generated: ${bangkokLocaleString()}`);
     parts.push(`-- ═══════════════════════════════════════════════\n`);
     parts.push(`SET FOREIGN_KEY_CHECKS = 0;`);
     parts.push(`SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n`);

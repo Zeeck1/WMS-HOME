@@ -11,6 +11,7 @@ import { getOacCheck } from '../services/api';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { bangkokYYYYMMDD, bangkokLocaleString } from '../utils/bangkokTime';
 
 const STATUS_CONFIG = {
   FULL: { label: 'Full', cls: 'oacr-st-full', icon: <FiCheckCircle />, desc: 'Ready to fulfill' },
@@ -99,9 +100,9 @@ function OACResultInner({ summary, fileSummaries, results, checkedAt, navigate }
   const [expandedGroups, setExpandedGroups] = useState(new Set());
 
   const checkedTime = checkedAt ? new Date(checkedAt) : new Date();
-  const timeStr = checkedTime.toLocaleString('en-GB', {
+  const timeStr = bangkokLocaleString(checkedTime, {
     day: '2-digit', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit'
+    hour: '2-digit', minute: '2-digit',
   });
 
   const filteredResults = useMemo(() => results.filter(r => {
@@ -249,7 +250,7 @@ function OACResultInner({ summary, fileSummaries, results, checkedAt, navigate }
       }
     }
 
-    const ts = new Date().toISOString().slice(0, 10);
+    const ts = bangkokYYYYMMDD();
     XLSX.writeFile(wb, `OAC_Results_${ts}.xlsx`);
     toast.success('Exported to Excel');
   }, [results, summary, fileSummaries, timeStr, totalOrderedCtn, totalOrderedKg, totalShortageCtn, totalShortageKg]);
@@ -476,7 +477,7 @@ function OACResultInner({ summary, fileSummaries, results, checkedAt, navigate }
       }
     }
 
-    const ts = new Date().toISOString().slice(0, 10);
+    const ts = bangkokYYYYMMDD();
     doc.save(`OAC_${mode === 'summary' ? 'Summary' : 'OrderByOrder'}_${ts}.pdf`);
     toast.success('PDF exported');
   }, [results, summary, fileSummaries, timeStr, fullPct, notFullPct, notHavePct, totalOrderedCtn, totalOrderedKg, totalShortageCtn, totalShortageKg]);

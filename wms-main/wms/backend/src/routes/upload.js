@@ -5,6 +5,11 @@ const crypto = require('crypto');
 const XLSX = require('xlsx');
 const path = require('path');
 const pool = require('../config/db');
+const {
+  bangkokYYYYMMDD,
+  dateToYYYYMMDDInBangkok,
+  excelSerialToBangkokYYYYMMDD,
+} = require('../utils/bangkokTime');
 
 /**
  * Parse MC / integer quantities from Excel. Fixes "1,277" → 1277 (parseInt alone yields 1).
@@ -39,15 +44,6 @@ function parseExcelFloat(raw) {
   }
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : 0;
-}
-
-/** Excel serial day number → YYYY-MM-DD (for sheet_to_json raw: true) */
-function excelSerialToISODate(serial) {
-  if (typeof serial !== 'number' || !Number.isFinite(serial)) return null;
-  const utcMs = (serial - 25569) * 86400 * 1000;
-  const d = new Date(utcMs);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString().split('T')[0];
 }
 
 function makeUniqueLotNo(prefix, rowIndex) {
@@ -223,9 +219,9 @@ router.post('/', upload.single('file'), async (req, res) => {
         let parsedDate = null;
         if (csInDate !== '' && csInDate != null) {
           if (csInDate instanceof Date && !Number.isNaN(csInDate.getTime())) {
-            parsedDate = csInDate.toISOString().split('T')[0];
+            parsedDate = dateToYYYYMMDDInBangkok(csInDate);
           } else if (typeof csInDate === 'number') {
-            parsedDate = excelSerialToISODate(csInDate);
+            parsedDate = excelSerialToBangkokYYYYMMDD(csInDate);
           } else {
             const ds = csInDate.toString().trim();
             const ddmm = ds.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
@@ -234,11 +230,11 @@ router.post('/', upload.single('file'), async (req, res) => {
               parsedDate = `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
             } else {
               const d = new Date(ds);
-              if (!Number.isNaN(d.getTime())) parsedDate = d.toISOString().split('T')[0];
+              if (!Number.isNaN(d.getTime())) parsedDate = dateToYYYYMMDDInBangkok(d);
             }
           }
         }
-        if (!parsedDate) parsedDate = new Date().toISOString().split('T')[0];
+        if (!parsedDate) parsedDate = bangkokYYYYMMDD();
 
         const [lotResult] = await conn.query(
           'INSERT INTO lots (lot_no, cs_in_date, sticker, product_id) VALUES (?, ?, ?, ?)',
@@ -350,7 +346,7 @@ router.post('/container-extra', upload.single('file'), async (req, res) => {
         if (productionDateRaw) {
           const raw = productionDateRaw;
           if (raw instanceof Date && !isNaN(raw.getTime())) {
-            productionDate = raw.toISOString().split('T')[0];
+            productionDate = dateToYYYYMMDDInBangkok(raw);
           } else {
             const s = raw.toString().trim();
             const mmY = s.match(/^(\d{1,2})[\/\-](\d{4})$/);
@@ -360,7 +356,7 @@ router.post('/container-extra', upload.single('file'), async (req, res) => {
               productionDate = `${yyyy}-${mm}-01`;
             } else {
               const d = new Date(s);
-              if (!isNaN(d.getTime())) productionDate = d.toISOString().split('T')[0];
+              if (!isNaN(d.getTime())) productionDate = dateToYYYYMMDDInBangkok(d);
             }
           }
         }
@@ -368,7 +364,7 @@ router.post('/container-extra', upload.single('file'), async (req, res) => {
         if (expirationDateRaw) {
           const raw = expirationDateRaw;
           if (raw instanceof Date && !isNaN(raw.getTime())) {
-            expirationDate = raw.toISOString().split('T')[0];
+            expirationDate = dateToYYYYMMDDInBangkok(raw);
           } else {
             const s = raw.toString().trim();
             const mmY = s.match(/^(\d{1,2})[\/\-](\d{4})$/);
@@ -378,14 +374,14 @@ router.post('/container-extra', upload.single('file'), async (req, res) => {
               expirationDate = `${yyyy}-${mm}-01`;
             } else {
               const d = new Date(s);
-              if (!isNaN(d.getTime())) expirationDate = d.toISOString().split('T')[0];
+              if (!isNaN(d.getTime())) expirationDate = dateToYYYYMMDDInBangkok(d);
             }
           }
         }
 
         // 4. Create lot with extra fields
         const lotNo = makeUniqueLotNo('CE', i);
-        const csInDate = productionDate || new Date().toISOString().split('T')[0];
+        const csInDate = productionDate || bangkokYYYYMMDD();
 
         const [lotResult] = await conn.query(
           'INSERT INTO lots (lot_no, cs_in_date, product_id, production_date, expiration_date, st_no, remark) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -491,7 +487,9 @@ router.post('/import', upload.single('file'), async (req, res) => {
         if (arrivalDateRaw) {
           const raw = arrivalDateRaw;
           if (raw instanceof Date && !isNaN(raw.getTime())) {
-            arrivalDate = raw.toISOString().split('T')[0];
+            arrivalDate = dateToYYYYMMDDInBangkok(raw);
+          } else if (typeof raw === 'number') {
+            arrivalDate = excelSerialToBangkokYYYYMMDD(raw);
           } else {
             const s = raw.toString().trim();
             // Expect Excel format: DD/MM/YYYY
@@ -503,11 +501,11 @@ router.post('/import', upload.single('file'), async (req, res) => {
               arrivalDate = `${yyyy}-${mm}-${dd}`;
             } else {
               const d = new Date(s);
-              if (!isNaN(d.getTime())) arrivalDate = d.toISOString().split('T')[0];
+              if (!isNaN(d.getTime())) arrivalDate = dateToYYYYMMDDInBangkok(d);
             }
           }
         }
-        if (!arrivalDate) arrivalDate = new Date().toISOString().split('T')[0];
+        if (!arrivalDate) arrivalDate = bangkokYYYYMMDD();
 
         const lotNo = makeUniqueLotNo('IMP', i);
         const [lotResult] = await conn.query(

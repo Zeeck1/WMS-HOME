@@ -44,6 +44,7 @@ import ImportShipments from './pages/ImportShipments';
 import ImportShipmentDetail from './pages/ImportShipmentDetail';
 import UserManagement from './pages/UserManagement';
 import logoThaiBg from './images/logo-thai-bg.jpg';
+import { getWithdrawals } from './services/api';
 
 /** Sidebar groups for superadmin; permission users see one "Overview" with all allowed links in this order. */
 const SIDEBAR_SECTIONS = [
@@ -114,25 +115,57 @@ function Protected({ pageKey, children }) {
 function SidebarNav({ collapsed, mobileOpen, onNavClick }) {
   const location = useLocation();
   const { hasAccess, user } = useAuth();
+  const [pendingReceiveCount, setPendingReceiveCount] = useState(0);
 
   useEffect(() => {
     if (mobileOpen) onNavClick();
     // eslint-disable-next-line
   }, [location.pathname]);
 
-  const link = (to, icon, label, pageKey, end) => {
+  const canManage = hasAccess('manage');
+  useEffect(() => {
+    if (!canManage) {
+      setPendingReceiveCount(0);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await getWithdrawals({ status: 'PENDING' });
+        const n = Array.isArray(res.data) ? res.data.length : 0;
+        if (!cancelled) setPendingReceiveCount(n);
+      } catch {
+        if (!cancelled) setPendingReceiveCount(0);
+      }
+    };
+    load();
+    const id = setInterval(load, 45000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [canManage, location.pathname]);
+
+  const link = (to, icon, label, pageKey, end, badgeCount) => {
     if (!hasAccess(pageKey)) return null;
+    const showBadge = pageKey === 'manage' && typeof badgeCount === 'number' && badgeCount > 0;
     return (
-      <NavLink key={pageKey} to={to} end={end} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+      <NavLink key={pageKey} to={to} end={end} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''} ${showBadge ? 'nav-link--badge' : ''}`}>
         {icon}
         <span className="nav-label">{label}</span>
+        {showBadge && (
+          <span className="nav-badge" title={`Receive Request: ${badgeCount}`}>
+            {badgeCount > 99 ? '99+' : badgeCount}
+          </span>
+        )}
       </NavLink>
     );
   };
 
   const renderNavItem = (item) => {
     const Icon = item.Icon;
-    return link(item.to, <Icon />, item.label, item.pageKey, item.end);
+    const badge = item.pageKey === 'manage' ? pendingReceiveCount : undefined;
+    return link(item.to, <Icon />, item.label, item.pageKey, item.end, badge);
   };
 
   const isSuperadmin = user?.role === 'superadmin';

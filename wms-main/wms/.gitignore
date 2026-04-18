@@ -13,6 +13,9 @@ dist/
 # Uploaded files (do not commit)
 backend/uploads/
 
+# Local CK Intelligence training file (copy from backend/data/ck-intelligence-knowledge.example.json)
+backend/data/ck-intelligence-knowledge.json
+
 # Logs
 *.log
 npm-debug.log*

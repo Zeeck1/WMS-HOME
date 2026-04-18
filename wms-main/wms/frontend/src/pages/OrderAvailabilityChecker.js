@@ -7,6 +7,7 @@ import {
 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { checkOrderAvailability, getOacChecks, deleteOacCheck } from '../services/api';
+import { bangkokLocaleString } from '../utils/bangkokTime';
 
 function OrderAvailabilityChecker() {
   const [files, setFiles] = useState([]);
@@ -89,10 +90,8 @@ function OrderAvailabilityChecker() {
     }
   };
 
-  const formatTime = (ts) => {
-    const d = new Date(ts);
-    return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-  };
+  const formatTime = (ts) =>
+    bangkokLocaleString(new Date(ts), { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   const filledPct = Math.round((files.length / 32) * 100);
 

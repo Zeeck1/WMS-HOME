@@ -8,6 +8,7 @@ import { getInventory, deleteAllStockData } from '../services/api';
 import * as XLSX from 'xlsx';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import { bangkokYYYYMMDD, bangkokLocaleString } from '../utils/bangkokTime';
 
 const TABS = [
   { id: 'BULK', label: 'Bulk', icon: <FiPackage /> },
@@ -110,6 +111,20 @@ function filterInventoryRowsByTab(rows, tab) {
   return (rows || []).filter((r) => String(r.stock_type || '').toUpperCase() === t);
 }
 
+/** Import Stock Summary: Line must not duplicate Country (legacy API/DB or location codes). */
+function normalizeImportRowLinePlace(row) {
+  if (String(row.stock_type || '').toUpperCase() !== 'IMPORT') return row;
+  const lp = row.line_place;
+  const c = row.country;
+  const lineStr = lp != null && lp !== '' ? String(lp).trim() : '';
+  const countryStr = c != null && c !== '' ? String(c).trim() : '';
+  if (!lineStr) return { ...row, line_place: null };
+  if (countryStr && lineStr.toLowerCase() === countryStr.toLowerCase()) {
+    return { ...row, line_place: null };
+  }
+  return row;
+}
+
 // ─── Main Component ────────────────────────────────────────────────────
 const STOCK_SUMMARY_TABS = new Set(['BULK', 'CONTAINER_EXTRA', 'IMPORT']);
 
@@ -210,12 +225,15 @@ function StockTable() {
     try {
       const res = await getInventory({ stock_type: activeTab });
       const filtered = filterInventoryRowsByTab(res.data, activeTab);
-      const normalized = filtered.map(r => ({
-        ...r,
-        cs_in_date: isImport ? formatISODateToDMY(r.cs_in_date) : r.cs_in_date,
-        production_date: formatMonthYearDisplay(r.production_date),
-        expiration_date: formatMonthYearDisplay(r.expiration_date),
-      }));
+      const normalized = filtered.map((r) => {
+        const base = isImport ? normalizeImportRowLinePlace(r) : r;
+        return {
+          ...base,
+          cs_in_date: isImport ? formatISODateToDMY(base.cs_in_date) : base.cs_in_date,
+          production_date: formatMonthYearDisplay(base.production_date),
+          expiration_date: formatMonthYearDisplay(base.expiration_date),
+        };
+      });
       setInventory(normalized);
     } catch (err) {
       toast.error('Failed to load inventory');
@@ -443,7 +461,7 @@ function StockTable() {
     const sheetName = isCE ? 'Container Extra Stock' : isImport ? 'Import Stock' : 'Bulk Stock';
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
     const prefix = isCE ? 'Container_Extra' : isImport ? 'Import' : 'Bulk';
-    XLSX.writeFile(wb, `WMS_${prefix}_Stock_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.writeFile(wb, `WMS_${prefix}_Stock_${bangkokYYYYMMDD()}.xlsx`);
     toast.success('Excel file downloaded');
   };
 
@@ -503,7 +521,7 @@ function StockTable() {
       }
 
       const prefix = isCE ? 'Container_Extra' : isImport ? 'Import' : 'Bulk';
-      const filename = `WMS_${prefix}_Stock_${new Date().toISOString().split('T')[0]}.pdf`;
+      const filename = `WMS_${prefix}_Stock_${bangkokYYYYMMDD()}.pdf`;
       pdf.save(filename);
       toast.success('PDF downloaded');
     } catch (err) {
@@ -566,7 +584,7 @@ function StockTable() {
       const a = document.createElement('a');
       const prefix = isCE ? 'Container_Extra' : isImport ? 'Import' : 'Bulk';
       a.href = url;
-      a.download = `WMS_${prefix}_Stock_${new Date().toISOString().split('T')[0]}.png`;
+      a.download = `WMS_${prefix}_Stock_${bangkokYYYYMMDD()}.png`;
       a.click();
       URL.revokeObjectURL(url);
       toast.info('Image copied isn’t supported here — PNG file downloaded instead. You can paste the file where needed.');
@@ -671,7 +689,7 @@ function StockTable() {
   };
 
   const tabLabel = isCE ? 'Container Extra' : isImport ? 'Import' : 'Bulk';
-  const printedAt = new Date().toLocaleString();
+  const printedAt = bangkokLocaleString();
 
   return (
     <div className="stock-table-print-page">

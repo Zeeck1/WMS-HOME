@@ -4,6 +4,7 @@ import { toast } from 'react-toastify';
 import { getInventory, manualUpdateCell, manualDeleteRow, manualAddRow } from '../services/api';
 import { parseLocationCode } from '../config/warehouseConfig';
 import ColumnFilterDropdown from '../components/ColumnFilterDropdown';
+import { bangkokYYYYMMDD, dateToYYYYMMDDInBangkok } from '../utils/bangkokTime';
 
 const normLotNoNumeric = (v) => String(v ?? '').replace(/\D/g, '');
 
@@ -61,6 +62,11 @@ const LINE_OPTIONS = [
 ];
 
 const rk = (r) => `${r.lot_id}-${r.location_id}`;
+/** Pending edits use keys `${rowKey}-${field}` — keep those rows visible even if table search no longer matches. */
+const rowKeyHasPendingEdits = (rowKey, pendingMap) => {
+  const prefix = `${rowKey}-`;
+  return Object.keys(pendingMap || {}).some((k) => k.startsWith(prefix));
+};
 const MANUAL_FETCH_LIMIT = 2000;
 
 /** Ensures each tab only shows rows for that stock type (API must match; this guards stale UI or bad responses). */
@@ -72,7 +78,7 @@ const ROW_WINDOW_SIZE = 150;
 const toDateOnly = (d) => {
   if (d == null || d === '') return '';
   if (typeof d === 'string') return d.split('T')[0];
-  try { return new Date(d).toISOString().split('T')[0]; } catch { return ''; }
+  try { return dateToYYYYMMDDInBangkok(d); } catch { return ''; }
 };
 
 // For month/year inputs like "12/2024" stored as "YYYY-MM-01" in DB
@@ -154,7 +160,7 @@ function manualCellFilterValue(row, col) {
   return String(v);
 }
 
-const todayISO = () => new Date().toISOString().split('T')[0];
+const todayISO = () => bangkokYYYYMMDD();
 
 function buildEmptyDraft(activeTab) {
   const t = todayISO();
@@ -250,7 +256,11 @@ function Manual() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [filters, setFilters] = useState({ fish_name: '', line: '', line_detail: '', stack_no: '' });
-  const [searchQuery, setSearchQuery] = useState('');
+  /** L/R + stack applied only after top "Search" (not while typing). */
+  const [appliedClientFilters, setAppliedClientFilters] = useState({ line: '', stack_no: '' });
+  /** Table-wide search: draft vs applied (Enter / Search — not live). */
+  const [tableSearchInput, setTableSearchInput] = useState('');
+  const [appliedTableSearch, setAppliedTableSearch] = useState('');
   const [columnFilters, setColumnFilters] = useState({});
   /** Staging row at top — fill in, then confirm to create in DB (sorted by Line / Place). */
   const [draftRow, setDraftRow] = useState(null);
@@ -330,7 +340,9 @@ function Manual() {
     setRows([]);
     setOriginalRows([]);
     setFilters(f => ({ ...f, fish_name: '', line_detail: '' }));
-    setSearchQuery('');
+    setAppliedClientFilters({ line: '', stack_no: '' });
+    setTableSearchInput('');
+    setAppliedTableSearch('');
     setColumnFilters({});
     setDraftRow(null);
     setUndoStack([]);
@@ -342,6 +354,7 @@ function Manual() {
 
   const handleSearch = (e) => {
     e.preventDefault();
+    setAppliedClientFilters({ line: filters.line, stack_no: filters.stack_no });
     const p = { limit: MANUAL_FETCH_LIMIT };
     if (filters.fish_name.trim()) p.fish_name = filters.fish_name.trim();
     if (filters.line_detail.trim()) p.location = filters.line_detail.trim();
@@ -349,21 +362,26 @@ function Manual() {
     loadData(p);
   };
 
-  // ─── Client-side filters (L/R, stack) then Stock Summary–style search + column filters ─
+  const applyTableSearch = useCallback(() => {
+    setAppliedTableSearch(tableSearchInput.trim());
+    setWindowStart(0);
+  }, [tableSearchInput]);
+
+  // ─── Client-side filters (L/R, stack after Search) then column text search (after Enter/Search) ─
   const afterSidebar = useMemo(() => {
     let list = rows;
-    if (filters.line) {
+    if (appliedClientFilters.line) {
       list = list.filter(r => {
         const p = parseLocationCode(r.line_place);
-        return p && p.side === filters.line;
+        return p && p.side === appliedClientFilters.line;
       });
     }
-    if (filters.stack_no) {
-      const sn = filters.stack_no.trim();
+    if (appliedClientFilters.stack_no) {
+      const sn = appliedClientFilters.stack_no.trim();
       if (sn) list = list.filter(r => String(r.stack_no || '').includes(sn));
     }
     return list;
-  }, [rows, filters.line, filters.stack_no]);
+  }, [rows, appliedClientFilters.line, appliedClientFilters.stack_no]);
 
   const filterableColumns = useMemo(
     () => columns.filter(c => c.key && !c.formula),
@@ -372,18 +390,20 @@ function Manual() {
 
   const rowsAfterSearch = useMemo(() => {
     let list = afterSidebar;
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      list = list.filter(row =>
-        filterableColumns.some((col) => {
+    if (appliedTableSearch.trim()) {
+      const q = appliedTableSearch.trim().toLowerCase();
+      list = list.filter((row) => {
+        const rowKey = rk(row);
+        if (rowKeyHasPendingEdits(rowKey, pendingEditsMap)) return true;
+        return filterableColumns.some((col) => {
           const s = manualCellFilterValue(row, col);
           const str = s != null && s !== '' ? String(s) : '';
           return str.toLowerCase().includes(q);
-        })
-      );
+        });
+      });
     }
     return list;
-  }, [afterSidebar, filterableColumns, searchQuery]);
+  }, [afterSidebar, filterableColumns, appliedTableSearch, pendingEditsMap]);
 
   /** Column filters only; skip `excludeColumnKey` so its dropdown lists values allowed by other filters (cascading). */
   const rowMatchesColumnFiltersExcept = useCallback((row, excludeColumnKey) =>
@@ -426,14 +446,15 @@ function Manual() {
 
   const handleClearAllFilters = () => {
     setColumnFilters({});
-    setSearchQuery('');
+    setTableSearchInput('');
+    setAppliedTableSearch('');
   };
 
   const activeFilterCount = Object.keys(columnFilters).length;
 
   useEffect(() => {
     setWindowStart(0);
-  }, [searchQuery, columnFilters, afterSidebar.length]);
+  }, [appliedTableSearch, columnFilters, afterSidebar.length]);
 
   const useWindow = filteredRows.length > ROW_WINDOW_SIZE;
   const displayRows = useMemo(() => {
@@ -845,27 +866,40 @@ function Manual() {
               <button type="button" className="btn btn-outline"
                 onClick={() => {
                   setFilters({ fish_name: '', line: '', line_detail: '', stack_no: '' });
+                  setAppliedClientFilters({ line: '', stack_no: '' });
                   setColumnFilters({});
-                  setSearchQuery('');
+                  setTableSearchInput('');
+                  setAppliedTableSearch('');
+                  setWindowStart(0);
+                  loadData();
                 }}>Clear</button>
             </div>
           </div>
         </form>
 
-        <div className="filter-bar no-print" style={{ marginBottom: 12 }}>
-          <div className="filter-bar-search-single">
+        <div className="filter-bar no-print manual-table-search-bar" style={{ marginBottom: 12 }}>
+          <div className="filter-bar-search-single" style={{ flex: 1, display: 'flex', gap: 8, alignItems: 'center' }}>
             <FiSearch className="filter-bar-search-icon" />
             <input
               type="text"
               className="form-control"
-              placeholder="Search all columns (same as Stock Summary)..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search all columns — press Enter or Search (not live)..."
+              value={tableSearchInput}
+              onChange={e => setTableSearchInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  applyTableSearch();
+                }
+              }}
             />
+            <button type="button" className="btn btn-primary btn-sm" onClick={applyTableSearch}>
+              <FiSearch /> Search
+            </button>
           </div>
         </div>
 
-        {(activeFilterCount > 0 || searchQuery.trim()) && (
+        {(activeFilterCount > 0 || appliedTableSearch.trim()) && (
           <div className="gs-active-filters-bar" style={{ marginBottom: 12 }}>
             {activeFilterCount > 0 && (
               <span>{activeFilterCount} column filter{activeFilterCount > 1 ? 's' : ''} active</span>

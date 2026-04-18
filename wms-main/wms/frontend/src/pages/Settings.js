@@ -6,6 +6,7 @@ import {
 } from 'react-icons/fi';
 import { getSettings, saveSettings, exportBackup, importBackup, getSettingsUploads, deleteSettingsUploads } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { bangkokYYYYMMDD, bangkokHHMM, bangkokLocaleString } from '../utils/bangkokTime';
 
 function formatUploadBytes(n) {
   if (n == null || Number.isNaN(Number(n))) return '—';
@@ -138,7 +139,7 @@ export default function Settings() {
       const blob = new Blob([response.data], { type: 'application/sql' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const timestamp = `${bangkokYYYYMMDD()}_${bangkokHHMM().replace(':', '')}`;
       a.href = url;
       a.download = `wms_backup_${timestamp}.sql`;
       document.body.appendChild(a);
@@ -459,7 +460,7 @@ export default function Settings() {
                             </td>
                             <td>{formatUploadBytes(f.size)}</td>
                             <td className="settings-uploads-date">
-                              {f.modifiedAt ? new Date(f.modifiedAt).toLocaleString() : '—'}
+                              {f.modifiedAt ? bangkokLocaleString(new Date(f.modifiedAt)) : '—'}
                             </td>
                             <td>
                               <button
@@ -490,7 +491,7 @@ export default function Settings() {
               <FiMessageSquare className="settings-section-icon settings-icon-line" />
               <div>
                 <h3>LINE Messaging API</h3>
-                <p>Send no-movement stock reports to LINE (uses your bot Channel Access Token)</p>
+                <p>Send no-movement stock reports to LINE, live alerts when Manage changes withdrawal quantities, and a text summary when users submit a withdrawal — same Channel Access Token and destination User/Group ID.</p>
               </div>
             </div>
             <div className="settings-field">

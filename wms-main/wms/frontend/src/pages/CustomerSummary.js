@@ -7,14 +7,15 @@ import logoThai from '../images/logo-thai.png';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { bangkokYYYYMMDD, dateToYYYYMMDDInBangkok } from '../utils/bangkokTime';
 
-const toDate = (d) => d ? (typeof d === 'string' ? d.split('T')[0] : new Date(d).toISOString().split('T')[0]) : '';
+const toDate = (d) => d ? (typeof d === 'string' ? d.split('T')[0] : dateToYYYYMMDDInBangkok(d)) : '';
 const fmtNum = (v, dec = 2) => Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: dec, maximumFractionDigits: dec });
 
 /** DD/MM/YYYY for PDF (matches typical stock reports) */
 const toDMY = (d) => {
   if (!d) return '';
-  const s = typeof d === 'string' ? d.split('T')[0] : new Date(d).toISOString().split('T')[0];
+  const s = typeof d === 'string' ? d.split('T')[0] : dateToYYYYMMDDInBangkok(d);
   const [y, m, dd] = s.split('-');
   if (!y || !m || !dd) return String(d);
   return `${dd}/${m}/${y}`;
@@ -285,7 +286,7 @@ function buildCustomerSummaryPdfTable(items, detailsById, dateKeys) {
   const headRow0 = [
     {
       content: 'Information / ข้อมูล',
-      colSpan: 6,
+      colSpan: 7,
       rowSpan: 1,
       styles: { ...hGreen, halign: 'center' },
     },
@@ -308,7 +309,8 @@ function buildCustomerSummaryPdfTable(items, detailsById, dateKeys) {
     { content: 'Fish Name / รายการ', rowSpan: 2, styles: { ...hGreen, halign: 'left' } },
     { content: 'Lot No.', rowSpan: 2, styles: { ...hGreen, halign: 'center' } },
     { content: 'IN - กล่อง', rowSpan: 2, styles: { ...hGreen, halign: 'center' } },
-    { content: 'IN - KG', rowSpan: 2, styles: { ...hGreen, halign: 'center' } },
+    { content: 'Kg รายละเอียด', rowSpan: 2, styles: { ...hGreen, halign: 'center', fontSize: 6.5 } },
+    { content: 'IN - KG (รวม)', rowSpan: 2, styles: { ...hGreen, halign: 'center' } },
   ];
   for (let j = 0; j < n; j += 1) {
     const dk = dateKeys[j];
@@ -362,6 +364,7 @@ function buildCustomerSummaryPdfTable(items, detailsById, dateKeys) {
       it.item_name || '',
       it.lot_no || '',
       Number(it.boxes || 0).toLocaleString(),
+      it.kg_parts || '—',
       fmtNum(it.weight_kg),
     ];
     for (let j = 0; j < n; j += 1) {
@@ -386,6 +389,7 @@ function buildCustomerSummaryPdfTable(items, detailsById, dateKeys) {
       },
     },
     items.reduce((s, it) => s + Number(it.boxes || 0), 0).toLocaleString(),
+    '',
     fmtNum(items.reduce((s, it) => s + Number(it.weight_kg || 0), 0)),
   ];
   for (let j = 0; j < n; j += 1) {
@@ -502,7 +506,8 @@ function CustomerSummary() {
       'รายการ': it.item_name || '',
       'LOT No.': it.lot_no || '',
       'IN กล่อง': Number(it.boxes || 0),
-      'IN Kg': Number(it.weight_kg || 0),
+      'Kg รายละเอียด': it.kg_parts || '',
+      'IN Kg (รวม)': Number(it.weight_kg || 0),
       'OUT กล่อง': Number(it.total_out_boxes || 0),
       'OUT Kg': Number(it.total_out_kg || 0),
       'คงเหลือ กล่อง': Number(it.balance_boxes || 0),
@@ -516,7 +521,7 @@ function CustomerSummary() {
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, viewLabel);
-    XLSX.writeFile(wb, `Customer_Summary_${viewLabel.replace(/\s/g, '_')}_${toDate(new Date().toISOString())}.xlsx`);
+    XLSX.writeFile(wb, `Customer_Summary_${viewLabel.replace(/\s/g, '_')}_${bangkokYYYYMMDD()}.xlsx`);
     toast.success('Excel downloaded');
   };
 
@@ -560,7 +565,7 @@ function CustomerSummary() {
       const fontOpts = { font: 'Sarabun' };
       const margin = 12;
       const pageW = doc.internal.pageSize.getWidth();
-      const exportDMY = toDMY(new Date().toISOString());
+      const exportDMY = toDMY(bangkokYYYYMMDD());
 
       let logoDraw = null;
       const logoRaw = await fetchReportLogo();
@@ -619,7 +624,7 @@ function CustomerSummary() {
         const maxW = dateKeys.length;
         const { head, body, foot } = buildCustomerSummaryPdfTable(sec.items, merged, dateKeys);
 
-        const lastCol = 6 + maxW * 2 + 1;
+        const lastCol = 7 + maxW * 2 + 1;
         const columnStyles = {
           0: { halign: 'center', cellWidth: 9 },
           1: { halign: 'center', cellWidth: 18 },
@@ -627,7 +632,7 @@ function CustomerSummary() {
           3: { halign: 'center', cellWidth: 18 },
         };
         for (let c = 4; c <= lastCol; c += 1) {
-          columnStyles[c] = { halign: 'right' };
+          columnStyles[c] = c === 5 ? { halign: 'left', cellWidth: 22 } : { halign: 'right' };
         }
 
         autoTable(doc, {
@@ -678,22 +683,22 @@ function CustomerSummary() {
                 st.textColor = PDF.headText;
                 st.fontStyle = 'bold';
               } else if (ri === 1) {
-                if (ci < 6) {
+                if (ci < 7) {
                   st.fillColor = PDF.headRow1;
                   st.textColor = PDF.headText;
                   st.fontStyle = 'bold';
-                } else if (ci < 6 + maxW * 2) {
+                } else if (ci < 7 + maxW * 2) {
                   st.fillColor = PDF.outBand;
                   st.textColor = PDF.outBandText;
                   st.fontStyle = 'bold';
                   st.fontSize = 6.5;
                 }
               } else if (ri === 2) {
-                if (ci >= 6 && ci < 6 + maxW * 2) {
+                if (ci >= 7 && ci < 7 + maxW * 2) {
                   st.fillColor = PDF.outBand;
                   st.textColor = PDF.outBandText;
                   st.fontStyle = 'bold';
-                } else if (ci >= 6 + maxW * 2) {
+                } else if (ci >= 7 + maxW * 2) {
                   st.fillColor = PDF.balBand;
                   st.textColor = PDF.balBandText;
                   st.fontStyle = 'bold';
@@ -719,7 +724,7 @@ function CustomerSummary() {
         );
       }
 
-      doc.save(`Customer_Summary_${viewLabel.replace(/\s/g, '_')}_${toDate(new Date().toISOString())}.pdf`);
+      doc.save(`Customer_Summary_${viewLabel.replace(/\s/g, '_')}_${bangkokYYYYMMDD()}.pdf`);
       toast.success('PDF downloaded');
     } catch {
       toast.error('Failed to generate PDF');
@@ -821,7 +826,8 @@ function SummaryTable({ items, expandedIds, detailCache, detailLoading, onToggle
             <th className="csm-th-item">รายการ</th>
             <th style={{ width: 80 }}>LOT No.</th>
             <th className="csm-th-num" style={{ width: 70 }}>IN กล่อง</th>
-            <th className="csm-th-num" style={{ width: 80 }}>IN Kg</th>
+            <th style={{ minWidth: 110 }}>Kg รายละเอียด</th>
+            <th className="csm-th-num" style={{ width: 80 }}>IN Kg (รวม)</th>
             <th className="csm-th-num" style={{ width: 70 }}>OUT กล่อง</th>
             <th className="csm-th-num" style={{ width: 80 }}>OUT Kg</th>
             <th className="csm-th-num" style={{ width: 70 }}>คงเหลือ กล่อง</th>
@@ -849,6 +855,7 @@ function SummaryTable({ items, expandedIds, detailCache, detailLoading, onToggle
                   <td>{it.item_name}</td>
                   <td>{it.lot_no || ''}</td>
                   <td className="num-cell">{Number(it.boxes || 0).toLocaleString()}</td>
+                  <td className="num-cell" style={{ fontSize: '0.85rem', whiteSpace: 'pre-wrap' }}>{it.kg_parts || '—'}</td>
                   <td className="num-cell">{fmtNum(it.weight_kg)}</td>
                   <td className="num-cell">{Number(it.total_out_boxes || 0).toLocaleString()}</td>
                   <td className="num-cell">{fmtNum(it.total_out_kg)}</td>
@@ -857,7 +864,7 @@ function SummaryTable({ items, expandedIds, detailCache, detailLoading, onToggle
                 </tr>
                 {isExpanded && (
                   <tr className="csm-detail-row">
-                    <td colSpan={11}>
+                    <td colSpan={12}>
                       {isLoadingDetail ? (
                         <div className="csm-detail-loading">Loading...</div>
                       ) : detail.length === 0 ? (
@@ -913,6 +920,7 @@ function SummaryTable({ items, expandedIds, detailCache, detailLoading, onToggle
             <td></td>
             <td colSpan={4} className="text-right csm-main-total-label"><strong>Total</strong></td>
             <td className="num-cell csm-main-total-num"><strong>{items.reduce((s, it) => s + Number(it.boxes || 0), 0).toLocaleString()}</strong></td>
+            <td className="num-cell csm-main-total-num"></td>
             <td className="num-cell csm-main-total-num"><strong>{fmtNum(items.reduce((s, it) => s + Number(it.weight_kg || 0), 0))}</strong></td>
             <td className="num-cell csm-main-total-num"><strong>{items.reduce((s, it) => s + Number(it.total_out_boxes || 0), 0).toLocaleString()}</strong></td>
             <td className="num-cell csm-main-total-num"><strong>{fmtNum(items.reduce((s, it) => s + Number(it.total_out_kg || 0), 0))}</strong></td>

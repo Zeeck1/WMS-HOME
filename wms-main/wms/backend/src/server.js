@@ -4,8 +4,14 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
+if (!process.env.TZ) process.env.TZ = 'Asia/Bangkok';
+
+const { bangkokISOWithOffset } = require('./utils/bangkokTime');
+
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+app.set('trust proxy', 1);
 
 // Middleware (raise limit for Send Email with PDF base64 - can be ~20MB+)
 app.use(cors());
@@ -17,6 +23,9 @@ const uploadsDir = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
+
+// Public files (LINE fetches withdraw-form images by HTTPS URL)
+app.use('/uploads', express.static(uploadsDir));
 
 // Auth routes (public)
 app.use('/api/auth', require('./routes/auth'));
@@ -42,7 +51,7 @@ app.use('/api/ck-intelligence/knowledge', require('./routes/ckKnowledge'));
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+  res.json({ status: 'OK', timestamp: new Date().toISOString(), bangkok: bangkokISOWithOffset() });
 });
 
 // Serve React frontend in production

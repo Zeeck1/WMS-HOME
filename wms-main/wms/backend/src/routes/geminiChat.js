@@ -1,4 +1,6 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { authMiddleware } = require('../middleware/auth');
 const pool = require('../config/db');
@@ -7,22 +9,73 @@ const router = express.Router();
 
 const KNOWLEDGE_APPEND_MAX_CHARS = 45000;
 
+const DEFAULT_KNOWLEDGE_JSON = path.join(__dirname, '..', '..', 'data', 'ck-intelligence-knowledge.json');
+
+/**
+ * Optional file-based training: boundaries, entries, extra system text.
+ * Copy backend/data/ck-intelligence-knowledge.example.json → ck-intelligence-knowledge.json
+ * Or set env CK_KNOWLEDGE_JSON_PATH to an absolute path.
+ */
+function loadCkKnowledgeJsonFile() {
+  const envPath = (process.env.CK_KNOWLEDGE_JSON_PATH || '').trim();
+  const p = envPath ? path.resolve(envPath) : DEFAULT_KNOWLEDGE_JSON;
+  if (!fs.existsSync(p)) {
+    return { systemExtra: '', jsonInner: '' };
+  }
+  try {
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+    let systemExtra = '';
+    if (typeof raw.systemExtra === 'string' && raw.systemExtra.trim()) {
+      systemExtra = raw.systemExtra.trim();
+    }
+    const parts = [];
+    if (Array.isArray(raw.boundaries) && raw.boundaries.length) {
+      const lines = raw.boundaries
+        .map((b) => `- ${String(b).trim()}`)
+        .filter((line) => line.length > 2);
+      if (lines.length) {
+        parts.push(`### Boundaries (follow strictly)\n${lines.join('\n')}`);
+      }
+    }
+    if (Array.isArray(raw.entries)) {
+      for (const e of raw.entries) {
+        const title = (e?.title != null ? String(e.title) : '').trim() || 'Untitled';
+        const cat = (e?.category != null ? String(e.category) : 'general').toLowerCase().trim() || 'general';
+        const content = e?.content != null ? String(e.content) : '';
+        parts.push(`### ${title} [${cat}]\n${content}`);
+      }
+    }
+    return { systemExtra, jsonInner: parts.join('\n\n') };
+  } catch (e) {
+    console.error('ck-intelligence-knowledge.json:', e?.message || e);
+    return { systemExtra: '', jsonInner: '' };
+  }
+}
+
 async function loadKnowledgeAppendix() {
+  const { systemExtra, jsonInner } = loadCkKnowledgeJsonFile();
+  let dbInner = '';
   try {
     const [rows] = await pool.query(
       `SELECT category, title, content FROM ck_knowledge_entries ORDER BY sort_order ASC, id ASC`
     );
-    if (!rows.length) return '';
-    const parts = rows.map((r) => `### ${r.title} [${r.category}]\n${r.content}`);
-    let block = parts.join('\n\n');
-    if (block.length > KNOWLEDGE_APPEND_MAX_CHARS) {
-      block = block.slice(0, KNOWLEDGE_APPEND_MAX_CHARS) + '\n\n[Knowledge truncated for length]';
+    if (rows.length) {
+      dbInner = rows.map((r) => `### ${r.title} [${r.category}]\n${r.content}`).join('\n\n');
     }
-    return `\n\n--- Trained knowledge (company & site-specific — use when relevant) ---\n${block}`;
   } catch (e) {
-    console.error('loadKnowledgeAppendix:', e?.message || e);
-    return '';
+    console.error('loadKnowledgeAppendix (db):', e?.message || e);
   }
+
+  const innerParts = [jsonInner, dbInner].filter(Boolean);
+  let combined = innerParts.join('\n\n');
+  if (combined.length > KNOWLEDGE_APPEND_MAX_CHARS) {
+    combined = combined.slice(0, KNOWLEDGE_APPEND_MAX_CHARS) + '\n\n[Knowledge truncated for length]';
+  }
+  const appendix = combined
+    ? `\n\n--- Trained knowledge (JSON file + database — use when relevant) ---\n${combined}`
+    : '';
+
+  return { systemExtra, appendix };
 }
 
 const MAX_MESSAGES = 40;
@@ -95,8 +148,11 @@ router.post('/chat', authMiddleware, async (req, res) => {
   const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
 
   try {
-    const knowledgeAppendix = await loadKnowledgeAppendix();
-    const systemInstruction = SYSTEM_INSTRUCTION + knowledgeAppendix;
+    const { systemExtra, appendix } = await loadKnowledgeAppendix();
+    const systemInstruction =
+      SYSTEM_INSTRUCTION +
+      (systemExtra ? `\n\n${systemExtra}` : '') +
+      appendix;
 
     const genAI = new GoogleGenerativeAI(apiKey.trim());
     const model = genAI.getGenerativeModel({

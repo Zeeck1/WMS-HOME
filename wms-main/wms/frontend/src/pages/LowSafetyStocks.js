@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { toast } from 'react-toastify';
 import { FiPackage, FiRefreshCw, FiTrendingDown, FiSearch, FiPrinter } from 'react-icons/fi';
 import { getLowStockStocks } from '../services/api';
+import { bangkokLocaleString } from '../utils/bangkokTime';
 
 const THRESHOLD_OPTIONS = [1000, 2000, 3000, 5000];
 
@@ -150,7 +151,7 @@ export default function LowSafetyStocks() {
             <strong>WMS — Low / Safety Stocks</strong>
             <div className="ls-print-below-band">{belowKgLabel}</div>
             <div className="ls-print-meta">
-              Printed: {new Date().toLocaleString()}
+              Printed: {bangkokLocaleString()}
               <br />
               {filteredItems.length} line item(s) in this report
               {searchQuery.trim() ? ' (after search filter)' : ''}

@@ -6,6 +6,11 @@ import {
 } from 'react-icons/fi';
 import { SiLine, SiGmail } from 'react-icons/si';
 import { getNoMovementStocks, sendLineNotification, sendEmailReport } from '../services/api';
+import {
+  bangkokYYYYMMDD,
+  bangkokLocaleString,
+  bangkokLocaleDateString,
+} from '../utils/bangkokTime';
 
 export default function NoMovementStocks() {
   const [items, setItems] = useState([]);
@@ -41,7 +46,7 @@ export default function NoMovementStocks() {
 
   useEffect(() => { load(); }, [load]);
 
-  const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const today = bangkokLocaleDateString(new Date(), { day: '2-digit', month: 'short', year: 'numeric' });
 
   const buildTextReport = (list = filteredItems) => {
     let text = `\n📦 No-Movement Stocks Report (by CS-IN Date)\n📅 ${today} | CS-IN ${months}+ months ago\n${'─'.repeat(40)}\n`;
@@ -50,8 +55,8 @@ export default function NoMovementStocks() {
       text += `\n${i + 1}. ${item.fish_name}`;
       if (item.order_code) text += ` (${item.order_code})`;
       text += `\n   Loc: ${item.line_place || item.location_code} | MC: ${Number(item.hand_on_balance_mc)} | KG: ${Number(item.hand_on_balance_kg).toFixed(1)}`;
-      text += `\n   CS-IN: ${item.cs_in_date ? new Date(item.cs_in_date).toLocaleDateString('en-GB') : '—'} | Days since CS-IN: ${item.days_idle}`;
-      if (item.last_out_date) text += ` | Last OUT: ${new Date(item.last_out_date).toLocaleDateString('en-GB')}`;
+      text += `\n   CS-IN: ${item.cs_in_date ? bangkokLocaleDateString(new Date(item.cs_in_date), { day: '2-digit', month: 'short', year: 'numeric' }) : '—'} | Days since CS-IN: ${item.days_idle}`;
+      if (item.last_out_date) text += ` | Last OUT: ${bangkokLocaleDateString(new Date(item.last_out_date), { day: '2-digit', month: 'short', year: 'numeric' })}`;
       text += '\n';
     });
     text += `\n${'─'.repeat(40)}\nTotal: ${list.length} item(s)`;
@@ -147,7 +152,7 @@ export default function NoMovementStocks() {
           position += pageHeight;
         }
       }
-      pdf.save(`no-movement-stocks-${new Date().toISOString().slice(0, 10)}.pdf`);
+      pdf.save(`no-movement-stocks-${bangkokYYYYMMDD()}.pdf`);
       toast.success('PDF downloaded!');
     } catch {
       toast.error('Failed to generate PDF');
@@ -255,7 +260,7 @@ export default function NoMovementStocks() {
         <div ref={reportRef} className="nm-report">
           <div className="nm-only-print">
             <strong>WMS — No-Movement Stocks</strong>
-            <div>Printed: {new Date().toLocaleString()}</div>
+            <div>Printed: {bangkokLocaleString()}</div>
             <div>
               CS-IN {months}+ months ago &nbsp;|&nbsp; {filteredItems.length} item(s)
               {searchQuery.trim() ? ' (search filtered)' : ''}
@@ -303,10 +308,10 @@ export default function NoMovementStocks() {
                         {item.stock_type === 'CONTAINER_EXTRA' ? 'EXTRA' : item.stock_type === 'IMPORT' ? 'IMPORT' : 'BULK'}
                       </span>
                     </td>
-                    <td>{item.cs_in_date ? new Date(item.cs_in_date).toLocaleDateString('en-GB') : '—'}</td>
+                    <td>{item.cs_in_date ? bangkokLocaleDateString(new Date(item.cs_in_date), { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}</td>
                     <td className="nm-cell-num">{Number(item.hand_on_balance_mc)}</td>
                     <td className="nm-cell-num">{Number(item.hand_on_balance_kg).toFixed(1)}</td>
-                    <td>{item.last_out_date ? new Date(item.last_out_date).toLocaleDateString('en-GB') : '—'}</td>
+                    <td>{item.last_out_date ? bangkokLocaleDateString(new Date(item.last_out_date), { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}</td>
                     <td>
                       <span className="nm-days-badge" style={{ backgroundColor: severityColor(item.days_idle) + '18', color: severityColor(item.days_idle), borderColor: severityColor(item.days_idle) + '40' }}>
                         {item.days_idle} days

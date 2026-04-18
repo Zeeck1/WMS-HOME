@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { FiPlus, FiEdit2, FiTrash2, FiSearch, FiAnchor, FiEye } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { getImportShipments, deleteImportShipment } from '../services/api';
+import { bangkokLocaleDateString } from '../utils/bangkokTime';
 
-const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB') : '-';
+const fmtDate = (d) => d ? bangkokLocaleDateString(new Date(d), { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
 
 function ImportShipments() {
   const navigate = useNavigate();

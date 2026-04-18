@@ -1,0 +1,35 @@
+{
+  "_about": "Copy this file to ck-intelligence-knowledge.json (same folder) and edit. Restart the backend after changes. Merged into CK Intelligence with DB knowledge (api/ck-intelligence/knowledge). Optional env CK_KNOWLEDGE_JSON_PATH overrides the file path.",
+  "systemExtra": "Stay within warehouse and WMS topics. Do not invent stock figures. If unsure, tell the user which app screen to open.",
+  "boundaries": [
+    "Do not give legal or financial advice; suggest consulting the appropriate department.",
+    "Never output or guess passwords, API keys, or tokens.",
+    "Prefer short answers; offer detail if the user asks.",
+    "When the user writes in Thai, reply helpfully in Thai (and English if useful for clarity)."
+  ],
+  "entries": [
+    {
+      "category": "company",
+      "title": "Company snapshot",
+      "content": "Founded in 2000, C.K. Frozen Fish and Food Company is the world’s leading manufacturer and exporter of freshwater frozen fish. Our presence spans over five continents globally. specialises in the processing of all kinds of raw freshwater/sea fish and shrimp; and seasonal fruits and vegetables. Additionally, we serve a wide range of Halal F&B Products."
+    },
+    { "category": "company",
+    "title": "Company location",
+    "content": "81 Moo 17 Khlong Nakhon Nueang Khet,Mueang Chachoengsao District, Chachoengsao 24000 (Head Office). 109/1 Moo 21, Bangplee-Tamru Road, Bangpleeyai, Bang Phli, Samut Prakan, 10540, Thailand (Second Office)"
+  },
+  { "category": "company",
+    "title": "Company founders",
+    "content": "Mr.Ali Khan (Founder & Chairman), Mrs.Charuwan Khan (Managing Director), Mr.Sal (Secretary & Leader)."
+  },
+    {
+      "category": "operations",
+      "title": "How we count MC",
+      "content": "Explain your site's convention for master carton (MC) vs KG here so the AI answers consistently."
+    },
+    {
+      "category": "policies",
+      "title": "Withdrawals",
+      "content": "Summarise your internal rules for withdrawal requests (PK vs RM, approval flow) in plain language."
+    }
+  ]
+}

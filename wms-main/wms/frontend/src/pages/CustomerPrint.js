@@ -3,9 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { FiPrinter, FiArrowLeft } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { getCustomerPrintData } from '../services/api';
+import { dateToYYYYMMDDInBangkok } from '../utils/bangkokTime';
 
-const toDate = (d) => d ? (typeof d === 'string' ? d.split('T')[0] : new Date(d).toISOString().split('T')[0]) : '';
-const COMPANY = 'บริษัท อี.เค.ไทยปลา ฟิช แอนด์ ซูชิ จำกัด สาขาวงเวียน์อักษา';
+const toDate = (d) => d ? (typeof d === 'string' ? d.split('T')[0] : dateToYYYYMMDDInBangkok(d)) : '';
+const COMPANY = 'Powered by CK Intelligence';
 const DOC_FOOTER = 'FM-CS-001 Rev.01 (01-11-2023)';
 const BLANK_ROWS_IN = 10;
 const BLANK_ROWS_OUT = 10;
@@ -109,12 +110,12 @@ function CustomerPrint() {
                   <th rowSpan={2} style={{ width: 72 }}>วันที่รับ</th>
                   <th rowSpan={2}>รายการ</th>
                   <th rowSpan={2} style={{ width: 65 }}>LOT No.</th>
-                  <th colSpan={2}>Total G/W</th>
+                  <th colSpan={3}>Total G/W</th>
                   <th colSpan={2}>N/W:UNIT</th>
                   <th rowSpan={2} style={{ width: 45 }}>เวลา</th>
                   <th rowSpan={2} style={{ width: 65 }}>หมายเหตุ</th>
                 </tr>
-                <tr><th>กล่อง</th><th>(Kg.)</th><th>กล่อง</th><th>(Kg.)</th></tr>
+                <tr><th>กล่อง</th><th style={{ fontSize: '0.65rem' }}>Kg รายละเอียด</th><th>Kg รวม</th><th>กล่อง</th><th>(Kg.)</th></tr>
               </thead>
               <tbody>
                 {depItems.map((it, i) => (
@@ -124,6 +125,7 @@ function CustomerPrint() {
                     <td>{it.item_name}</td>
                     <td>{it.lot_no || ''}</td>
                     <td className="num-cell">{it.boxes || ''}</td>
+                    <td className="num-cell" style={{ fontSize: '0.7rem', whiteSpace: 'pre-wrap' }}>{it.kg_parts || '—'}</td>
                     <td className="num-cell">{it.weight_kg ? Number(it.weight_kg).toFixed(2) : ''}</td>
                     <td className="num-cell">-</td>
                     <td className="num-cell">{it.nw_unit ? Number(it.nw_unit).toFixed(2) : ''}</td>
@@ -132,13 +134,14 @@ function CustomerPrint() {
                   </tr>
                 ))}
                 {blankArr(BLANK_ROWS_IN, depItems.length).map(i => (
-                  <tr key={`bi${i}`} className="cp-blank-row"><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+                  <tr key={`bi${i}`} className="cp-blank-row"><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr>
                   <td colSpan={4} className="text-right"></td>
                   <td className="num-cell"><b>{depTotalBoxes || ''}</b></td>
+                  <td></td>
                   <td className="num-cell"><b>{depTotalKg ? depTotalKg.toFixed(2) : ''}</b></td>
                   <td colSpan={4}></td>
                 </tr>

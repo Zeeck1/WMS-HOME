@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
+const { bangkokYYYYMMDD } = require('../utils/bangkokTime');
 
 const PRODUCT_FIELDS = ['fish_name', 'size', 'bulk_weight_kg', 'type', 'glazing', 'order_code'];
 const LOT_FIELDS = ['cs_in_date', 'sticker', 'remark', 'st_no', 'production_date', 'expiration_date'];
@@ -153,7 +154,7 @@ router.post('/row', async (req, res) => {
     }
 
     const lotNo = `MAN-${Date.now()}`;
-    const csIn = initial.cs_in_date || new Date().toISOString().split('T')[0];
+    const csIn = initial.cs_in_date || bangkokYYYYMMDD();
     const productionDate = initial.production_date || csIn;
     const expirationDate = initial.expiration_date || null;
     const [lt] = await conn.query(

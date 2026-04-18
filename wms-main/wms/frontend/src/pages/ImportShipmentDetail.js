@@ -13,9 +13,10 @@ import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { registerThaiFont } from '../services/pdfFonts';
+import { bangkokYYYYMMDD, dateToYYYYMMDDInBangkok, bangkokLocaleDateString } from '../utils/bangkokTime';
 
-const toInputDate = (d) => d ? (typeof d === 'string' ? d.split('T')[0] : new Date(d).toISOString().split('T')[0]) : '';
-const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB') : '';
+const toInputDate = (d) => d ? (typeof d === 'string' ? d.split('T')[0] : dateToYYYYMMDDInBangkok(d)) : '';
+const fmtDate = (d) => d ? bangkokLocaleDateString(new Date(d), { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
 const num = (v) => parseFloat(v) || 0;
 
 /** N/W (KGS) string from MC × WET/MC (2 dp). */
@@ -311,7 +312,7 @@ function ImportShipmentDetail() {
   };
 
   // ─── Export helpers ──────────────────────────────────────────────────────
-  const dateStr = () => new Date().toISOString().split('T')[0];
+  const dateStr = () => bangkokYYYYMMDD();
   const invLabel = shipment.inv_no || 'New';
 
   const exportStockItemsExcel = () => {

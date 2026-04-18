@@ -6,8 +6,45 @@ import {
 } from 'react-icons/fi';
 import { TbForklift } from 'react-icons/tb';
 import { toast } from 'react-toastify';
-import { getInventory, createWithdrawal, getWithdrawals, getWithdrawal } from '../services/api';
+import {
+  getInventory,
+  createWithdrawal,
+  getWithdrawals,
+  getWithdrawal,
+  sendLineNotification
+} from '../services/api';
 import { sortLocationsNearestFirst } from '../config/warehouseConfig';
+import {
+  bangkokYYYYMMDD,
+  bangkokYMDYesterday,
+  bangkokHHMM,
+  bangkokLocaleDateString,
+  dateToYYYYMMDDInBangkok,
+} from '../utils/bangkokTime';
+
+/** LINE text only — built from create response + distributed rows (no extra API, no image). */
+function buildWithdrawLineMessageFromClient(requestRow, distributedRows, notesText) {
+  const d = requestRow.withdraw_date
+    ? bangkokLocaleDateString(new Date(requestRow.withdraw_date))
+    : bangkokLocaleDateString(new Date(requestRow.created_at));
+  const t = requestRow.request_time ? String(requestRow.request_time).slice(0, 5) : '';
+  const lines = distributedRows.map((r, i) => {
+    const fish = r._fish_label || '';
+    const loc = r._line_place || '';
+    return `${i + 1}. ${fish} @ ${loc} — ${r.quantity_mc} MC`;
+  });
+  return [
+    '📦 Withdrawal request',
+    `Request: ${requestRow.request_no || '—'}`,
+    `Dept: ${requestRow.department}`,
+    `Date: ${d}${t ? ` ${t}` : ''}`,
+    `Requester: ${requestRow.requested_by || '—'}`,
+    '',
+    ...lines,
+    '',
+    `Notes: ${(notesText || '').trim() || '—'}`,
+  ].join('\n');
+}
 
 const DEPARTMENTS = [
   { id: 'PK', label: 'PK', desc: 'Packing Department', color: '#6366f1', icon: '📦' },
@@ -43,8 +80,8 @@ function Withdraw() {
   const [showHistory, setShowHistory] = useState(false);
   const [notes, setNotes] = useState('');
   const [requesterName, setRequesterName] = useState('');
-  const [withdrawDate, setWithdrawDate] = useState(new Date().toISOString().slice(0, 10));
-  const [requestTime, setRequestTime] = useState(new Date().toTimeString().slice(0, 5));
+  const [withdrawDate, setWithdrawDate] = useState(bangkokYYYYMMDD());
+  const [requestTime, setRequestTime] = useState(bangkokHHMM());
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [dateFilter, setDateFilter] = useState('');
   const [expandedRequest, setExpandedRequest] = useState(null);
@@ -105,8 +142,8 @@ function Withdraw() {
     myRequests.forEach(req => {
       const raw = req.withdraw_date || req.created_at;
       const d = raw ? new Date(raw) : new Date();
-      const dateKey = d.toISOString().slice(0, 10);
-      const dateLabel = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+      const dateKey = dateToYYYYMMDDInBangkok(d);
+      const dateLabel = bangkokLocaleDateString(d, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
       if (!groups[dateKey]) groups[dateKey] = { dateKey, dateLabel, requests: [] };
       groups[dateKey].requests.push(req);
     });
@@ -209,7 +246,7 @@ function Withdraw() {
   const distributeItems = (cartItem) => {
     const distributed = [];
     let remaining = cartItem.request_qty;
-    // subItems already sorted by nearest line
+    const fishLabel = [cartItem.fish_name, cartItem.type, cartItem.glazing].filter(Boolean).join(' ');
     for (const sub of cartItem.subItems) {
       if (remaining <= 0) break;
       const available = Number(sub.hand_on_balance_mc) || 0;
@@ -220,7 +257,9 @@ function Withdraw() {
         location_id: sub.location_id,
         quantity_mc: take,
         weight_kg: take * Number(cartItem.bulk_weight_kg),
-        production_process: cartItem.production_process || null
+        production_process: cartItem.production_process || null,
+        _line_place: sub.line_place,
+        _fish_label: fishLabel
       });
       remaining -= take;
     }
@@ -234,17 +273,22 @@ function Withdraw() {
     if (!requestTime) { toast.error('Please select a request time'); return; }
     setSubmitting(true);
     try {
-      // Distribute cart items across specific lots/locations
-      const items = [];
+      const distributedRows = [];
       for (const c of cart) {
-        const dist = distributeItems(c);
-        items.push(...dist);
+        distributedRows.push(...distributeItems(c));
       }
-      if (items.length === 0) {
+      if (distributedRows.length === 0) {
         toast.error('Could not allocate stock for the requested items');
         setSubmitting(false);
         return;
       }
+      const items = distributedRows.map(({ lot_id, location_id, quantity_mc, weight_kg, production_process }) => ({
+        lot_id,
+        location_id,
+        quantity_mc,
+        weight_kg,
+        production_process
+      }));
       const res = await createWithdrawal({
         department,
         items,
@@ -253,11 +297,18 @@ function Withdraw() {
         withdraw_date: withdrawDate,
         request_time: requestTime
       });
-      toast.success('Withdrawal request submitted!');
-      // Navigate to the printable form page
       const requestId = res.data.request?.id;
-      if (requestId) {
+      const reqRow = res.data.request;
+      if (requestId && reqRow) {
+        toast.success('Withdrawal request submitted!');
         navigate(`/withdraw/${requestId}/form`);
+        const msg = buildWithdrawLineMessageFromClient(reqRow, distributedRows, notes);
+        void sendLineNotification({ message: msg }).catch((lineErr) => {
+          console.error(lineErr);
+          toast.error(lineErr.response?.data?.error || 'Could not send to LINE — check Settings');
+        });
+      } else {
+        toast.success('Withdrawal request submitted!');
       }
       setCart([]);
       setNotes('');
@@ -353,9 +404,8 @@ function Withdraw() {
 
             {/* Date filter — find by date */}
             {(() => {
-              const todayStr = new Date().toISOString().slice(0, 10);
-              const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
-              const yesterdayStr = yesterday.toISOString().slice(0, 10);
+              const todayStr = bangkokYYYYMMDD();
+              const yesterdayStr = bangkokYMDYesterday();
               return (
                 <div className="wd-orders-date-bar">
                   <label className="wd-orders-date-label">Date:</label>
@@ -395,7 +445,7 @@ function Withdraw() {
                 <h3>No withdrawal requests</h3>
                 <p>
                   {dateFilter
-                    ? `No requests found for ${new Date(dateFilter + 'T12:00:00').toLocaleDateString(undefined, { dateStyle: 'medium' })}`
+                    ? `No requests found for ${bangkokLocaleDateString(new Date(`${dateFilter}T12:00:00+07:00`), { dateStyle: 'medium' })}`
                     : statusFilter !== 'ALL'
                       ? `No ${STATUS_CONFIG[statusFilter]?.label?.toLowerCase() || statusFilter.toLowerCase()} requests found`
                       : 'Submit a withdrawal request to see it here'}
@@ -432,7 +482,7 @@ function Withdraw() {
                             <span className="wd-order-summary">
                               {req.item_count} items · {Number(req.total_mc)} MC · {Number(req.total_kg || 0).toFixed(0)} KG
                             </span>
-                            <span className="wd-order-date">{new Date(req.created_at).toLocaleDateString(undefined, { dateStyle: 'medium' })}</span>
+                            <span className="wd-order-date">{bangkokLocaleDateString(new Date(req.created_at), { dateStyle: 'medium' })}</span>
                           </div>
                           <div className="wd-order-status-row">
                             <span className="wd-order-status-badge" style={{ background: STATUS_CONFIG[req.status]?.bg, color: STATUS_CONFIG[req.status]?.color }}>

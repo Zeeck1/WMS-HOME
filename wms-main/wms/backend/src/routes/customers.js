@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
+const { bangkokYYYYMMDD } = require('../utils/bangkokTime');
+const { sumKgPartsString, normalizeKgParts } = require('../utils/kgParts');
 
 // ── CRUD: Customers ────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
@@ -149,16 +151,19 @@ router.post('/:id/deposits', async (req, res) => {
     await conn.beginTransaction();
     const [d] = await conn.query(
       'INSERT INTO customer_deposits (customer_id, deposit_date, doc_ref, receiver_name, inspector_name) VALUES (?,?,?,?,?)',
-      [req.params.id, deposit_date || new Date().toISOString().split('T')[0], doc_ref || null, receiver_name || null, inspector_name || null]
+      [req.params.id, deposit_date || bangkokYYYYMMDD(), doc_ref || null, receiver_name || null, inspector_name || null]
     );
     const depositId = d.insertId;
 
     for (const item of items) {
+      const kgParts = normalizeKgParts(item.kg_parts);
+      let weightKg = parseFloat(item.weight_kg) || 0;
+      if (kgParts) weightKg = sumKgPartsString(kgParts);
       await conn.query(
-        `INSERT INTO customer_deposit_items (deposit_id, seq_no, receive_date, item_name, lot_no, boxes, weight_kg, nw_unit, time_str, remark)
-         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO customer_deposit_items (deposit_id, seq_no, receive_date, item_name, lot_no, boxes, weight_kg, kg_parts, nw_unit, time_str, remark)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
         [depositId, item.seq_no || 0, item.receive_date || null, item.item_name || '',
-         item.lot_no || null, item.boxes || 0, item.weight_kg || 0, item.nw_unit || 0,
+         item.lot_no || null, item.boxes || 0, weightKg, kgParts || null, item.nw_unit || 0,
          item.time_str || null, item.remark || null]
       );
     }
@@ -238,7 +243,7 @@ router.post('/:id/withdrawals', async (req, res) => {
     await conn.beginTransaction();
     const [w] = await conn.query(
       'INSERT INTO customer_withdrawals (customer_id, withdraw_date, doc_ref, withdrawer_name, inspector_name) VALUES (?,?,?,?,?)',
-      [req.params.id, withdraw_date || new Date().toISOString().split('T')[0], doc_ref || null, withdrawer_name || null, inspector_name || null]
+      [req.params.id, withdraw_date || bangkokYYYYMMDD(), doc_ref || null, withdrawer_name || null, inspector_name || null]
     );
     const wId = w.insertId;
 

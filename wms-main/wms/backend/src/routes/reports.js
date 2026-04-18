@@ -1,8 +1,26 @@
 const express = require('express');
 const router = express.Router();
+
+/** Public origin for LINE image URLs (HTTPS). Prefer PUBLIC_BASE_URL; else trust X-Forwarded-Proto (Railway, etc.). */
+function getPublicBaseUrl(req) {
+  const fromEnv = (process.env.PUBLIC_BASE_URL || '').trim().replace(/\/$/, '');
+  if (fromEnv) return fromEnv;
+  const xf = (req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  if (xf === 'https' || xf === 'http') return `${xf}://${req.get('host')}`;
+  if (req.secure) return `https://${req.get('host')}`;
+  if (process.env.NODE_ENV === 'production') {
+    return `https://${req.get('host')}`;
+  }
+  return `http://${req.get('host')}`;
+}
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 const pool = require('../config/db');
-const https = require('https');
+const { bangkokYYYYMMDD } = require('../utils/bangkokTime');
 const http = require('http');
+const https = require('https');
+const { getLinePushSettings, isValidLineDestination, pushLineText, pushLineMessages } = require('../utils/lineMessaging');
 const nodemailer = require('nodemailer');
 
 // GET low/safety stocks: items where hand_on_balance_kg is below threshold (default 2000)
@@ -23,7 +41,11 @@ router.get('/low-stock', async (req, res) => {
           s.inv_no AS order_code,
           s.inv_no AS lot_no,
           s.eta AS cs_in_date,
-          COALESCE(NULLIF(TRIM(ii.lines), ''), s.origin_country) AS line_place,
+          CASE
+            WHEN NULLIF(TRIM(ii.lines), '') IS NULL THEN NULL
+            WHEN NULLIF(TRIM(ii.lines), '') = NULLIF(TRIM(IFNULL(s.origin_country, '')), '') THEN NULL
+            ELSE NULLIF(TRIM(ii.lines), '')
+          END AS line_place,
           ii.lines AS stack_no,
           ii.remark,
           'IMPORT' AS stock_type,
@@ -58,7 +80,7 @@ router.get('/no-movement', async (req, res) => {
     const months = parseInt(req.query.months) || 3;
     const cutoffDate = new Date();
     cutoffDate.setMonth(cutoffDate.getMonth() - months);
-    const cutoff = cutoffDate.toISOString().slice(0, 10);
+    const cutoff = bangkokYYYYMMDD(cutoffDate);
 
     const [rows] = await pool.query(`
       SELECT
@@ -85,7 +107,11 @@ router.get('/no-movement', async (req, res) => {
           s.inv_no AS order_code,
           s.inv_no AS lot_no,
           s.eta AS cs_in_date,
-          COALESCE(NULLIF(TRIM(ii.lines), ''), s.origin_country) AS line_place,
+          CASE
+            WHEN NULLIF(TRIM(ii.lines), '') IS NULL THEN NULL
+            WHEN NULLIF(TRIM(ii.lines), '') = NULLIF(TRIM(IFNULL(s.origin_country, '')), '') THEN NULL
+            ELSE NULLIF(TRIM(ii.lines), '')
+          END AS line_place,
           ii.lines AS stack_no,
           ii.remark,
           'IMPORT' AS stock_type,
@@ -122,62 +148,81 @@ router.post('/no-movement/send-line', async (req, res) => {
   try {
     const { message } = req.body;
 
-    const [rows] = await pool.query(
-      "SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('line_channel_access_token', 'line_user_id')"
-    );
-    const settings = {};
-    rows.forEach(r => { settings[r.setting_key] = (r.setting_value != null ? String(r.setting_value) : ''); });
-    const token = (settings.line_channel_access_token || '').trim();
-    // LINE expects user/group ID: non-empty string (e.g. Uxxxxxxxx or Cxxxxxxxx), no control chars
-    let userId = (settings.line_user_id != null ? String(settings.line_user_id) : '').trim().replace(/[\s\r\n]+/g, '');
-    if (userId === 'null' || userId === 'undefined') userId = '';
+    const { token, userId: rawUserId } = await getLinePushSettings(pool);
+    let userId = rawUserId;
 
     if (!token) return res.status(400).json({ error: 'LINE Channel Access Token not configured. Go to Settings.' });
     if (!userId) return res.status(400).json({ error: 'LINE User/Group ID not configured. Go to Settings and enter the destination User ID or Group ID.' });
-    // LINE destination IDs: U (user), C (group), or R (room) + 32 hex chars = 33 total
-    if (!/^[UCR][a-fA-F0-9]{32}$/.test(userId)) {
+    if (!isValidLineDestination(userId)) {
       return res.status(400).json({
         error: 'Invalid LINE User/Group ID. It must be 33 characters: U, C, or R followed by 32 hex digits (e.g. U1234567890abcdef1234567890abcdef). Get it from your webhook or LINE Developers Console.'
       });
     }
 
-    // LINE allows max 5000 chars per message; split into chunks
-    const MAX_LEN = 4500;
-    const chunks = [];
-    for (let i = 0; i < message.length; i += MAX_LEN) {
-      chunks.push(message.slice(i, i + MAX_LEN));
-    }
-    const messages = chunks.map(text => ({ type: 'text', text }));
-
-    const payload = JSON.stringify({ to: userId, messages });
-
-    await new Promise((resolve, reject) => {
-      const req2 = https.request({
-        hostname: 'api.line.me',
-        path: '/v2/bot/message/push',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'Content-Length': Buffer.byteLength(payload)
-        }
-      }, (resp) => {
-        let data = '';
-        resp.on('data', chunk => data += chunk);
-        resp.on('end', () => {
-          if (resp.statusCode === 200) resolve(data);
-          else reject(new Error(`LINE Messaging API error: ${resp.statusCode} ${data}`));
-        });
-      });
-      req2.on('error', reject);
-      req2.write(payload);
-      req2.end();
-    });
+    await pushLineText(token, userId, message || '');
 
     res.json({ message: 'Sent to LINE successfully' });
   } catch (error) {
     console.error('Error sending LINE notification:', error);
     res.status(500).json({ error: error.message || 'Failed to send LINE notification' });
+  }
+});
+
+// POST withdraw form as image to LINE (PNG/JPEG base64) — same Settings as other LINE pushes
+router.post('/withdraw-form/send-line-image', async (req, res) => {
+  try {
+    const { imageBase64, requestNo } = req.body;
+    if (!imageBase64 || typeof imageBase64 !== 'string') {
+      return res.status(400).json({ error: 'imageBase64 is required' });
+    }
+
+    const match = imageBase64.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/i);
+    const rawB64 = match ? match[2] : imageBase64.replace(/^data:[^;]+;base64,/i, '');
+    let buf;
+    try {
+      buf = Buffer.from(rawB64, 'base64');
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid base64 image data' });
+    }
+    if (buf.length < 80) return res.status(400).json({ error: 'Image data too small' });
+    if (buf.length > 10 * 1024 * 1024) return res.status(400).json({ error: 'Image too large (max 10MB for LINE)' });
+
+    const lineDir = path.join(__dirname, '..', '..', 'uploads', 'line');
+    if (!fs.existsSync(lineDir)) fs.mkdirSync(lineDir, { recursive: true });
+    const ext = match && String(match[1]).toLowerCase() === 'png' ? 'png' : 'jpg';
+    const filename = `withdraw-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+    fs.writeFileSync(path.join(lineDir, filename), buf);
+
+    const base = getPublicBaseUrl(req);
+    if (!base.startsWith('https://')) {
+      return res.status(400).json({
+        error: 'LINE requires HTTPS image URLs. Deploy with HTTPS, set PUBLIC_BASE_URL to your public API origin (no /api), or use ngrok. http://localhost cannot be fetched by LINE.'
+      });
+    }
+
+    const imageUrl = `${base}/uploads/line/${filename}`;
+
+    const { token, userId } = await getLinePushSettings(pool);
+    if (!token) return res.status(400).json({ error: 'LINE Channel Access Token not configured. Go to Settings.' });
+    if (!userId) return res.status(400).json({ error: 'LINE User/Group ID not configured. Go to Settings.' });
+    if (!isValidLineDestination(userId)) {
+      return res.status(400).json({ error: 'Invalid LINE User/Group ID. Go to Settings.' });
+    }
+
+    const caption = requestNo
+      ? `📦 Withdrawal submitted — ${requestNo}`
+      : '📦 Withdrawal submitted — Withdraw form';
+    const messages = [
+      { type: 'text', text: caption },
+      { type: 'image', originalContentUrl: imageUrl, previewImageUrl: imageUrl }
+    ];
+
+    await pushLineMessages(token, userId, messages);
+
+    res.json({ message: 'Withdraw form image sent to LINE', imageUrl });
+  } catch (error) {
+    console.error('Error sending withdraw form LINE image:', error);
+    res.status(500).json({ error: error.message || 'Failed to send image to LINE' });
   }
 });
 

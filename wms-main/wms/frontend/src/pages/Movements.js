@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FiClock, FiSearch } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { getMovements, getImportMovementHistory } from '../services/api';
+import { bangkokLocaleString } from '../utils/bangkokTime';
 
 function Movements() {
   const [movements, setMovements] = useState([]);
@@ -157,7 +158,7 @@ function Movements() {
                   </td></tr>
                 ) : filtered.map(m => (
                   <tr key={m.id} style={m._source === 'import' ? { background: 'rgba(79,70,229,0.03)' } : {}}>
-                    <td style={{ whiteSpace: 'nowrap' }}>{new Date(m.created_at).toLocaleString()}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{bangkokLocaleString(new Date(m.created_at))}</td>
                     <td>
                       <span className={`badge badge-${m.movement_type.toLowerCase()}`}>
                         {m.movement_type}

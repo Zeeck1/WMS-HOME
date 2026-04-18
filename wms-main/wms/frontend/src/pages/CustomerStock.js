@@ -6,10 +6,14 @@ import {
   getCustomers, getCustomerDeposits, createDeposit, deleteAllDeposits,
   getCustomerDepositItems, getCustomerWithdrawals, createCustomerWithdrawal, deleteAllWithdrawals
 } from '../services/api';
+import { bangkokYYYYMMDD, dateToYYYYMMDDInBangkok } from '../utils/bangkokTime';
+import { sumKgPartsString } from '../utils/kgParts';
 
-const toDate = (d) => d ? (typeof d === 'string' ? d.split('T')[0] : new Date(d).toISOString().split('T')[0]) : '';
+const toDate = (d) => d ? (typeof d === 'string' ? d.split('T')[0] : dateToYYYYMMDDInBangkok(d)) : '';
 
-const EMPTY_ITEM = { receive_date: new Date().toISOString().split('T')[0], item_name: '', lot_no: '', boxes: '', weight_kg: '', nw_unit: '', time_str: '', remark: '' };
+const EMPTY_ITEM = {
+  receive_date: bangkokYYYYMMDD(), item_name: '', lot_no: '', boxes: '', kg_parts: '', weight_kg: '', nw_unit: '', time_str: '', remark: '',
+};
 
 function CustomerStock() {
   const navigate = useNavigate();
@@ -22,13 +26,13 @@ function CustomerStock() {
 
   // IN state
   const [depositItems, setDepositItems] = useState([{ ...EMPTY_ITEM, seq_no: 1 }]);
-  const [depositMeta, setDepositMeta] = useState({ deposit_date: new Date().toISOString().split('T')[0], doc_ref: '', receiver_name: '', inspector_name: '' });
+  const [depositMeta, setDepositMeta] = useState({ deposit_date: bangkokYYYYMMDD(), doc_ref: '', receiver_name: '', inspector_name: '' });
   const [pastDeposits, setPastDeposits] = useState([]);
   const [savingIn, setSavingIn] = useState(false);
 
   // OUT state
   const [outLotActive, setOutLotActive] = useState(false);
-  const [outLotDate, setOutLotDate] = useState(new Date().toISOString().split('T')[0]);
+  const [outLotDate, setOutLotDate] = useState(bangkokYYYYMMDD());
   const [outLotLabel, setOutLotLabel] = useState('');
   const [outSearch, setOutSearch] = useState({ cs_in_date: '', fish_name: '', lot_no: '' });
   const [availableItems, setAvailableItems] = useState([]);
@@ -77,7 +81,18 @@ function CustomerStock() {
   // ─── IN Handlers ─────────────────────────────────────────────────────
   const addItem = () => setDepositItems(prev => [...prev, { ...EMPTY_ITEM, seq_no: prev.length + 1 }]);
   const removeItem = (i) => setDepositItems(prev => prev.filter((_, idx) => idx !== i).map((it, idx) => ({ ...it, seq_no: idx + 1 })));
-  const updateItem = (i, field, val) => setDepositItems(prev => prev.map((it, idx) => idx === i ? { ...it, [field]: val } : it));
+  const updateItem = (i, field, val) => setDepositItems(prev => prev.map((it, idx) => {
+    if (idx !== i) return it;
+    if (field === 'kg_parts') {
+      const kgParts = val;
+      const sum = sumKgPartsString(kgParts);
+      const next = { ...it, kg_parts: kgParts };
+      if (String(kgParts).trim()) next.weight_kg = String(sum);
+      return next;
+    }
+    if (field === 'weight_kg' && String(it.kg_parts || '').trim()) return it;
+    return { ...it, [field]: val };
+  }));
 
   const handleSaveDeposit = async () => {
     if (!selectedCustomerId) return toast.error('เลือกลูกค้าก่อน');
@@ -142,7 +157,7 @@ function CustomerStock() {
     setOutCart(prev => [...prev, {
       deposit_item_id: item.id, item_name: item.item_name, lot_no: item.lot_no,
       receive_date: item.receive_date, balance_boxes: item.balance_boxes, balance_kg: item.balance_kg,
-      orig_boxes: item.boxes, orig_weight_kg: item.weight_kg, nw_unit: item.nw_unit,
+      orig_boxes: item.boxes, orig_weight_kg: item.weight_kg, kg_parts: item.kg_parts, nw_unit: item.nw_unit,
       boxes_out: '', weight_kg_out: '', time_str: '', remark: ''
     }]);
   };
@@ -221,7 +236,8 @@ function CustomerStock() {
                         <th>รายการ</th>
                         <th style={{ width: 100 }}>LOT No.</th>
                         <th style={{ width: 70 }}>กล่อง</th>
-                        <th style={{ width: 90 }}>Kg.</th>
+                        <th style={{ minWidth: 120 }}>Kg รายละเอียด</th>
+                        <th style={{ width: 80 }}>Kg. (รวม)</th>
                         <th style={{ width: 90 }}>N/W:UNIT</th>
                         <th style={{ width: 80 }}>เวลา</th>
                         <th style={{ width: 120 }}>หมายเหตุ</th>
@@ -236,7 +252,27 @@ function CustomerStock() {
                           <td><input className="form-control form-control-sm" placeholder="ชื่อสินค้า" value={it.item_name} onChange={e => updateItem(i, 'item_name', e.target.value)} /></td>
                           <td><input className="form-control form-control-sm" value={it.lot_no} onChange={e => updateItem(i, 'lot_no', e.target.value)} /></td>
                           <td><input type="number" className="form-control form-control-sm" value={it.boxes} onChange={e => updateItem(i, 'boxes', e.target.value)} /></td>
-                          <td><input type="number" step="0.01" className="form-control form-control-sm" value={it.weight_kg} onChange={e => updateItem(i, 'weight_kg', e.target.value)} /></td>
+                          <td>
+                            <input
+                              className="form-control form-control-sm"
+                              placeholder="15.2, 16.2, 14.3"
+                              value={it.kg_parts || ''}
+                              onChange={e => updateItem(i, 'kg_parts', e.target.value)}
+                              title="คั่นด้วยจุลภาค — ระบบคำนวณ Kg รวมอัตโนมัติ"
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              step="0.01"
+                              className="form-control form-control-sm"
+                              value={it.weight_kg}
+                              onChange={e => updateItem(i, 'weight_kg', e.target.value)}
+                              readOnly={!!String(it.kg_parts || '').trim()}
+                              title={String(it.kg_parts || '').trim() ? 'ยอดรวมจาก Kg รายละเอียด' : 'กรอก Kg โดยตรงเมื่อไม่ใช้รายละเอียด'}
+                              style={String(it.kg_parts || '').trim() ? { background: '#f8fafc' } : {}}
+                            />
+                          </td>
                           <td><input type="number" step="0.01" className="form-control form-control-sm" value={it.nw_unit} onChange={e => updateItem(i, 'nw_unit', e.target.value)} /></td>
                           <td><input className="form-control form-control-sm" placeholder="13.00น." value={it.time_str} onChange={e => updateItem(i, 'time_str', e.target.value)} /></td>
                           <td><input className="form-control form-control-sm" value={it.remark} onChange={e => updateItem(i, 'remark', e.target.value)} /></td>
@@ -359,7 +395,7 @@ function CustomerStock() {
                         ) : (
                           <div className="table-container" style={{ overflow: 'auto', maxHeight: '30vh' }}>
                             <table className="excel-table">
-                              <thead><tr><th>วันที่รับ</th><th>รายการ</th><th>LOT No.</th><th>กล่อง (ฝาก)</th><th>Kg. (ฝาก)</th><th>คงเหลือ กล่อง</th><th>คงเหลือ Kg.</th><th></th></tr></thead>
+                              <thead><tr><th>วันที่รับ</th><th>รายการ</th><th>LOT No.</th><th>กล่อง (ฝาก)</th><th>Kg รายละเอียด</th><th>Kg. รวม (ฝาก)</th><th>คงเหลือ กล่อง</th><th>คงเหลือ Kg.</th><th></th></tr></thead>
                               <tbody>
                                 {availableItems.map(it => (
                                   <tr key={it.id}>
@@ -367,6 +403,7 @@ function CustomerStock() {
                                     <td><strong>{it.item_name}</strong></td>
                                     <td>{it.lot_no || '-'}</td>
                                     <td className="num-cell">{it.boxes}</td>
+                                    <td className="num-cell" style={{ fontSize: '0.85rem', whiteSpace: 'pre-wrap' }}>{it.kg_parts || '—'}</td>
                                     <td className="num-cell">{Number(it.weight_kg).toFixed(2)}</td>
                                     <td className="num-cell" style={{ fontWeight: 700, color: '#16a34a' }}>{it.balance_boxes}</td>
                                     <td className="num-cell" style={{ fontWeight: 700, color: '#16a34a' }}>{Number(it.balance_kg).toFixed(2)}</td>

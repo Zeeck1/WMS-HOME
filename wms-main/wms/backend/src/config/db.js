@@ -1,6 +1,8 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
+if (!process.env.TZ) process.env.TZ = 'Asia/Bangkok';
+
 function getDbConfig() {
   const connectionUrl = process.env.DB_URL || process.env.DATABASE_URL || process.env.MYSQL_URL;
   if (connectionUrl) {
@@ -30,7 +32,12 @@ const pool = mysql.createPool({
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 0,
-  dateStrings: true
+  dateStrings: true,
+  timezone: '+07:00',
+});
+
+pool.on('connection', (connection) => {
+  connection.query("SET SESSION time_zone = '+07:00'");
 });
 
 module.exports = pool;

@@ -411,6 +411,7 @@ async function initDatabase() {
         lot_no VARCHAR(100),
         boxes INT DEFAULT 0,
         weight_kg DECIMAL(12,2) DEFAULT 0,
+        kg_parts VARCHAR(500) DEFAULT NULL,
         nw_unit DECIMAL(12,2) DEFAULT 0,
         time_str VARCHAR(50),
         remark TEXT,
@@ -551,6 +552,20 @@ async function initDatabase() {
       if (cols.length === 0) {
         await connection.query('ALTER TABLE import_expenses ADD COLUMN amount_usd_kgs_expr VARCHAR(200) DEFAULT NULL AFTER amount_usd_kgs');
         console.log('  Migration: added amount_usd_kgs_expr to import_expenses');
+      }
+    } catch (e) { /* ignore */ }
+
+    // Migration: kg_parts for comma-separated kg breakdown (Customer deposit IN)
+    try {
+      const [cols] = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'customer_deposit_items' AND COLUMN_NAME = 'kg_parts'
+      `, [dbName]);
+      if (cols.length === 0) {
+        await connection.query(
+          'ALTER TABLE customer_deposit_items ADD COLUMN kg_parts VARCHAR(500) DEFAULT NULL AFTER weight_kg'
+        );
+        console.log('  Migration: added kg_parts to customer_deposit_items');
       }
     } catch (e) { /* ignore */ }
 
