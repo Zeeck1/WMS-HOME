@@ -2,7 +2,49 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { bangkokYYYYMMDD } = require('../utils/bangkokTime');
-const { sumKgPartsString, normalizeKgParts } = require('../utils/kgParts');
+const {
+  sumKgPartsString,
+  normalizeKgParts,
+  parseKgPartsArray,
+  subtractKgPartsMultiset,
+  getRemainingKgState,
+  getRemainingKgStateWithInference,
+  round2,
+} = require('../utils/kgParts');
+
+/** Recompute balance_kg / balance_kg_parts from deposit kg_parts + withdrawal lines. */
+async function enrichDepositItemBalances(pool, rows) {
+  if (!rows || rows.length === 0) return rows;
+  const ids = rows.map((r) => r.id);
+  const [wds] = await pool.query(
+    `SELECT wi.deposit_item_id, wi.kg_parts_out, wi.weight_kg_out, w.withdraw_date, wi.id AS wi_id
+     FROM customer_withdrawal_items wi
+     JOIN customer_withdrawals w ON wi.withdrawal_id = w.id
+     WHERE wi.deposit_item_id IN (?)`,
+    [ids]
+  );
+  const byDep = {};
+  for (const w of wds) {
+    if (!byDep[w.deposit_item_id]) byDep[w.deposit_item_id] = [];
+    byDep[w.deposit_item_id].push(w);
+  }
+  for (const k of Object.keys(byDep)) {
+    byDep[k].sort((a, b) => {
+      const da = String(a.withdraw_date || '').localeCompare(String(b.withdraw_date || ''));
+      if (da !== 0) return da;
+      return (a.wi_id || 0) - (b.wi_id || 0);
+    });
+  }
+  return rows.map((r) => {
+    const wlist = byDep[r.id] || [];
+    const state = getRemainingKgStateWithInference(r, wlist);
+    return {
+      ...r,
+      balance_kg: state.balance_kg,
+      balance_kg_parts: state.balance_kg_parts,
+    };
+  });
+}
 
 // ── CRUD: Customers ────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
@@ -30,7 +72,8 @@ router.get('/summary/all', async (req, res) => {
     if (customer_id) { sql += ' WHERE d.customer_id = ?'; params.push(customer_id); }
     sql += ' ORDER BY c.name ASC, di.receive_date DESC, di.seq_no ASC';
     const [rows] = await pool.query(sql, params);
-    res.json(rows);
+    const enriched = await enrichDepositItemBalances(pool, rows);
+    res.json(enriched);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -196,7 +239,8 @@ router.get('/:id/deposit-items', async (req, res) => {
 
     sql += ' HAVING balance_boxes > 0 ORDER BY di.receive_date DESC, di.seq_no ASC';
     const [rows] = await pool.query(sql, params);
-    res.json(rows);
+    const enriched = await enrichDepositItemBalances(pool, rows);
+    res.json(enriched);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -248,11 +292,76 @@ router.post('/:id/withdrawals', async (req, res) => {
     const wId = w.insertId;
 
     for (const item of items) {
+      const [diRows] = await conn.query('SELECT * FROM customer_deposit_items WHERE id = ?', [item.deposit_item_id]);
+      const di = diRows[0];
+      if (!di) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'Deposit item not found' });
+      }
+
+      const [priorRows] = await conn.query(
+        `SELECT wi.kg_parts_out, wi.weight_kg_out, w.withdraw_date, wi.id
+         FROM customer_withdrawal_items wi
+         JOIN customer_withdrawals w ON wi.withdrawal_id = w.id
+         WHERE wi.deposit_item_id = ?
+         ORDER BY w.withdraw_date ASC, wi.id ASC`,
+        [item.deposit_item_id]
+      );
+
+      const [sumBoxRow] = await conn.query(
+        'SELECT COALESCE(SUM(boxes_out),0) AS s FROM customer_withdrawal_items WHERE deposit_item_id = ?',
+        [item.deposit_item_id]
+      );
+      const balanceBoxes = Number(di.boxes) - Number(sumBoxRow[0]?.s || 0);
+
+      const state = getRemainingKgState(di, priorRows);
+      const boxesOut = parseInt(item.boxes_out, 10) || 0;
+      if (boxesOut <= 0) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'ระบุจำนวนกล่องที่เบิก' });
+      }
+      if (boxesOut > balanceBoxes) {
+        await conn.rollback();
+        return res.status(400).json({ error: `${di.item_name || 'รายการ'}: เบิกเกินยอดคงเหลือ (กล่อง)` });
+      }
+
+      let weightOut;
+      let kgPartsOut = null;
+      const hasInParts = di.kg_parts && String(di.kg_parts).trim();
+
+      if (hasInParts) {
+        kgPartsOut = normalizeKgParts(item.kg_parts_out);
+        if (!kgPartsOut) {
+          await conn.rollback();
+          return res.status(400).json({ error: `${di.item_name || 'รายการ'}: กรุณาระบุ Kg รายละเอียด (คั่นด้วยจุลภาค) ให้ตรงกับยอดฝาก` });
+        }
+        weightOut = sumKgPartsString(kgPartsOut);
+        if (weightOut <= 0) {
+          await conn.rollback();
+          return res.status(400).json({ error: `${di.item_name || 'รายการ'}: Kg รายละเอียดไม่ถูกต้อง` });
+        }
+        if (state.mode === 'parts') {
+          const r = subtractKgPartsMultiset(state.remainingParts, parseKgPartsArray(kgPartsOut));
+          if (!r.ok) {
+            await conn.rollback();
+            return res.status(400).json({ error: `${di.item_name || 'รายการ'}: Kg รายละเอียดไม่ตรงกับยอดคงเหลือ` });
+          }
+        } else if (weightOut > round2(state.balance_kg) + 0.0001) {
+          await conn.rollback();
+          return res.status(400).json({ error: `${di.item_name || 'รายการ'}: เบิกเกินยอดคงเหลือ (Kg)` });
+        }
+      } else {
+        weightOut = round2(parseFloat(item.weight_kg_out) || 0);
+        if (weightOut > round2(state.balance_kg) + 0.0001) {
+          await conn.rollback();
+          return res.status(400).json({ error: `${di.item_name || 'รายการ'}: เบิกเกินยอดคงเหลือ (Kg)` });
+        }
+      }
+
       await conn.query(
-        `INSERT INTO customer_withdrawal_items (withdrawal_id, deposit_item_id, boxes_out, weight_kg_out, time_str, remark)
-         VALUES (?,?,?,?,?,?)`,
-        [wId, item.deposit_item_id, item.boxes_out || 0, item.weight_kg_out || 0,
-         item.time_str || null, item.remark || null]
+        `INSERT INTO customer_withdrawal_items (withdrawal_id, deposit_item_id, boxes_out, weight_kg_out, kg_parts_out, time_str, remark)
+         VALUES (?,?,?,?,?,?,?)`,
+        [wId, item.deposit_item_id, boxesOut, weightOut, kgPartsOut, item.time_str || null, item.remark || null]
       );
     }
     await conn.commit();
@@ -283,9 +392,11 @@ router.get('/print/:depositId/:withdrawalId', async (req, res) => {
 
         if (depItemIds.length > 0) {
           const [allWdItems] = await pool.query(
-            `SELECT wi.*, w.withdraw_date, w.id AS w_id,
+            `SELECT wi.id, wi.withdrawal_id, wi.deposit_item_id, wi.boxes_out, wi.weight_kg_out, wi.kg_parts_out,
+              wi.time_str, wi.remark,
+              w.withdraw_date, w.id AS w_id,
               di.item_name, di.lot_no, di.receive_date, di.deposit_id,
-              di.boxes AS orig_boxes, di.weight_kg AS orig_weight_kg, di.nw_unit
+              di.boxes AS orig_boxes, di.weight_kg AS orig_weight_kg, di.kg_parts AS orig_kg_parts, di.nw_unit
              FROM customer_withdrawal_items wi
              JOIN customer_withdrawals w ON wi.withdrawal_id = w.id
              JOIN customer_deposit_items di ON wi.deposit_item_id = di.id

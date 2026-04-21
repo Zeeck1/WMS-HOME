@@ -157,13 +157,24 @@ function CustomerStock() {
     setOutCart(prev => [...prev, {
       deposit_item_id: item.id, item_name: item.item_name, lot_no: item.lot_no,
       receive_date: item.receive_date, balance_boxes: item.balance_boxes, balance_kg: item.balance_kg,
+      balance_kg_parts: item.balance_kg_parts,
       orig_boxes: item.boxes, orig_weight_kg: item.weight_kg, kg_parts: item.kg_parts, nw_unit: item.nw_unit,
-      boxes_out: '', weight_kg_out: '', time_str: '', remark: ''
+      boxes_out: '', kg_parts_out: '', weight_kg_out: '', time_str: '', remark: ''
     }]);
   };
 
   const removeFromCart = (i) => setOutCart(prev => prev.filter((_, idx) => idx !== i));
-  const updateCartItem = (i, field, val) => setOutCart(prev => prev.map((it, idx) => idx === i ? { ...it, [field]: val } : it));
+  const updateCartItem = (i, field, val) => setOutCart(prev => prev.map((it, idx) => {
+    if (idx !== i) return it;
+    if (field === 'kg_parts_out') {
+      const next = { ...it, kg_parts_out: val };
+      if (String(val).trim()) next.weight_kg_out = String(sumKgPartsString(val));
+      else next.weight_kg_out = '';
+      return next;
+    }
+    if (field === 'weight_kg_out' && String(it.kg_parts || '').trim()) return it;
+    return { ...it, [field]: val };
+  }));
 
   const handleSaveWithdrawal = async () => {
     if (!selectedCustomerId) return toast.error('เลือกลูกค้าก่อน');
@@ -171,15 +182,26 @@ function CustomerStock() {
     if (valid.length === 0) return toast.error('ระบุจำนวนกล่องที่เบิก');
     for (const it of valid) {
       if (Number(it.boxes_out) > it.balance_boxes) return toast.error(`${it.item_name}: เบิกเกินยอดคงเหลือ`);
+      if (String(it.kg_parts || '').trim()) {
+        if (!String(it.kg_parts_out || '').trim()) return toast.error(`${it.item_name}: ระบุ Kg รายละเอียด (คั่นด้วยจุลภาค) ให้ตรงกับยอดคงเหลือ`);
+      }
     }
     setSavingOut(true);
     try {
+      const payloadItems = valid.map(it => ({
+        deposit_item_id: it.deposit_item_id,
+        boxes_out: it.boxes_out,
+        weight_kg_out: it.weight_kg_out,
+        kg_parts_out: String(it.kg_parts || '').trim() ? it.kg_parts_out : undefined,
+        time_str: it.time_str,
+        remark: it.remark,
+      }));
       await createCustomerWithdrawal(selectedCustomerId, {
         withdraw_date: outLotDate,
         doc_ref: outLotDate,
         withdrawer_name: outMeta.withdrawer_name,
         inspector_name: outMeta.inspector_name,
-        items: valid
+        items: payloadItems
       });
       toast.success('บันทึกรายการเบิกสำเร็จ');
       resetOutLot();
@@ -395,7 +417,7 @@ function CustomerStock() {
                         ) : (
                           <div className="table-container" style={{ overflow: 'auto', maxHeight: '30vh' }}>
                             <table className="excel-table">
-                              <thead><tr><th>วันที่รับ</th><th>รายการ</th><th>LOT No.</th><th>กล่อง (ฝาก)</th><th>Kg รายละเอียด</th><th>Kg. รวม (ฝาก)</th><th>คงเหลือ กล่อง</th><th>คงเหลือ Kg.</th><th></th></tr></thead>
+                              <thead><tr><th>วันที่รับ</th><th>รายการ</th><th>LOT No.</th><th>กล่อง (ฝาก)</th><th>Kg รายละเอียด</th><th>Kg. รวม (ฝาก)</th><th>คงเหลือ กล่อง</th><th title="ยอดคงเหลือแบบรายละเอียด (คั่นด้วยจุลภาค)">Balance amount</th><th>คงเหลือ Kg.</th><th></th></tr></thead>
                               <tbody>
                                 {availableItems.map(it => (
                                   <tr key={it.id}>
@@ -406,6 +428,11 @@ function CustomerStock() {
                                     <td className="num-cell" style={{ fontSize: '0.85rem', whiteSpace: 'pre-wrap' }}>{it.kg_parts || '—'}</td>
                                     <td className="num-cell">{Number(it.weight_kg).toFixed(2)}</td>
                                     <td className="num-cell" style={{ fontWeight: 700, color: '#16a34a' }}>{it.balance_boxes}</td>
+                                    <td className="num-cell" style={{ fontWeight: 700, color: '#16a34a', fontSize: '0.85rem', whiteSpace: 'pre-wrap' }}>
+                                      {it.balance_kg_parts != null && String(it.balance_kg_parts).trim()
+                                        ? it.balance_kg_parts
+                                        : '—'}
+                                    </td>
                                     <td className="num-cell" style={{ fontWeight: 700, color: '#16a34a' }}>{Number(it.balance_kg).toFixed(2)}</td>
                                     <td><button className="btn btn-primary btn-sm" onClick={() => addToOutCart(it)}>เลือก</button></td>
                                   </tr>
@@ -430,7 +457,7 @@ function CustomerStock() {
                                 <th>LOT No.</th>
                                 <th style={{ width: 90 }}>คงเหลือ กล่อง</th>
                                 <th style={{ width: 90 }}>เบิก กล่อง</th>
-                                <th style={{ width: 90 }}>เบิก KG</th>
+                                <th style={{ width: 130 }} title="ถ้ามี Kg รายละเอียดจาก IN ให้คั่นด้วยจุลภาค (เบิกบางส่วนได้)">เบิก KG</th>
                                 <th style={{ width: 80 }}>เวลา</th>
                                 <th style={{ width: 120 }}>หมายเหตุ</th>
                                 <th style={{ width: 40 }}></th>
@@ -445,8 +472,29 @@ function CustomerStock() {
                                   <td className="num-cell" style={{ color: '#16a34a' }}>{it.balance_boxes}</td>
                                   <td><input type="number" className="form-control form-control-sm" value={it.boxes_out}
                                     onChange={e => updateCartItem(i, 'boxes_out', e.target.value)} max={it.balance_boxes} /></td>
-                                  <td><input type="number" step="0.01" className="form-control form-control-sm" value={it.weight_kg_out}
-                                    onChange={e => updateCartItem(i, 'weight_kg_out', e.target.value)} /></td>
+                                  <td>
+                                    {String(it.kg_parts || '').trim() ? (
+                                      <input
+                                        className="form-control form-control-sm"
+                                        placeholder={
+                                          it.balance_kg_parts != null && String(it.balance_kg_parts).trim()
+                                            ? it.balance_kg_parts
+                                            : '15.2, 14.21, 15.1'
+                                        }
+                                        value={it.kg_parts_out || ''}
+                                        onChange={e => updateCartItem(i, 'kg_parts_out', e.target.value)}
+                                        title="คั่นด้วยจุลภาค — ต้องตรงกับยอดคงเหลือ (เช่น 15.2, 14.21 เหลือ 15.1)"
+                                      />
+                                    ) : (
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        className="form-control form-control-sm"
+                                        value={it.weight_kg_out}
+                                        onChange={e => updateCartItem(i, 'weight_kg_out', e.target.value)}
+                                      />
+                                    )}
+                                  </td>
                                   <td><input className="form-control form-control-sm" value={it.time_str}
                                     onChange={e => updateCartItem(i, 'time_str', e.target.value)} /></td>
                                   <td><input className="form-control form-control-sm" value={it.remark}

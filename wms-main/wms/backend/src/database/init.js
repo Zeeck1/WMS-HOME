@@ -441,6 +441,7 @@ async function initDatabase() {
         deposit_item_id INT NOT NULL,
         boxes_out INT DEFAULT 0,
         weight_kg_out DECIMAL(12,2) DEFAULT 0,
+        kg_parts_out VARCHAR(500) DEFAULT NULL,
         time_str VARCHAR(50),
         remark TEXT,
         FOREIGN KEY (withdrawal_id) REFERENCES customer_withdrawals(id) ON DELETE CASCADE,
@@ -566,6 +567,20 @@ async function initDatabase() {
           'ALTER TABLE customer_deposit_items ADD COLUMN kg_parts VARCHAR(500) DEFAULT NULL AFTER weight_kg'
         );
         console.log('  Migration: added kg_parts to customer_deposit_items');
+      }
+    } catch (e) { /* ignore */ }
+
+    // Migration: kg_parts_out on customer withdrawal lines (comma-separated, matches IN kg_parts)
+    try {
+      const [cols] = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'customer_withdrawal_items' AND COLUMN_NAME = 'kg_parts_out'
+      `, [dbName]);
+      if (cols.length === 0) {
+        await connection.query(
+          'ALTER TABLE customer_withdrawal_items ADD COLUMN kg_parts_out VARCHAR(500) DEFAULT NULL AFTER weight_kg_out'
+        );
+        console.log('  Migration: added kg_parts_out to customer_withdrawal_items');
       }
     } catch (e) { /* ignore */ }
 

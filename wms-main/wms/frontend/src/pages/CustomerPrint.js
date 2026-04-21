@@ -4,6 +4,13 @@ import { FiPrinter, FiArrowLeft } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { getCustomerPrintData } from '../services/api';
 import { dateToYYYYMMDDInBangkok } from '../utils/bangkokTime';
+import {
+  getRemainingKgState,
+  parseKgPartsToArray,
+  subtractKgPartsMultiset,
+  inferUniqueSubsetRemoval,
+  formatKgPartsArray,
+} from '../utils/kgParts';
 
 const toDate = (d) => d ? (typeof d === 'string' ? d.split('T')[0] : dateToYYYYMMDDInBangkok(d)) : '';
 const COMPANY = 'Powered by CK Intelligence';
@@ -28,27 +35,139 @@ function CustomerPrint() {
   }, [depositId, withdrawalId]);
 
   const rawWithdrawalItems = data?.withdrawalItems || [];
+  const depositItems = data?.deposit?.items || [];
   const { outRows, dayGroups } = useMemo(() => {
     if (rawWithdrawalItems.length === 0) return { outRows: [], dayGroups: [] };
+    const depositById = new Map(depositItems.map((d) => [d.id, d]));
+    const priorByDep = {};
     const balanceMap = {};
-    const rows = rawWithdrawalItems.map(it => {
+    /** Running multiset of kg parts per deposit line (for print when kg_parts_out was not stored). */
+    const partsState = {};
+
+    const rows = rawWithdrawalItems.map((it) => {
       const key = it.deposit_item_id;
       if (!balanceMap[key]) {
-        balanceMap[key] = { boxes: Number(it.orig_boxes || 0), kg: Number(it.orig_weight_kg || 0) };
+        balanceMap[key] = { boxes: Number(it.orig_boxes || 0) };
       }
       balanceMap[key].boxes -= Number(it.boxes_out || 0);
-      balanceMap[key].kg -= Number(it.weight_kg_out || 0);
-      return { ...it, remaining_boxes: balanceMap[key].boxes, remaining_kg: balanceMap[key].kg };
+
+      const di = depositById.get(key);
+      const kgParts = di?.kg_parts ?? it.orig_kg_parts;
+      const weightKg = di?.weight_kg ?? it.orig_weight_kg;
+      const depositLine = { kg_parts: kgParts, weight_kg: weightKg };
+
+      const prior = priorByDep[key] || [];
+      const stateAfter = getRemainingKgState(depositLine, [
+        ...prior,
+        { kg_parts_out: it.kg_parts_out, weight_kg_out: it.weight_kg_out },
+      ]);
+      priorByDep[key] = [...prior, { kg_parts_out: it.kg_parts_out, weight_kg_out: it.weight_kg_out }];
+
+      const hasInKgDetail = !!(kgParts && String(kgParts).trim());
+
+      if (partsState[key] === undefined && hasInKgDetail) {
+        partsState[key] = parseKgPartsToArray(kgParts);
+      }
+
+      let outKgDisplay;
+      let remainingKgPartsDisplay;
+      let remainingTotalKg = stateAfter.balance_kg;
+
+      if (hasInKgDetail && Array.isArray(partsState[key])) {
+        let parts = partsState[key];
+        const kgOutRaw = it.kg_parts_out ?? it.kgPartsOut;
+        const kgOutStr = kgOutRaw != null && String(kgOutRaw).trim() ? String(kgOutRaw).trim() : '';
+
+        if (kgOutStr) {
+          const sub = parseKgPartsToArray(kgOutStr);
+          const r = subtractKgPartsMultiset(parts, sub);
+          if (r.ok) {
+            parts = r.remaining;
+            outKgDisplay = kgOutStr;
+          } else {
+            outKgDisplay = it.weight_kg_out ? Number(it.weight_kg_out).toFixed(2) : '';
+            if (stateAfter.mode === 'parts' && stateAfter.remainingParts) {
+              parts = [...stateAfter.remainingParts];
+            } else {
+              parts = [];
+            }
+          }
+        } else {
+          const wt = parseFloat(it.weight_kg_out) || 0;
+          const infer = wt > 0 ? inferUniqueSubsetRemoval(parts, wt) : null;
+          if (infer) {
+            parts = infer.remaining;
+            outKgDisplay = infer.inferredParts.join(', ');
+          } else if (wt > 0) {
+            outKgDisplay = wt.toFixed(2);
+            if (stateAfter.mode === 'parts' && stateAfter.remainingParts) {
+              parts = [...stateAfter.remainingParts];
+            } else {
+              parts = [];
+            }
+          } else {
+            outKgDisplay = '';
+          }
+        }
+
+        partsState[key] = parts;
+
+        if (parts.length > 0) {
+          remainingKgPartsDisplay = formatKgPartsArray(parts);
+          remainingTotalKg = Math.round(parts.reduce((s, p) => s + p, 0) * 100) / 100;
+        } else {
+          remainingKgPartsDisplay =
+            stateAfter.mode === 'parts' && stateAfter.balance_kg_parts
+              ? stateAfter.balance_kg_parts
+              : Number(stateAfter.balance_kg).toFixed(2);
+          if (!String(remainingKgPartsDisplay).trim() && stateAfter.balance_kg === 0) {
+            remainingKgPartsDisplay = '—';
+          }
+          remainingTotalKg = stateAfter.balance_kg;
+        }
+      } else {
+        if (hasInKgDetail) {
+          outKgDisplay =
+            it.kg_parts_out && String(it.kg_parts_out).trim()
+              ? it.kg_parts_out
+              : it.weight_kg_out
+                ? Number(it.weight_kg_out).toFixed(2)
+                : '';
+        } else {
+          outKgDisplay = it.weight_kg_out ? Number(it.weight_kg_out).toFixed(2) : '';
+        }
+        if (hasInKgDetail && stateAfter.mode === 'parts') {
+          remainingKgPartsDisplay = stateAfter.balance_kg_parts || '—';
+        } else {
+          remainingKgPartsDisplay = Number(stateAfter.balance_kg).toFixed(2);
+        }
+        remainingTotalKg = stateAfter.balance_kg;
+      }
+
+      return {
+        ...it,
+        remaining_boxes: balanceMap[key].boxes,
+        remaining_kg: stateAfter.balance_kg,
+        remaining_kg_display: remainingKgPartsDisplay,
+        remaining_total_balance_kg: remainingTotalKg,
+        out_kg_display: outKgDisplay,
+        has_in_kg_detail: hasInKgDetail,
+      };
     });
     const grouped = [];
-    let curDate = null, curGroup = null;
+    let curDate = null;
+    let curGroup = null;
     for (const row of rows) {
       const d = toDate(row.withdraw_date);
-      if (d !== curDate) { curDate = d; curGroup = { date: d, items: [] }; grouped.push(curGroup); }
+      if (d !== curDate) {
+        curDate = d;
+        curGroup = { date: d, items: [] };
+        grouped.push(curGroup);
+      }
       curGroup.items.push(row);
     }
     return { outRows: rows, dayGroups: grouped };
-  }, [rawWithdrawalItems]);
+  }, [rawWithdrawalItems, depositItems]);
 
   if (loading) return <div className="loading"><div className="spinner"></div>Loading...</div>;
   if (!data) return <div style={{ padding: 40, textAlign: 'center' }}>ไม่พบข้อมูล</div>;
@@ -202,11 +321,17 @@ function CustomerPrint() {
                   <th rowSpan={2}>รายการ</th>
                   <th rowSpan={2} style={{ width: 65 }}>LOT No.</th>
                   <th colSpan={2}>Total G/W</th>
-                  <th colSpan={2}>คงเหลือ</th>
+                  <th colSpan={3}>คงเหลือ</th>
                   <th rowSpan={2} style={{ width: 45 }}>เวลา</th>
                   <th rowSpan={2} style={{ width: 65 }}>หมายเหตุ</th>
                 </tr>
-                <tr><th>กล่อง</th><th>(Kg.)</th><th>กล่อง</th><th>(Kg.)</th></tr>
+                <tr>
+                  <th>กล่อง</th>
+                  <th style={{ fontSize: '0.65rem' }}>Kg รายละเอียด</th>
+                  <th>กล่อง</th>
+                  <th style={{ fontSize: '0.65rem' }}>Kg รายละเอียด</th>
+                  <th style={{ fontSize: '0.65rem' }}>Total Balance KG</th>
+                </tr>
               </thead>
               <tbody>
                 {(() => { let seq = 0; return dayGroups.map((group) => {
@@ -216,7 +341,7 @@ function CustomerPrint() {
                       <React.Fragment key={`wr${it.id}`}>
                         {ii === 0 && (
                           <tr className="cp-day-header">
-                            <td colSpan={10} style={{ background: '#f8f9fa', fontWeight: 700, fontSize: '0.72rem', textAlign: 'left', padding: '4px 8px' }}>
+                            <td colSpan={11} style={{ background: '#f8f9fa', fontWeight: 700, fontSize: '0.72rem', textAlign: 'left', padding: '4px 8px' }}>
                               วันที่เบิก: {group.date}
                             </td>
                           </tr>
@@ -227,9 +352,14 @@ function CustomerPrint() {
                           <td>{it.item_name}</td>
                           <td>{it.lot_no || ''}</td>
                           <td className="num-cell">{it.boxes_out || ''}</td>
-                          <td className="num-cell">{it.weight_kg_out ? Number(it.weight_kg_out).toFixed(2) : ''}</td>
+                          <td className="num-cell" style={{ fontSize: '0.72rem', whiteSpace: 'pre-wrap' }}>
+                            {it.out_kg_display ?? ''}
+                          </td>
                           <td className="num-cell">{it.remaining_boxes}</td>
-                          <td className="num-cell">{Number(it.remaining_kg).toFixed(2)}</td>
+                          <td className="num-cell" style={{ fontSize: '0.72rem', whiteSpace: 'pre-wrap' }}>
+                            {it.remaining_kg_display ?? Number(it.remaining_kg).toFixed(2)}
+                          </td>
+                          <td className="num-cell">{Number(it.remaining_total_balance_kg ?? it.remaining_kg).toFixed(2)}</td>
                           <td className="text-center">{it.time_str || ''}</td>
                           <td>{it.remark || ''}</td>
                         </tr>
@@ -238,7 +368,7 @@ function CustomerPrint() {
                   });
                 }); })()}
                 {blankArr(BLANK_ROWS_OUT, outRows.length).map(i => (
-                  <tr key={`bo${i}`} className="cp-blank-row"><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+                  <tr key={`bo${i}`} className="cp-blank-row"><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
                 ))}
               </tbody>
               <tfoot>
@@ -246,7 +376,7 @@ function CustomerPrint() {
                   <td colSpan={4} className="text-right"></td>
                   <td className="num-cell"><b>{wdTotalBoxes || ''}</b></td>
                   <td className="num-cell"><b>{wdTotalKg ? wdTotalKg.toFixed(2) : ''}</b></td>
-                  <td colSpan={4}></td>
+                  <td colSpan={5}></td>
                 </tr>
               </tfoot>
             </table>
