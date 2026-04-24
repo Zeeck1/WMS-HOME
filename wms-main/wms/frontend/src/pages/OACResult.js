@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   FiArrowLeft, FiCheckCircle, FiAlertCircle, FiAlertTriangle,
   FiSearch, FiDownload, FiPackage, FiBox, FiFile,
@@ -36,9 +36,17 @@ function shortFileName(name) {
 function OACResult() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const searchParams = new URLSearchParams(location.search);
+  const fromOrdersQuery = searchParams.get('from') === 'orders';
+  const returnOrderFile = searchParams.get('orderFile') || location.state?.orderFile || '';
+  const returnCheckId = location.state?.checkId || id;
+  const backTarget = (fromOrdersQuery || location.state?.fromOrders)
+    ? `/oac?tab=orders&checkId=${encodeURIComponent(String(returnCheckId || ''))}&orderFile=${encodeURIComponent(String(returnOrderFile || ''))}`
+    : '/oac';
 
   useEffect(() => {
     setLoading(true);
@@ -71,7 +79,7 @@ function OACResult() {
           <FiClipboard style={{ fontSize: '3rem', color: 'var(--gray-300)' }} />
           <h3>{error || 'No results to display'}</h3>
           <p>Please run an availability check first.</p>
-          <button className="btn btn-primary" onClick={() => navigate('/oac')}>
+          <button className="btn btn-primary" onClick={() => navigate(backTarget)}>
             <FiArrowLeft /> Go to Order Checker
           </button>
         </div>
@@ -88,11 +96,12 @@ function OACResult() {
       results={results}
       checkedAt={checkedAt}
       navigate={navigate}
+      backTarget={backTarget}
     />
   );
 }
 
-function OACResultInner({ summary, fileSummaries, results, checkedAt, navigate }) {
+function OACResultInner({ summary, fileSummaries, results, checkedAt, navigate, backTarget }) {
   const [activeFilter, setActiveFilter] = useState('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: null, dir: 'asc' });
@@ -548,7 +557,7 @@ function OACResultInner({ summary, fileSummaries, results, checkedAt, navigate }
   return (
     <>
       <div className="oacr-topbar">
-        <button className="oacr-back" onClick={() => navigate('/oac')}>
+        <button className="oacr-back" onClick={() => navigate(backTarget)}>
           <FiArrowLeft /> Back
         </button>
         <div className="oacr-topbar-center">

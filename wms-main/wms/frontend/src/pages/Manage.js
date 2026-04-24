@@ -14,6 +14,21 @@ import {
   dateToYYYYMMDDInBangkok,
 } from '../utils/bangkokTime';
 
+/** Same labels as withdraw LINE: invoice (import), order no (extra), BULK + lot. */
+function withdrawalItemRefSuffix(item) {
+  const st = String(item.stock_type || 'BULK').toUpperCase();
+  if (st === 'IMPORT') {
+    const inv = String(item.order_code || '').trim();
+    return inv ? ` · Invoice no: ${inv}` : '';
+  }
+  if (st === 'CONTAINER_EXTRA') {
+    const ord = String(item.order_code || '').trim();
+    return ord ? ` · Order no: ${ord}` : '';
+  }
+  const lot = String(item.lot_no || '').trim();
+  return lot ? ` · BULK · Lot ${lot}` : ' · BULK';
+}
+
 /** Text for LINE — same endpoint as No Movement page (`/reports/no-movement/send-line`). */
 function buildWithdrawalQtyChangeLineMessage(expandedData, editedQty) {
   const rows = expandedData?.items || [];
@@ -26,7 +41,7 @@ function buildWithdrawalQtyChangeLineMessage(expandedData, editedQty) {
     if (newQty === oldActual) continue;
     const requested = Number(it.requested_mc ?? it.quantity_mc);
     const label = `${it.fish_name || ''} ${it.size || ''} @ ${it.line_place || '—'}`.replace(/\s+/g, ' ').trim();
-    lines.push(`• ${label}\n  Requested (MC): ${requested} → Actual (MC): ${newQty}`);
+    lines.push(`• ${label}${withdrawalItemRefSuffix(it)}\n  Requested (MC): ${requested} → Actual (MC): ${newQty}`);
   }
   if (lines.length === 0) return null;
   let text = '📦 Withdrawal — Actual (MC) updated (Manage)\n';
@@ -36,6 +51,15 @@ function buildWithdrawalQtyChangeLineMessage(expandedData, editedQty) {
 }
 
 const STATUS_FLOW = ['PENDING', 'TAKING_OUT', 'READY', 'FINISHED'];
+
+function withdrawDeptBadgeClass(department) {
+  switch (department) {
+    case 'PK': return 'mg-dept-PK';
+    case 'RM': return 'mg-dept-RM';
+    case 'Branch.05 (SM)': return 'mg-dept-B05SM';
+    default: return 'mg-dept-other';
+  }
+}
 
 const STATUS_CONFIG = {
   PENDING:     { label: 'Receive Request', icon: <FiClock />,       color: '#f59e0b', bg: '#fffbeb', next: 'TAKING_OUT', nextLabel: 'Start Taking Out' },
@@ -255,6 +279,7 @@ function Manage() {
             <option value="">All Departments</option>
             <option value="PK">PK</option>
             <option value="RM">RM</option>
+            <option value="Branch.05 (SM)">Branch.05 (SM)</option>
           </select>
           <select className="form-control" style={{ width: 'auto' }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
             <option value="">All Status</option>
@@ -312,7 +337,7 @@ function Manage() {
                   {/* Card header */}
                   <div className="mg-req-header" onClick={() => toggleExpand(req.id)}>
                     <div className="mg-req-left">
-                      <span className={`mg-dept-badge mg-dept-${req.department}`}>{req.department}</span>
+                      <span className={`mg-dept-badge ${withdrawDeptBadgeClass(req.department)}`}>{req.department}</span>
                       <div className="mg-req-info">
                         <span className="mg-req-no">{req.request_no}</span>
                         <span className="mg-req-date">{bangkokLocaleString(new Date(req.created_at))}</span>
@@ -390,7 +415,7 @@ function Manage() {
                                   <td><strong>{item.fish_name}</strong></td>
                                   <td>{item.size}</td>
                                   <td>{item.line_place}</td>
-                                  <td className="mg-lot-cell">{item.lot_no}</td>
+                                  <td className="mg-lot-cell">{item.lot_no || item.order_code || '—'}</td>
                                   <td className="num-cell">
                                     <span className={`mg-balance-badge ${balance <= 0 ? 'empty' : isInsufficient ? 'low' : 'ok'}`}>
                                       {balance}

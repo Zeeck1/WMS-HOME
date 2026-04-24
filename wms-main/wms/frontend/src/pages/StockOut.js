@@ -1,13 +1,28 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { FiArrowUpCircle, FiPackage, FiBox, FiAnchor } from 'react-icons/fi';
 import { toast } from 'react-toastify';
-import { getInventory, stockOut } from '../services/api';
+import { getInventory, stockOut, createImportStockOut } from '../services/api';
+import { bangkokYYYYMMDD } from '../utils/bangkokTime';
 
 const TABS = [
   { id: 'BULK', label: 'Bulk', icon: <FiPackage /> },
   { id: 'CONTAINER_EXTRA', label: 'Container Extra', icon: <FiBox /> },
   { id: 'IMPORT', label: 'Import', icon: <FiAnchor /> }
 ];
+
+function isImportShipmentRow(item) {
+  return String(item?.stock_type || '').toUpperCase() === 'IMPORT' &&
+    item?.lot_id == null &&
+    (item?._source === '_shipment' || item?._imp_item_id != null);
+}
+
+function stockOutRowKey(item) {
+  if (item?._imp_item_id != null) return `imp-${item._imp_item_id}`;
+  if (item?.lot_id != null && item?.location_id != null) {
+    return `loc-${item.lot_id}-${item.location_id}`;
+  }
+  return `row-${item?.fish_name}-${item?.line_place}`;
+}
 
 function StockOut() {
   const [activeTab, setActiveTab] = useState('BULK');
@@ -20,7 +35,8 @@ function StockOut() {
     quantity_mc: '',
     weight_kg: '',
     reference_no: '',
-    notes: ''
+    notes: '',
+    date_out: ''
   });
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -31,7 +47,14 @@ function StockOut() {
   const fetchInventory = useCallback(async () => {
     try {
       const res = await getInventory({ stock_type: activeTab });
-      setInventory((res.data || []).filter(item => item.lot_id != null && item.location_id != null));
+      const rows = res.data || [];
+      setInventory(rows.filter((item) => {
+        if (item.lot_id != null && item.location_id != null) return true;
+        if (activeTab === 'IMPORT') {
+          return isImportShipmentRow(item);
+        }
+        return false;
+      }));
     } catch (err) {
       toast.error('Failed to load inventory');
     } finally {
@@ -45,7 +68,7 @@ function StockOut() {
     setActiveTab(tab);
     setSelectedRow(null);
     setSearchQuery('');
-    setForm({ quantity_mc: '', weight_kg: '', reference_no: '', notes: '' });
+    setForm({ quantity_mc: '', weight_kg: '', reference_no: '', notes: '', date_out: '' });
   };
 
   const filteredInventory = useMemo(() => {
@@ -59,19 +82,29 @@ function StockOut() {
       const order = (item.order_code || '').toLowerCase();
       const handMc = String(item.hand_on_balance_mc ?? '');
       const handKg = String(item.hand_on_balance_kg ?? '');
+      const country = (item.country || '').toLowerCase();
+      const stack = (item.stack_no || '').toLowerCase();
+      const remark = (item.remark || '').toLowerCase();
       return fish.includes(q) || size.includes(q) || lot.includes(q) ||
-        location.includes(q) || order.includes(q) || handMc.includes(q) || handKg.includes(q);
+        location.includes(q) || order.includes(q) || handMc.includes(q) || handKg.includes(q) ||
+        country.includes(q) || stack.includes(q) || remark.includes(q);
     });
   }, [inventory, searchQuery]);
 
   const selectItem = (item) => {
     setSelectedRow(item);
-    setForm({ quantity_mc: '', weight_kg: '', reference_no: '', notes: '' });
+    setForm({
+      quantity_mc: '', weight_kg: '', reference_no: '', notes: '', date_out: bangkokYYYYMMDD()
+    });
   };
 
   const handleQtyChange = (qty) => {
-    const autoWeight = selectedRow ? (parseInt(qty) || 0) * Number(selectedRow.bulk_weight_kg) : '';
-    setForm({ ...form, quantity_mc: qty, weight_kg: autoWeight ? autoWeight.toFixed(2) : '' });
+    const autoWeight = selectedRow ? (parseInt(qty, 10) || 0) * Number(selectedRow.bulk_weight_kg) : '';
+    setForm(f => ({ ...f, quantity_mc: qty, weight_kg: autoWeight ? autoWeight.toFixed(2) : '' }));
+  };
+
+  const clearForm = () => {
+    setForm({ quantity_mc: '', weight_kg: '', reference_no: '', notes: '', date_out: '' });
   };
 
   const handleStockOut = async (e) => {
@@ -80,24 +113,46 @@ function StockOut() {
       toast.warning('Select an item and enter quantity');
       return;
     }
-    if (parseInt(form.quantity_mc) > selectedRow.hand_on_balance_mc) {
+    const qty = parseInt(form.quantity_mc, 10) || 0;
+    if (qty > selectedRow.hand_on_balance_mc) {
       toast.error(`Cannot stock out more than Hand On balance (${selectedRow.hand_on_balance_mc} MC)`);
       return;
     }
 
+    if (isImportShipmentRow(selectedRow)) {
+      if (!form.date_out) {
+        toast.warning('Select date out');
+        return;
+      }
+      if (selectedRow._imp_shipment_id == null || selectedRow._imp_item_id == null) {
+        toast.error('Invalid import line (missing shipment link)');
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
-      await stockOut({
-        lot_id: selectedRow.lot_id,
-        location_id: selectedRow.location_id,
-        quantity_mc: parseInt(form.quantity_mc),
-        weight_kg: parseFloat(form.weight_kg) || 0,
-        reference_no: form.reference_no,
-        notes: form.notes
-      });
+      if (isImportShipmentRow(selectedRow)) {
+        await createImportStockOut(selectedRow._imp_shipment_id, {
+          item_id: selectedRow._imp_item_id,
+          date_out: form.date_out,
+          order_ref: form.reference_no || '',
+          mc: qty,
+          nw_kgs: parseFloat(form.weight_kg) || 0
+        });
+      } else {
+        await stockOut({
+          lot_id: selectedRow.lot_id,
+          location_id: selectedRow.location_id,
+          quantity_mc: qty,
+          weight_kg: parseFloat(form.weight_kg) || 0,
+          reference_no: form.reference_no,
+          notes: form.notes
+        });
+      }
       toast.success(`Stock OUT recorded: ${form.quantity_mc} MC`);
       setSelectedRow(null);
-      setForm({ quantity_mc: '', weight_kg: '', reference_no: '', notes: '' });
+      clearForm();
       fetchInventory();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to record stock out');
@@ -107,6 +162,10 @@ function StockOut() {
   };
 
   if (loading) return <div className="loading"><div className="spinner"></div>Loading...</div>;
+
+  const tableColSpan = 7;
+  const selectedKey = selectedRow ? stockOutRowKey(selectedRow) : null;
+  const selectedIsImportShipment = selectedRow && isImportShipmentRow(selectedRow);
 
   return (
     <>
@@ -129,18 +188,40 @@ function StockOut() {
         {selectedRow && (
           <div className="card" style={{ marginBottom: 20, maxWidth: 720 }}>
             <div className="card-header">
-              <h3>Remove Stock From Location</h3>
-              <button className="btn btn-outline btn-sm" onClick={() => setSelectedRow(null)}>Cancel</button>
+              <h3>{selectedIsImportShipment ? 'Record Import Stock Out' : 'Remove Stock From Location'}</h3>
+              <button
+                className="btn btn-outline btn-sm"
+                onClick={() => { setSelectedRow(null); clearForm(); }}
+              >
+                Cancel
+              </button>
             </div>
             <div className="card-body">
               <div className="alert alert-warning">
                 {isNonBulk && selectedRow.order_code && <><strong>{selectedRow.order_code}</strong> — </>}
                 <strong>{selectedRow.fish_name}</strong> ({selectedRow.size}) |
                 {!isNonBulk && <> Lot: {selectedRow.lot_no} |</>}
-                {' '}Location: {selectedRow.line_place} |
+                {' '}
+                {selectedIsImportShipment
+                  ? <>Line: {selectedRow.line_place || selectedRow.stack_no || '—'} {selectedRow.country ? `| From: ${selectedRow.country}` : ''} |</>
+                  : <>Location: {selectedRow.line_place} |</>}
                 <strong> Hand On: {selectedRow.hand_on_balance_mc} MC</strong>
               </div>
               <form onSubmit={handleStockOut}>
+                {selectedIsImportShipment && (
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Date out *</label>
+                      <input
+                        className="form-control"
+                        type="date"
+                        value={form.date_out}
+                        onChange={e => setForm(f => ({ ...f, date_out: e.target.value }))}
+                        required
+                      />
+                    </div>
+                  </div>
+                )}
                 <div className="form-row">
                   <div className="form-group">
                     <label>Quantity OUT (MC) *</label>
@@ -148,17 +229,22 @@ function StockOut() {
                   </div>
                   <div className="form-group">
                     <label>Weight (KG)</label>
-                    <input className="form-control" type="number" step="0.01" value={form.weight_kg} onChange={e => setForm({ ...form, weight_kg: e.target.value })} />
+                    <input className="form-control" type="number" step="0.01" value={form.weight_kg} onChange={e => setForm(f => ({ ...f, weight_kg: e.target.value }))} />
                   </div>
                 </div>
                 <div className="form-row">
                   <div className="form-group">
-                    <label>Reference No</label>
-                    <input className="form-control" value={form.reference_no} onChange={e => setForm({ ...form, reference_no: e.target.value })} placeholder="Invoice number" />
+                    <label>{selectedIsImportShipment ? 'Order ref' : 'Reference No'}</label>
+                    <input
+                      className="form-control"
+                      value={form.reference_no}
+                      onChange={e => setForm(f => ({ ...f, reference_no: e.target.value }))}
+                      placeholder={selectedIsImportShipment ? 'e.g. RAT.01' : 'Reference'}
+                    />
                   </div>
                   <div className="form-group">
                     <label>Notes</label>
-                    <input className="form-control" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Loading notes" />
+                    <input className="form-control" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes" />
                   </div>
                 </div>
                 <button type="submit" className="btn btn-danger" disabled={submitting}>
@@ -176,7 +262,7 @@ function StockOut() {
               <input
                 type="text"
                 className="form-control"
-                placeholder="Search fish, size, lot, location, order..."
+                placeholder={isImport ? 'Search fish, invoice, line, country, remark...' : 'Search fish, size, lot, location, order...'}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 style={{ maxWidth: 320 }}
@@ -199,25 +285,28 @@ function StockOut() {
               </thead>
               <tbody>
                 {inventory.length === 0 ? (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: '#999' }}>No stock available</td></tr>
+                  <tr><td colSpan={tableColSpan} style={{ textAlign: 'center', padding: 40, color: '#999' }}>No stock available</td></tr>
                 ) : filteredInventory.length === 0 ? (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: '#999' }}>No matches for &quot;{searchQuery}&quot;</td></tr>
-                ) : filteredInventory.map((item, i) => (
-                  <tr key={i} style={{ background: selectedRow === item ? '#dbeafe' : undefined, cursor: 'pointer' }} onClick={() => selectItem(item)}>
+                  <tr><td colSpan={tableColSpan} style={{ textAlign: 'center', padding: 40, color: '#999' }}>No matches for &quot;{searchQuery}&quot;</td></tr>
+                ) : filteredInventory.map((item) => {
+                  const k = stockOutRowKey(item);
+                  return (
+                  <tr key={k} style={{ background: selectedKey === k ? '#dbeafe' : undefined, cursor: 'pointer' }} onClick={() => selectItem(item)}>
                     {isNonBulk && <td><strong>{item.order_code || '-'}</strong></td>}
                     <td><strong>{item.fish_name}</strong></td>
                     <td>{item.size}</td>
                     {!isNonBulk && <td>{item.lot_no}</td>}
-                    <td>{item.line_place}</td>
+                    <td>{isImport && isImportShipmentRow(item) ? (item.line_place || item.stack_no || '—') : (item.line_place || '—')}</td>
                     <td className="num-cell"><strong>{item.hand_on_balance_mc}</strong></td>
-                    <td className="num-cell">{Number(item.hand_on_balance_kg).toFixed(2)}</td>
+                    <td className="num-cell">{(Number(item.hand_on_balance_kg) || 0).toFixed(2)}</td>
                     <td>
                       <button className="btn btn-danger btn-sm" onClick={(e) => { e.stopPropagation(); selectItem(item); }}>
                         <FiArrowUpCircle /> OUT
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

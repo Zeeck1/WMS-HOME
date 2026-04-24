@@ -591,6 +591,106 @@ router.post('/check', upload.array('files', 32), async (req, res) => {
   }
 });
 
+function mapOacLineRowFromJoin(r) {
+  return {
+    id: r.id,
+    checkId: r.check_id,
+    checkedAt: r.checked_at,
+    orderFile: r.order_file,
+    orderSheet: r.order_sheet,
+    product: r.product,
+    pack: r.pack,
+    weightMc: parseFloat(r.weight_mc) || 0,
+    orderedCtn: r.ordered_ctn,
+    orderedKg: parseFloat(r.ordered_kg) || 0,
+    grossWeightKg: parseFloat(r.gross_weight_kg) || 0,
+    stockMc: r.stock_mc,
+    stockKg: parseFloat(r.stock_kg) || 0,
+    availableCtn: r.available_ctn,
+    availableKg: parseFloat(r.available_kg) || 0,
+    shortageCtn: r.shortage_ctn,
+    shortageKg: parseFloat(r.shortage_kg) || 0,
+    status: r.status,
+    matchedProduct: r.matched_product,
+    remark: r.remark,
+    origin: r.origin || ''
+  };
+}
+
+// GET /api/oac/order-groups — distinct (check + uploaded file) for Orders tab list
+router.get('/order-groups', async (req, res) => {
+  try {
+    await ensureTables();
+    const q = (req.query.search || '').trim();
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 300, 1), 500);
+    const params = [];
+    let where = ' WHERE 1=1 ';
+    if (q) {
+      where += ' AND i.order_file LIKE ? ';
+      params.push(`%${q}%`);
+    }
+    const [rows] = await pool.query(
+      `SELECT
+        c.id AS checkId,
+        c.checked_at AS checkedAt,
+        i.order_file AS orderFile,
+        COUNT(i.id) AS lineCount
+      FROM oac_check_items i
+      JOIN oac_checks c ON c.id = i.check_id
+      ${where}
+      GROUP BY c.id, c.checked_at, i.order_file
+      ORDER BY c.checked_at DESC, i.order_file ASC
+      LIMIT ?`,
+      [...params, limit]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('OAC order-groups error:', error);
+    res.status(500).json({ error: 'Failed to list order groups' });
+  }
+});
+
+// GET /api/oac/order-lines — all order rows from uploaded Excel runs (for Orders tab)
+router.get('/order-lines', async (req, res) => {
+  try {
+    await ensureTables();
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const q = (req.query.search || '').trim();
+    const searchActive = q.length > 0;
+    const like = searchActive ? [`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`] : [];
+    const whereSql = searchActive
+      ? ` WHERE (
+            i.product LIKE ? OR i.order_file LIKE ? OR i.order_sheet LIKE ? OR
+            i.pack LIKE ? OR IFNULL(i.matched_product, '') LIKE ?
+          ) `
+      : '';
+
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) AS total FROM oac_check_items i ${whereSql}`,
+      searchActive ? like : []
+    );
+    const total = countRows[0].total;
+
+    const [rows] = await pool.query(
+      `SELECT i.id, i.check_id, c.checked_at,
+          i.order_file, i.order_sheet, i.product, i.pack, i.weight_mc, i.ordered_ctn, i.ordered_kg, i.gross_weight_kg,
+          i.stock_mc, i.stock_kg, i.available_ctn, i.available_kg, i.shortage_ctn, i.shortage_kg, i.status,
+          i.matched_product, i.remark, i.origin
+        FROM oac_check_items i
+        JOIN oac_checks c ON c.id = i.check_id
+        ${whereSql}
+        ORDER BY c.checked_at DESC, i.id DESC
+        LIMIT ? OFFSET ?`,
+      searchActive ? [...like, limit, offset] : [limit, offset]
+    );
+    res.json({ total, limit, offset, items: rows.map(mapOacLineRowFromJoin) });
+  } catch (error) {
+    console.error('OAC order-lines error:', error);
+    res.status(500).json({ error: 'Failed to list order lines' });
+  }
+});
+
 // GET /api/oac/checks — list recent checks
 router.get('/checks', async (req, res) => {
   try {
@@ -633,6 +733,7 @@ router.get('/checks/:id', async (req, res) => {
       },
       fileSummaries: fileSummaries || [],
       results: items.map(r => ({
+        id: r.id,
         orderFile: r.order_file,
         orderSheet: r.order_sheet,
         product: r.product,

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   FiShoppingCart, FiPlus, FiTrash2, FiSend, FiSearch,
-  FiPackage, FiCheck, FiChevronRight, FiClock, FiCheckCircle, FiXCircle, FiRefreshCw, FiBox, FiAnchor
+  FiPackage, FiCheck, FiChevronRight, FiClock, FiCheckCircle, FiXCircle, FiRefreshCw, FiBox, FiAnchor, FiArrowLeft
 } from 'react-icons/fi';
 import { TbForklift } from 'react-icons/tb';
 import { toast } from 'react-toastify';
@@ -22,6 +22,21 @@ import {
   dateToYYYYMMDDInBangkok,
 } from '../utils/bangkokTime';
 
+/** Extra ref text for LINE: invoice (import), order no (extra), BULK + lot (bulk). */
+function withdrawLineRefSuffix(r) {
+  const st = String(r._stock_type || 'BULK').toUpperCase();
+  if (st === 'IMPORT') {
+    const inv = String(r._order_code || '').trim();
+    return inv ? ` · Invoice no: ${inv}` : '';
+  }
+  if (st === 'CONTAINER_EXTRA') {
+    const ord = String(r._order_code || '').trim();
+    return ord ? ` · Order no: ${ord}` : '';
+  }
+  const lot = String(r._lot_no || '').trim();
+  return lot ? ` · BULK · Lot ${lot}` : ' · BULK';
+}
+
 /** LINE text only — built from create response + distributed rows (no extra API, no image). */
 function buildWithdrawLineMessageFromClient(requestRow, distributedRows, notesText) {
   const d = requestRow.withdraw_date
@@ -31,7 +46,7 @@ function buildWithdrawLineMessageFromClient(requestRow, distributedRows, notesTe
   const lines = distributedRows.map((r, i) => {
     const fish = r._fish_label || '';
     const loc = r._line_place || '';
-    return `${i + 1}. ${fish} @ ${loc} — ${r.quantity_mc} MC`;
+    return `${i + 1}. ${fish} @ ${loc} — ${r.quantity_mc} MC${withdrawLineRefSuffix(r)}`;
   });
   return [
     '📦 Withdrawal request',
@@ -48,7 +63,8 @@ function buildWithdrawLineMessageFromClient(requestRow, distributedRows, notesTe
 
 const DEPARTMENTS = [
   { id: 'PK', label: 'PK', desc: 'Packing Department', color: '#6366f1', icon: '📦' },
-  { id: 'RM', label: 'RM', desc: 'Raw Material Department', color: '#f97316', icon: '🏭' }
+  { id: 'RM', label: 'RM', desc: 'Raw Material Department', color: '#f97316', icon: '🐟' },
+  { id: 'Branch.05 (SM)', label: 'Branch.05', desc: 'Branch.05 (SM)', color: '#0d9488', icon: '🏢' }
 ];
 
 const STOCK_TYPE_TABS = [
@@ -99,9 +115,21 @@ function Withdraw() {
   const fetchInventory = async () => {
     setLoading(true);
     try {
-      const params = stockTypeTab ? { stock_type: stockTypeTab } : {};
+      // API only merges Import Stock (shipment) rows when stock_type=IMPORT or merge_import_shipments=1.
+      // Without a tab, request merge so search shows import lines alongside bulk/CE without clicking Import.
+      const params = stockTypeTab
+        ? { stock_type: stockTypeTab }
+        : { merge_import_shipments: 1 };
       const res = await getInventory(params);
-      setInventory((res.data || []).filter(item => item.lot_id != null && item.location_id != null));
+      // Import Stock rows (Excel import_items merged in API) use _imp_item_id and have no lot/location;
+      // bulk/CE rows must have both for warehouse movements.
+      setInventory((res.data || []).filter((item) => {
+        if (item.lot_id != null && item.location_id != null) return true;
+        const isImportShipment =
+          String(item.stock_type || '').toUpperCase() === 'IMPORT' &&
+          (item._source === '_shipment' || item._imp_item_id != null);
+        return Boolean(isImportShipment);
+      }));
     } catch (err) {
       toast.error('Failed to load stock');
     } finally {
@@ -166,8 +194,13 @@ function Withdraw() {
         return (
           label.includes(q) ||
           (item.line_place && item.line_place.toLowerCase().includes(q)) ||
-          (item.lot_no && item.lot_no.toLowerCase().includes(q)) ||
-          (item.order_code && item.order_code.toLowerCase().includes(q))
+          (item.lot_no && String(item.lot_no).toLowerCase().includes(q)) ||
+          (item.order_code && String(item.order_code).toLowerCase().includes(q)) ||
+          (item.country && String(item.country).toLowerCase().includes(q)) ||
+          (item.stack_no && String(item.stack_no).toLowerCase().includes(q)) ||
+          (item.remark && String(item.remark).toLowerCase().includes(q)) ||
+          (item.hand_on_balance_mc != null && String(item.hand_on_balance_mc).includes(q)) ||
+          (item.hand_on_balance_kg != null && String(item.hand_on_balance_kg).includes(q))
         );
       });
     }
@@ -205,6 +238,10 @@ function Withdraw() {
     });
     return Object.values(groups);
   }, [inventory, search]);
+
+  const isImportShipmentRow = (sub) => String(sub.stock_type || '').toUpperCase() === 'IMPORT' &&
+    sub.lot_id == null &&
+    (sub._source === '_shipment' || sub._imp_item_id != null);
 
   const addToCart = (group) => {
     const exists = cart.find(c => c.groupKey === group.key);
@@ -252,15 +289,34 @@ function Withdraw() {
       const available = Number(sub.hand_on_balance_mc) || 0;
       if (available <= 0) continue;
       const take = Math.min(remaining, available);
-      distributed.push({
-        lot_id: sub.lot_id,
-        location_id: sub.location_id,
-        quantity_mc: take,
-        weight_kg: take * Number(cartItem.bulk_weight_kg),
-        production_process: cartItem.production_process || null,
-        _line_place: sub.line_place,
-        _fish_label: fishLabel
-      });
+      const stockType = String(cartItem.stock_type || sub.stock_type || 'BULK').toUpperCase();
+      const orderCode = cartItem.order_code || sub.order_code || '';
+      const lotNo = sub.lot_no != null && sub.lot_no !== '' ? String(sub.lot_no) : '';
+      if (isImportShipmentRow(sub)) {
+        distributed.push({
+          import_item_id: sub._imp_item_id,
+          quantity_mc: take,
+          weight_kg: take * Number(cartItem.bulk_weight_kg),
+          production_process: cartItem.production_process || null,
+          _line_place: sub.line_place,
+          _fish_label: fishLabel,
+          _stock_type: 'IMPORT',
+          _order_code: orderCode
+        });
+      } else {
+        distributed.push({
+          lot_id: sub.lot_id,
+          location_id: sub.location_id,
+          quantity_mc: take,
+          weight_kg: take * Number(cartItem.bulk_weight_kg),
+          production_process: cartItem.production_process || null,
+          _line_place: sub.line_place,
+          _fish_label: fishLabel,
+          _stock_type: stockType,
+          _order_code: orderCode,
+          _lot_no: lotNo
+        });
+      }
       remaining -= take;
     }
     return distributed;
@@ -282,13 +338,23 @@ function Withdraw() {
         setSubmitting(false);
         return;
       }
-      const items = distributedRows.map(({ lot_id, location_id, quantity_mc, weight_kg, production_process }) => ({
-        lot_id,
-        location_id,
-        quantity_mc,
-        weight_kg,
-        production_process
-      }));
+      const items = distributedRows.map((row) => {
+        if (row.import_item_id != null) {
+          return {
+            import_item_id: row.import_item_id,
+            quantity_mc: row.quantity_mc,
+            weight_kg: row.weight_kg,
+            production_process: row.production_process
+          };
+        }
+        return {
+          lot_id: row.lot_id,
+          location_id: row.location_id,
+          quantity_mc: row.quantity_mc,
+          weight_kg: row.weight_kg,
+          production_process: row.production_process
+        };
+      });
       const res = await createWithdrawal({
         department,
         items,
@@ -322,6 +388,13 @@ function Withdraw() {
 
   const totalCartMC = cart.reduce((s, c) => s + c.request_qty, 0);
   const totalCartKG = cart.reduce((s, c) => s + (c.request_qty * Number(c.bulk_weight_kg)), 0);
+
+  const backToDepartmentSelect = () => {
+    setStep('dept');
+    setDepartment(null);
+    setCart([]);
+    setShowHistory(false);
+  };
 
   // ─── Department Selection ──────────────────────────
   if (step === 'dept') {
@@ -358,15 +431,20 @@ function Withdraw() {
   return (
     <>
       <div className="page-header">
-        <h2>
-          <FiShoppingCart /> Withdraw — <span style={{ color: DEPARTMENTS.find(d => d.id === department)?.color }}>{department}</span>
-        </h2>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="wd-withdraw-header-title">
+          <button type="button" className="btn btn-outline btn-sm" onClick={backToDepartmentSelect} aria-label="Back to department selection">
+            <FiArrowLeft /> Back
+          </button>
+          <h2>
+            <FiShoppingCart /> Withdraw —{' '}
+            <span style={{ color: DEPARTMENTS.find(d => d.id === department)?.color }}>
+              {DEPARTMENTS.find(d => d.id === department)?.label ?? department}
+            </span>
+          </h2>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <button className="btn btn-outline" onClick={() => setShowHistory(!showHistory)}>
             {showHistory ? 'Back to Select' : `My Requests (${myRequests.length})`}
-          </button>
-          <button className="btn btn-outline" onClick={() => { setStep('dept'); setDepartment(null); setCart([]); }}>
-            Change Dept
           </button>
         </div>
       </div>
@@ -540,7 +618,9 @@ function Withdraw() {
                               <div key={idx} className="wd-order-detail-item">
                                 <span className="wd-order-detail-fish">{it.fish_name}</span>
                                 <span className="wd-order-detail-size">{it.size}</span>
-                                <span className="wd-order-detail-meta">{it.line_place} · {it.lot_no}</span>
+                                <span className="wd-order-detail-meta">
+                                  {it.line_place != null && it.line_place !== '' ? it.line_place : '—'} · {(it.lot_no || it.order_code) || '—'}
+                                </span>
                                 <span className="wd-order-detail-qty">{it.quantity_mc} MC</span>
                               </div>
                             ))}

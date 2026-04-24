@@ -3014,6 +3014,19 @@ body {
    Withdraw Page Styles
    ============================================================ */
 
+/* Withdraw page — Back sits next to cart icon + title */
+.wd-withdraw-header-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.wd-withdraw-header-title h2 {
+  margin: 0;
+}
+
 /* Department selection — larger prominence */
 .wd-dept-title {
   font-size: 2.25rem;
@@ -3030,6 +3043,16 @@ body {
   gap: 36px;
   max-width: 960px;
   margin: 0 auto;
+}
+
+/* When there are 3 depts, center the last card under the two above (2-column layout) */
+@media (min-width: 900px) {
+  .wd-dept-grid .wd-dept-card:nth-child(3):last-child {
+    grid-column: 1 / -1;
+    justify-self: center;
+    width: 100%;
+    max-width: calc((100% - 36px) / 2);
+  }
 }
 
 .wd-dept-card {
@@ -4330,6 +4353,8 @@ body {
 
 .mg-dept-PK { background: #6366f1; }
 .mg-dept-RM { background: #f97316; }
+.mg-dept-B05SM { background: #0d9488; }
+.mg-dept-other { background: #64748b; }
 
 .mg-req-no {
   font-family: 'Courier New', monospace;
@@ -8120,6 +8145,179 @@ body.ckic-route:has(.ckic-page[data-theme="light"]) .topbar-logout {
   margin-top: 2px;
 }
 
+/* OAC main tabs (Check vs Orders) */
+.oac-page-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--gray-200, #e5e7eb);
+}
+
+.oac-page-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--gray-600, #4b5563);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.oac-page-tab:hover {
+  color: var(--primary, #4f46e5);
+}
+
+.oac-page-tab.active {
+  color: var(--primary, #4f46e5);
+  border-bottom-color: var(--primary, #4f46e5);
+}
+
+.oac-orders-card .table-container {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.oac-orders-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 14px;
+  font-size: 0.85rem;
+  color: var(--gray-600);
+}
+
+/* OAC Orders: order name list + Excel-style line table */
+.oac-order-name-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.oac-order-name-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--gray-200, #e5e7eb);
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text, #111827);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.oac-order-name-btn:hover:not(:disabled) {
+  background: var(--gray-50, #f9fafb);
+  border-color: var(--gray-300, #d1d5db);
+}
+
+.oac-order-name-btn:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.oac-order-name-text {
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.oac-order-name-chev {
+  flex-shrink: 0;
+  color: var(--gray-400, #9ca3af);
+  margin-left: 8px;
+}
+
+.oac-order-design-wrap {
+  overflow-x: auto;
+  padding: 0 0 4px;
+}
+
+.oac-order-design-table {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  background: #fff;
+  color: #111;
+}
+
+.oac-order-design-table th,
+.oac-order-design-table td {
+  border: 1px solid #1a1a1a;
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+
+.oac-order-design-table thead th {
+  text-transform: uppercase;
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  background: #f3f3f3;
+}
+
+.oac-col-no {
+  width: 40px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.oac-col-desc {
+  text-align: left;
+  min-width: 120px;
+}
+
+.oac-col-pack {
+  text-align: left;
+  min-width: 160px;
+}
+
+.oac-col-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.oac-col-remark {
+  text-align: left;
+  min-width: 100px;
+  font-size: 0.78rem;
+}
+
+.oac-order-total-row td {
+  font-weight: 700;
+  background: #fafafa;
+}
+
+.oac-order-total-label {
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.oac-order-total-val {
+  font-weight: 700;
+}
+
 /* Layout */
 .oac-upload-layout {
   display: grid;
@@ -9543,6 +9741,41 @@ body.ckic-route:has(.ckic-page[data-theme="light"]) .topbar-logout {
 .imp-td-fac { background: rgba(16, 185, 129, 0.02); }
 .imp-td-bal { background: rgba(239, 68, 68, 0.03); text-align: right; font-weight: 700; }
 .imp-td-out { background: rgba(245, 158, 11, 0.02); text-align: right; font-size: 0.78rem; }
+
+/* Multiple stock-outs per item + date: stacked lines with scroll (was only first out via .find) */
+.imp-stock-table .imp-td-out-multi {
+  white-space: normal;
+  vertical-align: top;
+  padding: 3px 4px !important;
+  max-width: 7rem;
+}
+
+.imp-out-date-stack {
+  max-height: 5.5rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  scrollbar-width: thin;
+}
+
+.imp-out-date-line {
+  line-height: 1.4;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+  font-size: 0.76rem;
+}
+
+.imp-out-date-line:last-child {
+  border-bottom: none;
+  padding-bottom: 2px;
+}
+
+.imp-out-line-order {
+  text-align: right;
+  word-break: break-word;
+  white-space: normal;
+}
 
 .imp-bal-reduced { color: var(--danger) !important; }
 

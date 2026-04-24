@@ -993,12 +993,38 @@ function ImportShipmentDetail() {
                       <td><input className="imp-cell-input" value={it.remark} onChange={e => updateItem(idx, 'remark', e.target.value)} /></td>
                       <td><input className="imp-cell-input imp-cell-num" type="number" step="0.01" value={it.unit_price} onChange={e => updateItem(idx, 'unit_price', e.target.value)} /></td>
                       {stockOutDates.map(([date, outs]) => {
-                        const itemOut = outs.find(o => o.item_id === it.id);
+                        const itemOuts = outs
+                          .filter(o => o.item_id === it.id)
+                          .sort((a, b) => (a.id || 0) - (b.id || 0));
                         return (
                           <React.Fragment key={date}>
-                            <td className="imp-td-out">{itemOut?.order_ref || ''}</td>
-                            <td className="imp-td-out">{itemOut ? num(itemOut.mc) : ''}</td>
-                            <td className="imp-td-out">{itemOut ? num(itemOut.nw_kgs).toLocaleString('en-US', { minimumFractionDigits: 2 }) : ''}</td>
+                            <td className="imp-td-out imp-td-out-multi">
+                              <div className="imp-out-date-stack">
+                                {itemOuts.map((o) => (
+                                  <div key={o.id} className="imp-out-date-line imp-out-line-order">
+                                    {o.order_ref != null && String(o.order_ref).trim() !== '' ? o.order_ref : '—'}
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="imp-td-out imp-td-out-multi">
+                              <div className="imp-out-date-stack">
+                                {itemOuts.map((o) => (
+                                  <div key={o.id} className="imp-out-date-line">
+                                    {num(o.mc)}
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="imp-td-out imp-td-out-multi">
+                              <div className="imp-out-date-stack">
+                                {itemOuts.map((o) => (
+                                  <div key={o.id} className="imp-out-date-line">
+                                    {num(o.nw_kgs).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
                           </React.Fragment>
                         );
                       })}

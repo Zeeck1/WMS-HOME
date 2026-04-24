@@ -123,6 +123,10 @@ export const getOacChecks = (limit) => api.get('/oac/checks', { params: { limit 
 export const getOacCheck = (id) => api.get(`/oac/checks/${id}`);
 export const deleteOacCheck = (id) => api.delete(`/oac/checks/${id}`);
 export const getOacStockSummary = () => api.get('/oac/stock-summary');
+/** All saved order lines from OAC Excel uploads (paged) */
+export const getOacOrderLines = (params) => api.get('/oac/order-lines', { params });
+/** Distinct order file per check — list for Orders tab */
+export const getOacOrderGroups = (params) => api.get('/oac/order-groups', { params });
 
 // ─── Imports (Shipments) ─────────────────────────────
 export const getImportShipments = () => api.get('/imports');

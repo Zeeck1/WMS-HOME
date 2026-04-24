@@ -278,7 +278,7 @@ async function initDatabase() {
       CREATE TABLE IF NOT EXISTS withdraw_requests (
         id INT AUTO_INCREMENT PRIMARY KEY,
         request_no VARCHAR(50) NOT NULL UNIQUE,
-        department ENUM('PK','RM') NOT NULL,
+        department ENUM('PK','RM','Branch.05 (SM)') NOT NULL,
         status ENUM('PENDING','TAKING_OUT','READY','FINISHED','CANCELLED') NOT NULL DEFAULT 'PENDING',
         withdraw_date DATE DEFAULT NULL,
         request_time TIME DEFAULT NULL,
@@ -306,6 +306,24 @@ async function initDatabase() {
         await connection.query('ALTER TABLE withdraw_requests ADD COLUMN request_time TIME DEFAULT NULL AFTER withdraw_date');
         await connection.query('ALTER TABLE withdraw_requests ADD COLUMN finished_at TIMESTAMP NULL DEFAULT NULL AFTER request_time');
         console.log('  Migration: added withdraw_date, request_time, finished_at columns');
+      }
+    } catch (e) {
+      // ignore migration errors
+    }
+
+    // Migration: allow Branch.05 (SM) on existing installs
+    try {
+      const [dCol] = await connection.query(
+        `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'withdraw_requests' AND COLUMN_NAME = 'department'`,
+        [dbName]
+      );
+      const ct = dCol[0] && String(dCol[0].COLUMN_TYPE);
+      if (ct && !ct.includes('Branch.05')) {
+        await connection.query(
+          `ALTER TABLE withdraw_requests MODIFY COLUMN department ENUM('PK','RM','Branch.05 (SM)') NOT NULL`
+        );
+        console.log('  Migration: withdraw_requests.department extended with Branch.05 (SM)');
       }
     } catch (e) {
       // ignore migration errors
@@ -503,6 +521,47 @@ async function initDatabase() {
       ) ENGINE=InnoDB
     `);
     console.log('  Table created: import_stock_outs');
+
+    // Migration: import shipment lines on withdraw (import_item_id; lot/location nullable)
+    try {
+      const [impW] = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'withdraw_items' AND COLUMN_NAME = 'import_item_id'
+      `, [dbName]);
+      if (impW.length === 0) {
+        await connection.query('ALTER TABLE withdraw_items ADD COLUMN import_item_id INT NULL DEFAULT NULL AFTER request_id');
+        await connection.query('ALTER TABLE withdraw_items ADD COLUMN import_stock_out_id INT NULL DEFAULT NULL AFTER movement_id');
+        await connection.query('ALTER TABLE withdraw_items MODIFY lot_id INT NULL');
+        await connection.query('ALTER TABLE withdraw_items MODIFY location_id INT NULL');
+        await connection.query(
+          'ALTER TABLE withdraw_items ADD CONSTRAINT fk_wi_import_item FOREIGN KEY (import_item_id) REFERENCES import_items(id) ON DELETE CASCADE'
+        );
+        await connection.query(
+          'ALTER TABLE withdraw_items ADD CONSTRAINT fk_wi_import_stock_out FOREIGN KEY (import_stock_out_id) REFERENCES import_stock_outs(id) ON DELETE SET NULL'
+        );
+        console.log('  Migration: import_item_id / import_stock_out_id and nullable lot/location on withdraw_items');
+      }
+    } catch (e) {
+      console.error('  Migration withdraw_items import columns:', e.message);
+    }
+
+    // Backfill: import_stock_outs created from withdrawals stored the request number
+    // (WD-PK-YYYYMMDD-###). Replace it with Production Process (withdraw line) or Department.
+    try {
+      const [res] = await connection.query(`
+        UPDATE import_stock_outs iso
+        JOIN withdraw_items wi ON wi.import_stock_out_id = iso.id
+        JOIN withdraw_requests wr ON wr.id = wi.request_id
+        SET iso.order_ref = COALESCE(NULLIF(TRIM(wi.production_process), ''), wr.department)
+        WHERE iso.order_ref = wr.request_no
+           OR iso.order_ref LIKE 'WD-%'
+      `);
+      if (res && res.affectedRows > 0) {
+        console.log(`  Migration: backfilled ${res.affectedRows} import_stock_outs.order_ref with production_process/department`);
+      }
+    } catch (e) {
+      console.error('  Migration backfill import_stock_outs.order_ref:', e.message);
+    }
 
     await connection.query(`
       CREATE TABLE IF NOT EXISTS import_expenses (
