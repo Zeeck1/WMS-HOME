@@ -4627,6 +4627,17 @@ body {
    Withdraw Form (Printable) Styles
    ============================================================ */
 
+/* Default print sheet; named @page rules below apply to specific UIs. */
+@page {
+  size: A4 portrait;
+  margin: 10mm;
+}
+
+@page withdraw-form-landscape {
+  size: A4 landscape;
+  margin: 10mm;
+}
+
 .wf-page {
   padding: 20px;
 }
@@ -4877,6 +4888,7 @@ body {
 
   .wf-page {
     padding: 0;
+    page: withdraw-form-landscape;
   }
 
   .wf-form {
@@ -4927,11 +4939,6 @@ body {
     padding: 3px 4px;
     height: 22px;
     min-height: 22px;
-  }
-
-  @page {
-    size: A4 landscape;
-    margin: 10mm;
   }
 }
 
@@ -7065,6 +7072,14 @@ body {
   align-items: center;
   padding: 12px 20px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.cp-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 .cp-print-area {
   max-width: 800px;
@@ -7083,6 +7098,9 @@ body {
   font-size: 0.82rem;
   font-weight: 700;
   margin-bottom: 2px;
+  max-width: 100%;
+  line-height: 1.35;
+  padding: 0 4px;
 }
 .cp-title {
   text-align: center;
@@ -7171,6 +7189,9 @@ body {
 .cp-footer {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   margin-top: 16px;
   padding-top: 6px;
   border-top: 1px solid #ccc;
@@ -7178,8 +7199,13 @@ body {
   color: #666;
 }
 
-/* ─── Print: Portrait, fit on one page ─── */
-@page {
+/* Customer IN (deposit) print only: /customer/print/:depositId/0 */
+@page customer-print-in-landscape {
+  size: A4 landscape;
+  margin: 8mm 10mm;
+}
+/* ─── Print: Customer form — named portrait (default @page does not break withdraw landscape) ─── */
+@page customer-print-portrait {
   size: A4 portrait;
   margin: 8mm 10mm;
 }
@@ -7190,9 +7216,14 @@ body {
   .main-content { margin: 0 !important; padding: 0 !important; }
   .main-scroll { padding: 0 !important; overflow: visible !important; }
   .cp-print-area {
+    page: customer-print-portrait;
     border: none; padding: 0; max-width: 100%;
     box-shadow: none; font-size: 0.7rem;
     width: 100%;
+  }
+  /* Deposit/IN form only (URL ends with /0) — wide table, landscape */
+  .cp-print-area.cp-print-in-only {
+    page: customer-print-in-landscape;
   }
   .cp-table th {
     background: #eee !important;

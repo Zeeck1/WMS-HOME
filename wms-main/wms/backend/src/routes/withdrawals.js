@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { bangkokYYYYMMDDCompact } = require('../utils/bangkokTime');
+const { authMiddleware, superadminOnly } = require('../middleware/auth');
 
 const WITHDRAW_DEPARTMENTS = ['PK', 'RM', 'Branch.05 (SM)'];
 
@@ -439,6 +440,70 @@ router.put('/:id/status', async (req, res) => {
     await conn.rollback();
     console.error('Error updating withdrawal status:', error);
     res.status(500).json({ error: 'Failed to update status' });
+  } finally {
+    conn.release();
+  }
+});
+
+// ─── DELETE permanently remove a withdrawal (superadmin) — stock outs + import outs + request ──
+// Must be registered before `DELETE /:id` (soft cancel) so path `/:id/erase` matches.
+router.delete('/:id/erase', authMiddleware, superadminOnly, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (Number.isNaN(id)) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
+
+  const [exists] = await pool.query('SELECT id, request_no FROM withdraw_requests WHERE id = ?', [id]);
+  if (exists.length === 0) {
+    return res.status(404).json({ error: 'Request not found' });
+  }
+  const requestNo = exists[0].request_no;
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [items] = await conn.query(
+      'SELECT id, movement_id, import_stock_out_id, import_item_id FROM withdraw_items WHERE request_id = ?',
+      [id]
+    );
+
+    const movementIds = [...new Set(items.map((i) => i.movement_id).filter(Boolean))];
+    const importOutIds = [...new Set(items.map((i) => i.import_stock_out_id).filter(Boolean))];
+
+    if (movementIds.length) {
+      const ph = movementIds.map(() => '?').join(',');
+      await conn.query(`DELETE FROM movements WHERE id IN (${ph})`, movementIds);
+    }
+
+    if (importOutIds.length) {
+      const phOut = importOutIds.map(() => '?').join(',');
+      const [shipRows] = await conn.query(
+        `SELECT DISTINCT ii.shipment_id
+         FROM withdraw_items wi
+         JOIN import_items ii ON ii.id = wi.import_item_id
+         WHERE wi.request_id = ? AND wi.import_item_id IS NOT NULL`,
+        [id]
+      );
+      await conn.query(`DELETE FROM import_stock_outs WHERE id IN (${phOut})`, importOutIds);
+      for (const row of shipRows) {
+        if (row.shipment_id) {
+          await conn.query('UPDATE import_shipments SET last_update_stock = NOW() WHERE id = ?', [row.shipment_id]);
+        }
+      }
+    }
+
+    await conn.query('DELETE FROM withdraw_requests WHERE id = ?', [id]);
+    await conn.commit();
+
+    res.json({
+      message: 'Withdrawal permanently removed from Manage, Withdraw, and stock records',
+      request_no: requestNo
+    });
+  } catch (error) {
+    await conn.rollback();
+    console.error('Error permanently deleting withdrawal:', error);
+    res.status(500).json({ error: 'Failed to remove withdrawal' });
   } finally {
     conn.release();
   }

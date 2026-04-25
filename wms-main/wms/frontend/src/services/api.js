@@ -72,6 +72,8 @@ export const createWithdrawal = (data) => api.post('/withdrawals', data);
 export const updateWithdrawalItems = (id, data) => api.put(`/withdrawals/${id}/items`, data);
 export const updateWithdrawalStatus = (id, data) => api.put(`/withdrawals/${id}/status`, data);
 export const cancelWithdrawal = (id) => api.delete(`/withdrawals/${id}`);
+/** Superadmin: remove request and all linked stock-out / import-out rows everywhere */
+export const permanentlyDeleteWithdrawal = (id) => api.delete(`/withdrawals/${id}/erase`, withAuth());
 
 // ─── Upload ───────────────────────────────────────────
 export const uploadExcel = (file) => {

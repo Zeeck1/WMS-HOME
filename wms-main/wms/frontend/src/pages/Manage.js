@@ -2,10 +2,11 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   FiSettings, FiSearch, FiCheck, FiClock, FiTruck, FiPackage,
-  FiCheckCircle, FiXCircle, FiChevronDown, FiChevronUp, FiRefreshCw, FiPrinter, FiFileText
+  FiCheckCircle, FiXCircle, FiChevronDown, FiChevronUp, FiRefreshCw, FiPrinter, FiFileText, FiTrash2
 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
-import { getWithdrawals, getWithdrawal, updateWithdrawalStatus, updateWithdrawalItems, cancelWithdrawal, sendLineNotification } from '../services/api';
+import { getWithdrawals, getWithdrawal, updateWithdrawalStatus, updateWithdrawalItems, cancelWithdrawal, permanentlyDeleteWithdrawal, sendLineNotification } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import {
   bangkokYYYYMMDD,
   bangkokYMDYesterday,
@@ -71,6 +72,8 @@ const STATUS_CONFIG = {
 
 function Manage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isSuperadmin = user?.role === 'superadmin';
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState(null);
@@ -210,6 +213,33 @@ function Manage() {
       fetchRequests();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to cancel');
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const handlePermanentlyDelete = async (req) => {
+    if (!isSuperadmin) return;
+    const msg =
+      `Permanently delete ${req.request_no}?\n\n` +
+      'This removes the request from the Withdraw page and Manage, and deletes all linked stock OUT / import stock records for this request. ' +
+      'It cannot be undone.';
+    if (!window.confirm(msg)) return;
+    setProcessing(req.id);
+    try {
+      await permanentlyDeleteWithdrawal(req.id);
+      toast.success('Withdrawal fully removed from all sections');
+      setExpandedId(null);
+      setExpandedData(null);
+      setEditedQty({});
+      fetchRequests();
+    } catch (err) {
+      const code = err.response?.status;
+      if (code === 401 || code === 403) {
+        toast.error('Only the superadmin can delete requested data from here');
+      } else {
+        toast.error(err.response?.data?.error || 'Failed to delete request');
+      }
     } finally {
       setProcessing(null);
     }
@@ -536,6 +566,18 @@ function Manage() {
                             disabled={isProcessing}
                           >
                             <FiXCircle /> Cancel Request
+                          </button>
+                        )}
+                        {isSuperadmin && (
+                          <button
+                            type="button"
+                            className="btn btn-danger"
+                            style={{ borderStyle: 'dashed' }}
+                            onClick={() => handlePermanentlyDelete(req)}
+                            disabled={isProcessing}
+                            title="Remove this request and all linked stock records (superadmin only)"
+                          >
+                            <FiTrash2 /> Delete from all (superadmin)
                           </button>
                         )}
                       </div>

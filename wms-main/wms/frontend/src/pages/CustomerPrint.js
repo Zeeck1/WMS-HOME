@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { FiPrinter, FiArrowLeft } from 'react-icons/fi';
+import { FiPrinter, FiArrowLeft, FiImage } from 'react-icons/fi';
 import { toast } from 'react-toastify';
+import html2canvas from 'html2canvas';
 import { getCustomerPrintData } from '../services/api';
 import { dateToYYYYMMDDInBangkok } from '../utils/bangkokTime';
 import {
@@ -13,16 +14,38 @@ import {
 } from '../utils/kgParts';
 
 const toDate = (d) => d ? (typeof d === 'string' ? d.split('T')[0] : dateToYYYYMMDDInBangkok(d)) : '';
-const COMPANY = 'Powered by CK Intelligence';
+const COMPANY = 'บริษัท ซี.เค.โฟรเซน ฟิช แอนด์ ฟู้ด จำกัด สาขาฉะเชิงเทรา';
+/** Shown in the print form page footer (letterhead still uses {COMPANY}). */
+const FOOTER_ATTRIBUTION = 'Powered by CK Intelligence';
 const DOC_FOOTER = 'FM-CS-001 Rev.01 (01-11-2023)';
 const BLANK_ROWS_IN = 10;
 const BLANK_ROWS_OUT = 10;
+
+/** Comma-separated withdraw KG parts (e.g. "15.2, 15.6") — "เบิก KG" แบบรายละเอียด */
+function hasMultiPartWithdrawKg(s) {
+  if (s == null || s === '') return false;
+  const str = String(s).trim();
+  if (!str.includes(',') && !str.includes('，')) return false;
+  const parts = str.split(/[,，]/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2) return false;
+  return parts.some((p) => /^-?\d+(\.\d+)?$/.test(p));
+}
+
+function formatInNwUnitKg(v) {
+  if (v == null || v === '') return '';
+  const n = Number(v);
+  if (Number.isNaN(n)) return '';
+  if (Math.abs(n) < 1e-9) return '';
+  return n.toFixed(2);
+}
 
 function CustomerPrint() {
   const { depositId, withdrawalId } = useParams();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [copyingImage, setCopyingImage] = useState(false);
+  const printAreaRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -169,6 +192,67 @@ function CustomerPrint() {
     return { outRows: rows, dayGroups: grouped };
   }, [rawWithdrawalItems, depositItems]);
 
+  const showOutTotalBalanceKgCol = useMemo(
+    () =>
+      outRows.some((it) => {
+        const rawOut =
+          it.kg_parts_out != null && String(it.kg_parts_out).trim() !== ''
+            ? String(it.kg_parts_out)
+            : (it.out_kg_display != null ? String(it.out_kg_display) : '');
+        return hasMultiPartWithdrawKg(rawOut);
+      }),
+    [outRows]
+  );
+
+  const outTableDataCols = showOutTotalBalanceKgCol ? 11 : 10;
+
+  const handleCopyForm = useCallback(async () => {
+    const el = printAreaRef.current;
+    if (!el) {
+      toast.error('Nothing to copy');
+      return;
+    }
+    setCopyingImage(true);
+    try {
+      toast.info('กำลังสร้างรูป… / Generating image…');
+      const canvas = await html2canvas(el, {
+        useCORS: true,
+        scale: 2,
+        logging: false,
+        backgroundColor: '#ffffff',
+      });
+      const blob = await new Promise((resolve, reject) => {
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error('toBlob failed'))),
+          'image/png',
+          0.95
+        );
+      });
+
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+          toast.success('คัดลอกรูปแล้ว — วาง (Ctrl+V) ใน Line, แชท, Word / Image copied');
+          return;
+        } catch (clipErr) {
+          console.warn(clipErr);
+        }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `customer-form-${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.info('คัดลอกรูปไม่ได้ — ดาวน์โหลด PNG แทน (หรือลอง Chrome/Edge) / Image saved (clipboard unavailable)');
+    } catch (e) {
+      console.error(e);
+      toast.error('สร้างรูปไม่สำเร็จ / Failed to copy image');
+    } finally {
+      setCopyingImage(false);
+    }
+  }, []);
+
   if (loading) return <div className="loading"><div className="spinner"></div>Loading...</div>;
   if (!data) return <div style={{ padding: 40, textAlign: 'center' }}>ไม่พบข้อมูล</div>;
 
@@ -178,6 +262,10 @@ function CustomerPrint() {
 
   const isOutPrint = !!(withdrawalId && withdrawalId !== '0');
   const depItems = deposit?.items || [];
+  const showInKgDetailCol = depItems.some(
+    (it) => it.kg_parts != null && String(it.kg_parts).trim() !== ''
+  );
+  const inTableDataColCount = showInKgDetailCol ? 10 : 9;
   const depTotalBoxes = depItems.reduce((s, it) => s + (it.boxes || 0), 0);
   const depTotalKg = depItems.reduce((s, it) => s + Number(it.weight_kg || 0), 0);
 
@@ -191,10 +279,24 @@ function CustomerPrint() {
     <>
       <div className="cp-toolbar no-print">
         <button className="btn btn-outline" onClick={() => navigate('/customer', { state: { tab: isOutPrint ? 'OUT' : 'IN', customerId: customer?.customer_id } })}><FiArrowLeft /> กลับ</button>
-        <button className="btn btn-primary" onClick={() => window.print()}><FiPrinter /> พิมพ์</button>
+        <div className="cp-toolbar-actions">
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={handleCopyForm}
+            disabled={copyingImage}
+            title="Copy the form as a picture — paste in LINE, Word, etc."
+          >
+            <FiImage /> {copyingImage ? '…' : 'คัดลอกรูป'}
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => window.print()}><FiPrinter /> พิมพ์</button>
+        </div>
       </div>
 
-      <div className="cp-print-area">
+      <div
+        ref={printAreaRef}
+        className={`cp-print-area${!isOutPrint ? ' cp-print-in-only' : ''}`}
+      >
         {/* ═══════════════ รายการรับฝากสินค้า (IN) ═══════════════ */}
         {deposit && (
           <div className="cp-form">
@@ -229,12 +331,18 @@ function CustomerPrint() {
                   <th rowSpan={2} style={{ width: 72 }}>วันที่รับ</th>
                   <th rowSpan={2}>รายการ</th>
                   <th rowSpan={2} style={{ width: 65 }}>LOT No.</th>
-                  <th colSpan={3}>Total G/W</th>
-                  <th colSpan={2}>N/W:UNIT</th>
+                  <th colSpan={showInKgDetailCol ? 3 : 2}>Total G/W</th>
+                  <th rowSpan={2} style={{ width: 72, fontSize: '0.7rem' }}>N/W:UNIT<br />(Kg.)</th>
                   <th rowSpan={2} style={{ width: 45 }}>เวลา</th>
                   <th rowSpan={2} style={{ width: 65 }}>หมายเหตุ</th>
                 </tr>
-                <tr><th>กล่อง</th><th style={{ fontSize: '0.65rem' }}>Kg รายละเอียด</th><th>Kg รวม</th><th>กล่อง</th><th>(Kg.)</th></tr>
+                <tr>
+                  <th>กล่อง</th>
+                  {showInKgDetailCol && (
+                    <th style={{ fontSize: '0.65rem' }}>Kg รายละเอียด</th>
+                  )}
+                  <th>Kg รวม</th>
+                </tr>
               </thead>
               <tbody>
                 {depItems.map((it, i) => (
@@ -244,25 +352,32 @@ function CustomerPrint() {
                     <td>{it.item_name}</td>
                     <td>{it.lot_no || ''}</td>
                     <td className="num-cell">{it.boxes || ''}</td>
-                    <td className="num-cell" style={{ fontSize: '0.7rem', whiteSpace: 'pre-wrap' }}>{it.kg_parts || '—'}</td>
+                    {showInKgDetailCol && (
+                      <td className="num-cell" style={{ fontSize: '0.7rem', whiteSpace: 'pre-wrap' }}>
+                        {it.kg_parts && String(it.kg_parts).trim() ? it.kg_parts : '—'}
+                      </td>
+                    )}
                     <td className="num-cell">{it.weight_kg ? Number(it.weight_kg).toFixed(2) : ''}</td>
-                    <td className="num-cell">-</td>
-                    <td className="num-cell">{it.nw_unit ? Number(it.nw_unit).toFixed(2) : ''}</td>
+                    <td className="num-cell">{formatInNwUnitKg(it.nw_unit)}</td>
                     <td className="text-center">{it.time_str || ''}</td>
                     <td>{it.remark || ''}</td>
                   </tr>
                 ))}
-                {blankArr(BLANK_ROWS_IN, depItems.length).map(i => (
-                  <tr key={`bi${i}`} className="cp-blank-row"><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+                {blankArr(BLANK_ROWS_IN, depItems.length).map((i) => (
+                  <tr key={`bi${i}`} className="cp-blank-row">
+                    {Array.from({ length: inTableDataColCount }, (_, j) => (
+                      <td key={j}>&nbsp;</td>
+                    ))}
+                  </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr>
                   <td colSpan={4} className="text-right"></td>
                   <td className="num-cell"><b>{depTotalBoxes || ''}</b></td>
-                  <td></td>
+                  {showInKgDetailCol && <td></td>}
                   <td className="num-cell"><b>{depTotalKg ? depTotalKg.toFixed(2) : ''}</b></td>
-                  <td colSpan={4}></td>
+                  <td colSpan={3}></td>
                 </tr>
               </tfoot>
             </table>
@@ -321,7 +436,7 @@ function CustomerPrint() {
                   <th rowSpan={2}>รายการ</th>
                   <th rowSpan={2} style={{ width: 65 }}>LOT No.</th>
                   <th colSpan={2}>Total G/W</th>
-                  <th colSpan={3}>คงเหลือ</th>
+                  <th colSpan={showOutTotalBalanceKgCol ? 3 : 2}>คงเหลือ</th>
                   <th rowSpan={2} style={{ width: 45 }}>เวลา</th>
                   <th rowSpan={2} style={{ width: 65 }}>หมายเหตุ</th>
                 </tr>
@@ -330,7 +445,9 @@ function CustomerPrint() {
                   <th style={{ fontSize: '0.65rem' }}>Kg รายละเอียด</th>
                   <th>กล่อง</th>
                   <th style={{ fontSize: '0.65rem' }}>Kg รายละเอียด</th>
-                  <th style={{ fontSize: '0.65rem' }}>Total Balance KG</th>
+                  {showOutTotalBalanceKgCol && (
+                    <th style={{ fontSize: '0.65rem' }}>Total Balance KG</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -341,7 +458,7 @@ function CustomerPrint() {
                       <React.Fragment key={`wr${it.id}`}>
                         {ii === 0 && (
                           <tr className="cp-day-header">
-                            <td colSpan={11} style={{ background: '#f8f9fa', fontWeight: 700, fontSize: '0.72rem', textAlign: 'left', padding: '4px 8px' }}>
+                            <td colSpan={outTableDataCols} style={{ background: '#f8f9fa', fontWeight: 700, fontSize: '0.72rem', textAlign: 'left', padding: '4px 8px' }}>
                               วันที่เบิก: {group.date}
                             </td>
                           </tr>
@@ -359,7 +476,9 @@ function CustomerPrint() {
                           <td className="num-cell" style={{ fontSize: '0.72rem', whiteSpace: 'pre-wrap' }}>
                             {it.remaining_kg_display ?? Number(it.remaining_kg).toFixed(2)}
                           </td>
-                          <td className="num-cell">{Number(it.remaining_total_balance_kg ?? it.remaining_kg).toFixed(2)}</td>
+                          {showOutTotalBalanceKgCol && (
+                            <td className="num-cell">{Number(it.remaining_total_balance_kg ?? it.remaining_kg).toFixed(2)}</td>
+                          )}
                           <td className="text-center">{it.time_str || ''}</td>
                           <td>{it.remark || ''}</td>
                         </tr>
@@ -367,8 +486,12 @@ function CustomerPrint() {
                     );
                   });
                 }); })()}
-                {blankArr(BLANK_ROWS_OUT, outRows.length).map(i => (
-                  <tr key={`bo${i}`} className="cp-blank-row"><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+                {blankArr(BLANK_ROWS_OUT, outRows.length).map((i) => (
+                  <tr key={`bo${i}`} className="cp-blank-row">
+                    {Array.from({ length: outTableDataCols }, (_, j) => (
+                      <td key={j}>&nbsp;</td>
+                    ))}
+                  </tr>
                 ))}
               </tbody>
               <tfoot>
@@ -376,7 +499,7 @@ function CustomerPrint() {
                   <td colSpan={4} className="text-right"></td>
                   <td className="num-cell"><b>{wdTotalBoxes || ''}</b></td>
                   <td className="num-cell"><b>{wdTotalKg ? wdTotalKg.toFixed(2) : ''}</b></td>
-                  <td colSpan={5}></td>
+                  <td colSpan={showOutTotalBalanceKgCol ? 5 : 4}></td>
                 </tr>
               </tfoot>
             </table>
@@ -409,7 +532,7 @@ function CustomerPrint() {
         )}
 
         <div className="cp-footer">
-          <span>{COMPANY}</span>
+          <span>{FOOTER_ATTRIBUTION}</span>
           <span>{DOC_FOOTER}</span>
         </div>
       </div>
