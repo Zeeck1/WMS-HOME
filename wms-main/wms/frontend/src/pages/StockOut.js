@@ -74,17 +74,18 @@ function StockOut() {
   const filteredInventory = useMemo(() => {
     if (!searchQuery.trim()) return inventory;
     const q = searchQuery.trim().toLowerCase();
+    const lc = (v) => String(v ?? '').toLowerCase();
     return inventory.filter(item => {
-      const fish = (item.fish_name || '').toLowerCase();
-      const size = (item.size || '').toLowerCase();
-      const lot = (item.lot_no || '').toLowerCase();
-      const location = (item.line_place || '').toLowerCase();
-      const order = (item.order_code || '').toLowerCase();
+      const fish = lc(item.fish_name);
+      const size = lc(item.size);
+      const lot = lc(item.lot_no);
+      const location = lc(item.line_place);
+      const order = lc(item.order_code);
       const handMc = String(item.hand_on_balance_mc ?? '');
       const handKg = String(item.hand_on_balance_kg ?? '');
-      const country = (item.country || '').toLowerCase();
-      const stack = (item.stack_no || '').toLowerCase();
-      const remark = (item.remark || '').toLowerCase();
+      const country = lc(item.country);
+      const stack = lc(item.stack_no);
+      const remark = lc(item.remark);
       return fish.includes(q) || size.includes(q) || lot.includes(q) ||
         location.includes(q) || order.includes(q) || handMc.includes(q) || handKg.includes(q) ||
         country.includes(q) || stack.includes(q) || remark.includes(q);
