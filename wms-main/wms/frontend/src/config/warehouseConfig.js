@@ -116,11 +116,12 @@ export function getAllLocationCodes(warehouseId) {
 export function parseLocationCode(code) {
   if (!code) return null;
   const upper = code.toUpperCase().trim();
-  const match = upper.match(/^([A-Z]{1,2})(\d{1,2})([LR])?(?:-(\d+))?$/);
+  // LINE only (A, AA), or LINE + POS ± optional side + optional level (A01, A01L, A01L-2)
+  const match = upper.match(/^([A-Z]{1,2})(?:(\d{1,2})([LR])?)?(?:-(\d+))?$/);
   if (!match) return null;
   return {
     line: match[1],
-    position: parseInt(match[2], 10),
+    position: match[2] != null ? parseInt(match[2], 10) : null,
     side: match[3] || 'L',
     level: match[4] ? parseInt(match[4], 10) : null,
     raw: upper,
@@ -135,7 +136,7 @@ export function getLocationSortParts(code) {
   const parsed = parseLocationCode(code);
   if (!parsed) return { position: 0, level: 0, line: 'ZZZZ' };
   return {
-    position: parsed.position,
+    position: parsed.position != null ? parsed.position : 0,
     level: parsed.level || 0,
     line: parsed.line,
   };

@@ -47,7 +47,9 @@ function LinesReformat() {
         const pa = parseLocationCode(a.line_place);
         const pb = parseLocationCode(b.line_place);
         if (pa && pb) {
-          if (pa.position !== pb.position) return pa.position - pb.position;
+          const posA = pa.position != null ? pa.position : 0;
+          const posB = pb.position != null ? pb.position : 0;
+          if (posA !== posB) return posA - posB;
           return (pa.level || 0) - (pb.level || 0);
         }
         return (a.line_place || '').localeCompare(b.line_place || '');
@@ -90,7 +92,9 @@ function LinesReformat() {
     const grouped = {};
     items.forEach(item => {
       const p = parseLocationCode(item.line_place);
-      const posKey = p ? `${p.line}${String(p.position).padStart(2, '0')}${p.side}` : 'UNKNOWN';
+      const posKey = p
+        ? `${p.line}${p.position != null ? String(p.position).padStart(2, '0') : '00'}${p.side}`
+        : 'UNKNOWN';
       if (!grouped[posKey]) grouped[posKey] = [];
       grouped[posKey].push(item);
     });

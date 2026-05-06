@@ -3,6 +3,12 @@ const router = express.Router();
 const pool = require('../config/db');
 const { authMiddleware, superadminOnly } = require('../middleware/auth');
 
+/** Line letter(s) only — use anchored match so "A" does not match "BA01L" via LIKE '%A%'. */
+function isLineOnlyLocationFilter(location) {
+  const s = String(location || '').trim();
+  return /^[A-Za-z]{1,2}$/.test(s);
+}
+
 async function fetchImportShipmentRows(filters = {}) {
   const { fish_name, location } = filters;
   let sql = `
@@ -60,7 +66,17 @@ router.get('/', async (req, res) => {
 
     if (stock_type) { sql += ' AND stock_type = ?'; params.push(stock_type); }
     if (fish_name) { sql += ' AND fish_name LIKE ?'; params.push(`%${fish_name}%`); }
-    if (location) { sql += ' AND line_place LIKE ?'; params.push(`%${location}%`); }
+    if (location) {
+      if (isLineOnlyLocationFilter(location)) {
+        const line = String(location).trim().toUpperCase();
+        const pattern = `^(${line})$|^${line}[0-9]{1,2}[LR](-[0-9]+)?$`;
+        sql += ' AND UPPER(TRIM(line_place)) REGEXP ?';
+        params.push(pattern);
+      } else {
+        sql += ' AND line_place LIKE ?';
+        params.push(`%${location}%`);
+      }
+    }
     if (lot_no) { sql += ' AND lot_no LIKE ?'; params.push(`%${lot_no}%`); }
 
     sql += ' ORDER BY line_place, stack_no, fish_name';

@@ -132,14 +132,15 @@ function LocationLayout() {
         stockType: item.stock_type,
       };
 
-      const posKey = `${parsed.line}-${parsed.position}-${parsed.side}`;
+      const posNum = parsed.position != null ? parsed.position : 0;
+      const posKey = `${parsed.line}-${posNum}-${parsed.side}`;
       if (!map[posKey]) map[posKey] = { qty: 0, kg: 0, products: [], line: parsed.line };
       map[posKey].qty += mc;
       map[posKey].kg += totalKg;
       map[posKey].products.push(productInfo);
 
       if (parsed.level) {
-        const levelKey = `${parsed.line}-${parsed.position}-${parsed.side}-${parsed.level}`;
+        const levelKey = `${parsed.line}-${posNum}-${parsed.side}-${parsed.level}`;
         if (!map[levelKey]) map[levelKey] = { qty: 0, kg: 0, products: [], line: parsed.line, level: parsed.level };
         map[levelKey].qty += mc;
         map[levelKey].kg += totalKg;
