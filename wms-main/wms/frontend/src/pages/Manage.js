@@ -2,10 +2,14 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   FiSettings, FiSearch, FiCheck, FiClock, FiTruck, FiPackage,
-  FiCheckCircle, FiXCircle, FiChevronDown, FiChevronUp, FiRefreshCw, FiPrinter, FiFileText, FiTrash2
+  FiCheckCircle, FiXCircle, FiChevronDown, FiChevronUp, FiRefreshCw, FiPrinter, FiFileText, FiTrash2,
+  FiMapPin, FiCalendar, FiRotateCcw, FiSave
 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
-import { getWithdrawals, getWithdrawal, updateWithdrawalStatus, updateWithdrawalItems, cancelWithdrawal, permanentlyDeleteWithdrawal, sendLineNotification } from '../services/api';
+import {
+  getWithdrawals, getWithdrawal, getInventory, updateWithdrawalStatus, updateWithdrawalItems,
+  saveWithdrawalPickRoute, undoWithdrawalPickRoute, cancelWithdrawal, permanentlyDeleteWithdrawal, sendLineNotification
+} from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import {
   bangkokYYYYMMDD,
@@ -14,6 +18,13 @@ import {
   bangkokLocaleString,
   dateToYYYYMMDDInBangkok,
 } from '../utils/bangkokTime';
+import {
+  groupWithdrawItems,
+  withdrawFishNameLabel,
+  withdrawDisplayLineKey,
+  getManageDisplayItems,
+  linesToPickRoutePayload,
+} from '../utils/withdrawItemGrouping';
 
 /** Same labels as withdraw LINE: invoice (import), order no (extra), BULK + lot. */
 function withdrawalItemRefSuffix(item) {
@@ -31,11 +42,11 @@ function withdrawalItemRefSuffix(item) {
 }
 
 /** Text for LINE — same endpoint as No Movement page (`/reports/no-movement/send-line`). */
-function buildWithdrawalQtyChangeLineMessage(expandedData, editedQty) {
-  const rows = expandedData?.items || [];
+function buildWithdrawalQtyChangeLineMessage(displayItems, editedQty) {
+  const rows = displayItems || [];
   const lines = [];
   for (const it of rows) {
-    const edited = editedQty[it.id];
+    const edited = editedQty[withdrawDisplayLineKey(it)];
     if (edited === undefined) continue;
     const newQty = Number(edited);
     const oldActual = Number(it.quantity_mc);
@@ -45,6 +56,12 @@ function buildWithdrawalQtyChangeLineMessage(expandedData, editedQty) {
     lines.push(`• ${label}${withdrawalItemRefSuffix(it)}\n  Requested (MC): ${requested} → Actual (MC): ${newQty}`);
   }
   if (lines.length === 0) return null;
+  return lines;
+}
+
+function formatWithdrawalQtyChangeLineMessage(expandedData, displayItems, editedQty) {
+  const lines = buildWithdrawalQtyChangeLineMessage(displayItems, editedQty);
+  if (!lines?.length) return null;
   let text = '📦 Withdrawal — Actual (MC) updated (Manage)\n';
   text += `Request: ${expandedData.request_no || '—'}\nDept: ${expandedData.department || '—'}\n\n`;
   text += lines.join('\n\n');
@@ -60,6 +77,88 @@ function withdrawDeptBadgeClass(department) {
     case 'Branch.05 (SM)': return 'mg-dept-B05SM';
     default: return 'mg-dept-other';
   }
+}
+
+function lineQtyKey(item) {
+  return item._lineKey || withdrawDisplayLineKey(item);
+}
+
+function currentItemQty(item, editedQty) {
+  const key = lineQtyKey(item);
+  return editedQty[key] !== undefined
+    ? Number(editedQty[key])
+    : Number(item.quantity_mc);
+}
+
+function ManageWithdrawItemRow({ item, rowNum, isPending, editedQty, setEditedQty }) {
+  const balance = Number(item.hand_on_balance || 0);
+  const requestedMc = Number(item.requested_mc || item.quantity_mc);
+  const currentQty = currentItemQty(item, editedQty);
+  const isInsufficient = balance < requestedMc;
+  const qtyKey = lineQtyKey(item);
+  const isEdited = editedQty[qtyKey] !== undefined && editedQty[qtyKey] !== item.quantity_mc;
+  const weightKg = currentQty * Number(item.bulk_weight_kg);
+  const actualDiffers = currentQty !== requestedMc;
+
+  return (
+    <tr className={`mg-group-detail-row ${isInsufficient && isPending ? 'mg-row-warn' : ''}`}>
+      <td>{rowNum}</td>
+      <td><strong>{item.fish_name}</strong></td>
+      <td>{item.size}</td>
+      <td>{item.line_place}</td>
+      <td className="mg-lot-cell">{item.lot_no || item.order_code || '—'}</td>
+      <td className="num-cell">
+        <span className={`mg-balance-badge ${balance <= 0 ? 'empty' : isInsufficient ? 'low' : 'ok'}`}>
+          {balance}
+        </span>
+      </td>
+      <td className="num-cell">
+        <span className="mg-requested-val">{requestedMc}</span>
+      </td>
+      <td className="num-cell">
+        {isPending ? (
+          <div className="mg-qty-edit">
+            <input
+              type="number"
+              className={`mg-qty-input ${isEdited ? 'edited' : ''} ${isInsufficient && editedQty[qtyKey] === undefined ? 'warn' : ''}`}
+              min={0}
+              max={balance}
+              value={currentQty}
+              onChange={(e) => {
+                const val = Math.max(0, Math.min(balance, Number(e.target.value) || 0));
+                setEditedQty((prev) => ({ ...prev, [qtyKey]: val }));
+              }}
+            />
+            {isInsufficient && editedQty[qtyKey] === undefined && (
+              <button
+                type="button"
+                className="mg-qty-fix-btn"
+                title="Set to max available balance"
+                onClick={() => setEditedQty((prev) => ({ ...prev, [qtyKey]: Math.min(balance, requestedMc) }))}
+              >
+                Fix
+              </button>
+            )}
+          </div>
+        ) : (
+          <span className={actualDiffers ? 'mg-actual-changed' : ''}>
+            <strong>{item.quantity_mc}</strong>
+            {actualDiffers && <span className="mg-diff-note"> (was {requestedMc})</span>}
+          </span>
+        )}
+      </td>
+      <td className="num-cell">{weightKg.toFixed(0)}</td>
+      <td>
+        {isInsufficient && isPending && editedQty[qtyKey] === undefined ? (
+          <span className="mg-stock-warn">Low Stock</span>
+        ) : (
+          <span className="mg-stock-ok">
+            <FiCheck size={12} /> OK
+          </span>
+        )}
+      </td>
+    </tr>
+  );
 }
 
 const STATUS_CONFIG = {
@@ -85,6 +184,9 @@ function Manage() {
   const [processing, setProcessing] = useState(null);
   const [editedQty, setEditedQty] = useState({});   // { itemId: newQty }
   const [saving, setSaving] = useState(false);
+  const [savingPickRoute, setSavingPickRoute] = useState(false);
+  const [inventory, setInventory] = useState([]);
+  const [pickRouteTab, setPickRouteTab] = useState('nearest');
   const [managerName, setManagerName] = useState('');
 
   const fetchRequests = useCallback(async () => {
@@ -110,37 +212,72 @@ function Manage() {
       setExpandedId(null);
       setExpandedData(null);
       setEditedQty({});
+      setInventory([]);
       return;
     }
     try {
-      const res = await getWithdrawal(id);
-      setExpandedData(res.data);
+      const [wRes, invRes] = await Promise.all([
+        getWithdrawal(id),
+        getInventory({ merge_import_shipments: 1 }),
+      ]);
+      setExpandedData(wRes.data);
       setExpandedId(id);
       setEditedQty({});
+      setInventory(invRes.data || []);
+      const savedMode = wRes.data.pick_route_saved
+        ? (wRes.data.pick_route_mode || 'nearest')
+        : 'nearest';
+      setPickRouteTab(savedMode);
     } catch (err) {
       toast.error('Failed to load details');
     }
   };
 
-  // Check if any quantities have been changed
-  const hasQtyChanges = expandedData?.items?.some(item => {
-    const edited = editedQty[item.id];
-    return edited !== undefined && edited !== item.quantity_mc;
+  const savedPickMode = expandedData?.pick_route_saved
+    ? (expandedData.pick_route_mode || 'nearest')
+    : 'nearest';
+  const pickRouteSortMode = pickRouteTab === 'fifo' ? 'cs_in_date' : 'nearest';
+  const pickRouteDirty = pickRouteTab !== savedPickMode;
+  const canUndoPickRoute = Boolean(expandedData?.pick_route_saved);
+
+  const displayItems = useMemo(() => {
+    if (!expandedData?.items) return [];
+    const useSaved = !pickRouteDirty && expandedData.pick_route_saved;
+    if (useSaved) {
+      return getManageDisplayItems(expandedData.items, inventory, pickRouteSortMode, editedQty);
+    }
+    return getManageDisplayItems(expandedData.items, inventory, pickRouteSortMode, editedQty);
+  }, [expandedData, inventory, pickRouteSortMode, pickRouteDirty, editedQty]);
+
+  const itemGroups = useMemo(
+    () => groupWithdrawItems(displayItems, pickRouteSortMode),
+    [displayItems, pickRouteSortMode]
+  );
+
+  const hasQtyChanges = displayItems.some((item) => {
+    const key = lineQtyKey(item);
+    const edited = editedQty[key];
+    return edited !== undefined && edited !== Number(item.quantity_mc);
   });
 
   const handleSaveQty = async (requestId) => {
     if (!hasQtyChanges) return;
     setSaving(true);
     try {
-      const items = Object.entries(editedQty)
-        .filter(([itemId, qty]) => {
-          const original = expandedData.items.find(it => it.id === Number(itemId));
-          return original && qty !== original.quantity_mc;
+      const items = displayItems
+        .filter((it) => it.id != null && Number.isFinite(Number(it.id)))
+        .map((it) => {
+          const key = lineQtyKey(it);
+          const qty = editedQty[key] !== undefined ? Number(editedQty[key]) : Number(it.quantity_mc);
+          return { id: Number(it.id), quantity_mc: qty };
         })
-        .map(([itemId, qty]) => ({ id: Number(itemId), quantity_mc: Number(qty) }));
+        .filter(({ id, quantity_mc }) => {
+          const original = expandedData.items.find((it) => it.id === id);
+          return original && quantity_mc !== Number(original.quantity_mc);
+        });
 
       if (items.length === 0) return;
-      const lineMessage = buildWithdrawalQtyChangeLineMessage(expandedData, editedQty);
+      const lineMessage = formatWithdrawalQtyChangeLineMessage(expandedData, displayItems, editedQty);
       await updateWithdrawalItems(requestId, { items });
       toast.success('Quantities updated successfully');
 
@@ -162,6 +299,62 @@ function Manage() {
       toast.error(err.response?.data?.error || 'Failed to update quantities');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const reloadExpanded = async (requestId) => {
+    const [wRes, invRes] = await Promise.all([
+      getWithdrawal(requestId),
+      getInventory({ merge_import_shipments: 1 }),
+    ]);
+    setExpandedData(wRes.data);
+    setInventory(invRes.data || []);
+    const savedMode = wRes.data.pick_route_saved
+      ? (wRes.data.pick_route_mode || 'nearest')
+      : 'nearest';
+    setPickRouteTab(savedMode);
+    setEditedQty({});
+    fetchRequests();
+  };
+
+  const handleSavePickRoute = async (requestId) => {
+    if (!pickRouteDirty && expandedData?.pick_route_saved) {
+      toast.info('Pick route is already saved for this tab');
+      return;
+    }
+    if (!window.confirm(
+      pickRouteTab === 'fifo'
+        ? 'Save FIFO pick route? Item locations will be replaced with oldest stock from Stock Summary (same request totals).'
+        : 'Save nearest-line pick route? Item locations will match the original nearest allocation.'
+    )) return;
+    setSavingPickRoute(true);
+    try {
+      const payload = linesToPickRoutePayload(displayItems);
+      await saveWithdrawalPickRoute(requestId, {
+        mode: pickRouteTab,
+        items: payload,
+      });
+      toast.success(pickRouteTab === 'fifo' ? 'FIFO pick route saved' : 'Nearest pick route saved');
+      await reloadExpanded(requestId);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to save pick route');
+    } finally {
+      setSavingPickRoute(false);
+    }
+  };
+
+  const handleUndoPickRoute = async (requestId) => {
+    if (!canUndoPickRoute) return;
+    if (!window.confirm('Undo saved pick route and restore the previous allocation?')) return;
+    setSavingPickRoute(true);
+    try {
+      await undoWithdrawalPickRoute(requestId);
+      toast.success('Pick route undone');
+      await reloadExpanded(requestId);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to undo pick route');
+    } finally {
+      setSavingPickRoute(false);
     }
   };
 
@@ -410,7 +603,65 @@ function Manage() {
                   {isExpanded && expandedData && (
                     <div className="mg-req-detail">
                       <div className="mg-detail-items">
-                        <h5>Items</h5>
+                        <div className="mg-pick-route-bar">
+                          <h5>Items</h5>
+                          <div className="mg-pick-route-controls">
+                            <div className="wr-sort-switch" role="tablist" aria-label="Pick route">
+                              <button
+                                type="button"
+                                role="tab"
+                                aria-selected={pickRouteTab === 'nearest'}
+                                className={`wr-sort-switch-option ${pickRouteTab === 'nearest' ? 'active' : ''}`}
+                                onClick={() => setPickRouteTab('nearest')}
+                              >
+                                <FiMapPin aria-hidden />
+                                <span>Nearest line</span>
+                              </button>
+                              <button
+                                type="button"
+                                role="tab"
+                                aria-selected={pickRouteTab === 'fifo'}
+                                className={`wr-sort-switch-option ${pickRouteTab === 'fifo' ? 'active' : ''}`}
+                                onClick={() => setPickRouteTab('fifo')}
+                              >
+                                <FiCalendar aria-hidden />
+                                <span>Oldest lot (FIFO)</span>
+                              </button>
+                            </div>
+                            {req.status === 'PENDING' && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn btn-primary btn-sm"
+                                  disabled={savingPickRoute || (!pickRouteDirty && expandedData.pick_route_saved)}
+                                  onClick={() => handleSavePickRoute(req.id)}
+                                >
+                                  <FiSave /> {savingPickRoute ? 'Saving...' : 'Save'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-outline btn-sm"
+                                  disabled={savingPickRoute || !canUndoPickRoute}
+                                  onClick={() => handleUndoPickRoute(req.id)}
+                                >
+                                  <FiRotateCcw /> Undo
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        {pickRouteDirty && req.status === 'PENDING' && (
+                          <p className="mg-pick-route-hint">
+                            Preview — click Save to apply {pickRouteTab === 'fifo' ? 'FIFO (oldest stock from Stock Summary)' : 'nearest line'} to this request.
+                            {expandedData.pick_route_saved ? ' Undo restores the allocation before the first save.' : ''}
+                          </p>
+                        )}
+                        {expandedData.pick_route_saved && !pickRouteDirty && (
+                          <p className="mg-pick-route-saved">
+                            Saved pick route: <strong>{savedPickMode === 'fifo' ? 'Oldest lot (FIFO)' : 'Nearest line'}</strong>
+                            {' '}— stock will be deducted from these locations when finished.
+                          </p>
+                        )}
                         <table className="table mg-items-table">
                           <thead>
                             <tr>
@@ -427,79 +678,155 @@ function Manage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {expandedData.items?.map((item, i) => {
-                              const balance = Number(item.hand_on_balance || 0);
-                              const requestedMc = Number(item.requested_mc || item.quantity_mc);
+                            {(() => {
+                              let rowNum = 0;
                               const isPending = req.status === 'PENDING';
-                              const currentQty = editedQty[item.id] !== undefined
-                                ? Number(editedQty[item.id])
-                                : Number(item.quantity_mc);
-                              const isInsufficient = balance < requestedMc;
-                              const isEdited = editedQty[item.id] !== undefined && editedQty[item.id] !== item.quantity_mc;
-                              const weightKg = currentQty * Number(item.bulk_weight_kg);
-                              const actualDiffers = currentQty !== requestedMc;
+                              return itemGroups.flatMap((group) => {
+                                const multiLine = group.lines.length > 1;
+                                const groupActualTotal = group.lines.reduce(
+                                  (s, item) => s + currentItemQty(item, editedQty),
+                                  0
+                                );
+                                const groupWeightKg = group.lines.reduce(
+                                  (s, item) => s + currentItemQty(item, editedQty) * Number(item.bulk_weight_kg),
+                                  0
+                                );
+                                const groupHasLowStock = isPending && group.lines.some((item) => {
+                                  const balance = Number(item.hand_on_balance || 0);
+                                  const requestedMc = Number(item.requested_mc || item.quantity_mc);
+                                  return balance < requestedMc && editedQty[lineQtyKey(item)] === undefined;
+                                });
+                                const groupActualDiffers = groupActualTotal !== group.totalReqMc;
 
-                              return (
-                                <tr key={item.id} className={isInsufficient && isPending ? 'mg-row-warn' : ''}>
-                                  <td>{i + 1}</td>
-                                  <td><strong>{item.fish_name}</strong></td>
-                                  <td>{item.size}</td>
-                                  <td>{item.line_place}</td>
-                                  <td className="mg-lot-cell">{item.lot_no || item.order_code || '—'}</td>
-                                  <td className="num-cell">
-                                    <span className={`mg-balance-badge ${balance <= 0 ? 'empty' : isInsufficient ? 'low' : 'ok'}`}>
-                                      {balance}
-                                    </span>
-                                  </td>
-                                  <td className="num-cell">
-                                    <span className="mg-requested-val">{requestedMc}</span>
-                                  </td>
-                                  <td className="num-cell">
-                                    {isPending ? (
-                                      <div className="mg-qty-edit">
-                                        <input
-                                          type="number"
-                                          className={`mg-qty-input ${isEdited ? 'edited' : ''} ${isInsufficient && editedQty[item.id] === undefined ? 'warn' : ''}`}
-                                          min={0}
-                                          max={balance}
-                                          value={currentQty}
-                                          onChange={e => {
-                                            const val = Math.max(0, Math.min(balance, Number(e.target.value) || 0));
-                                            setEditedQty(prev => ({ ...prev, [item.id]: val }));
-                                          }}
-                                        />
-                                        {isInsufficient && editedQty[item.id] === undefined && (
-                                          <button
-                                            className="mg-qty-fix-btn"
-                                            title="Set to max available balance"
-                                            onClick={() => setEditedQty(prev => ({ ...prev, [item.id]: Math.min(balance, requestedMc) }))}
-                                          >
-                                            Fix
-                                          </button>
+                                const rows = [];
+                                if (multiLine) {
+                                  rows.push(
+                                    <tr key={`${group.key}-header`} className="mg-group-row">
+                                      <td className="mg-group-num">—</td>
+                                      <td>
+                                        <strong>{withdrawFishNameLabel(group)}</strong>
+                                        <span className="mg-group-badge">{group.lines.length} loc</span>
+                                      </td>
+                                      <td>{group.size}</td>
+                                      <td colSpan={2} className="mg-group-loc-summary">
+                                        {group.lines.length} locations
+                                      </td>
+                                      <td className="num-cell">—</td>
+                                      <td className="num-cell">
+                                        <span className="mg-requested-val">{group.totalReqMc}</span>
+                                      </td>
+                                      <td className="num-cell">
+                                        <strong className={groupActualDiffers ? 'mg-actual-changed' : ''}>
+                                          {groupActualTotal}
+                                        </strong>
+                                      </td>
+                                      <td className="num-cell">{groupWeightKg.toFixed(0)}</td>
+                                      <td>
+                                        {groupHasLowStock ? (
+                                          <span className="mg-stock-warn">Low Stock</span>
+                                        ) : (
+                                          <span className="mg-stock-ok">
+                                            <FiCheck size={12} /> OK
+                                          </span>
                                         )}
-                                      </div>
-                                    ) : (
-                                      <span className={actualDiffers ? 'mg-actual-changed' : ''}>
-                                        <strong>{item.quantity_mc}</strong>
-                                        {actualDiffers && <span className="mg-diff-note"> (was {requestedMc})</span>}
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td className="num-cell">{weightKg.toFixed(0)}</td>
-                                  <td>
-                                    {isInsufficient && isPending && editedQty[item.id] === undefined ? (
-                                      <span className="mg-stock-warn">
-                                        Low Stock
-                                      </span>
-                                    ) : (
-                                      <span className="mg-stock-ok">
-                                        <FiCheck size={12} /> OK
-                                      </span>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
+                                      </td>
+                                    </tr>
+                                  );
+                                }
+
+                                group.lines.forEach((item) => {
+                                  rowNum += 1;
+                                  if (multiLine) {
+                                    rows.push(
+                                      <tr
+                                        key={item.id}
+                                        className={`mg-group-detail-row ${isPending && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) ? 'mg-row-warn' : ''}`}
+                                      >
+                                        <td>{rowNum}</td>
+                                        <td colSpan={2} className="mg-group-detail-spacer" aria-hidden="true" />
+                                        <td>{item.line_place}</td>
+                                        <td className="mg-lot-cell">{item.lot_no || item.order_code || '—'}</td>
+                                        <td className="num-cell">
+                                          <span className={`mg-balance-badge ${
+                                            Number(item.hand_on_balance || 0) <= 0 ? 'empty'
+                                              : Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) ? 'low' : 'ok'
+                                          }`}>
+                                            {Number(item.hand_on_balance || 0)}
+                                          </span>
+                                        </td>
+                                        <td className="num-cell">
+                                          <span className="mg-requested-val">{Number(item.requested_mc || item.quantity_mc)}</span>
+                                        </td>
+                                        <td className="num-cell">
+                                          {isPending ? (
+                                            <div className="mg-qty-edit">
+                                              <input
+                                                type="number"
+                                                className={`mg-qty-input ${
+                                                  editedQty[lineQtyKey(item)] !== undefined && editedQty[lineQtyKey(item)] !== item.quantity_mc ? 'edited' : ''
+                                                } ${
+                                                  Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) && editedQty[lineQtyKey(item)] === undefined ? 'warn' : ''
+                                                }`}
+                                                min={0}
+                                                max={Number(item.hand_on_balance || 0)}
+                                                value={currentItemQty(item, editedQty)}
+                                                onChange={(e) => {
+                                                  const balance = Number(item.hand_on_balance || 0);
+                                                  const val = Math.max(0, Math.min(balance, Number(e.target.value) || 0));
+                                                  setEditedQty((prev) => ({ ...prev, [item.id]: val }));
+                                                }}
+                                              />
+                                              {Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) && editedQty[lineQtyKey(item)] === undefined && (
+                                                <button
+                                                  type="button"
+                                                  className="mg-qty-fix-btn"
+                                                  title="Set to max available balance"
+                                                  onClick={() => setEditedQty((prev) => ({
+                                                    ...prev,
+                                                    [lineQtyKey(item)]: Math.min(
+                                                      Number(item.hand_on_balance || 0),
+                                                      Number(item.requested_mc || item.quantity_mc)
+                                                    ),
+                                                  }))}
+                                                >
+                                                  Fix
+                                                </button>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <span className={currentItemQty(item, editedQty) !== Number(item.requested_mc || item.quantity_mc) ? 'mg-actual-changed' : ''}>
+                                              <strong>{item.quantity_mc}</strong>
+                                            </span>
+                                          )}
+                                        </td>
+                                        <td className="num-cell">
+                                          {(currentItemQty(item, editedQty) * Number(item.bulk_weight_kg)).toFixed(0)}
+                                        </td>
+                                        <td>
+                                          {isPending && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) && editedQty[lineQtyKey(item)] === undefined ? (
+                                            <span className="mg-stock-warn">Low Stock</span>
+                                          ) : (
+                                            <span className="mg-stock-ok"><FiCheck size={12} /> OK</span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    );
+                                  } else {
+                                    rows.push(
+                                      <ManageWithdrawItemRow
+                                        key={item.id}
+                                        item={item}
+                                        rowNum={rowNum}
+                                        isPending={isPending}
+                                        editedQty={editedQty}
+                                        setEditedQty={setEditedQty}
+                                      />
+                                    );
+                                  }
+                                });
+                                return rows;
+                              });
+                            })()}
                           </tbody>
                         </table>
                         {expandedData.notes && (

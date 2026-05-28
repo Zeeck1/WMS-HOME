@@ -12,6 +12,58 @@ function departmentRequestCode(department) {
   return department;
 }
 
+function serializeWithdrawItemRow(row) {
+  return {
+    lot_id: row.lot_id,
+    location_id: row.location_id,
+    import_item_id: row.import_item_id,
+    requested_mc: Number(row.requested_mc),
+    quantity_mc: Number(row.quantity_mc),
+    weight_kg: Number(row.weight_kg),
+    production_process: row.production_process || null,
+  };
+}
+
+async function insertWithdrawItemLine(conn, requestId, item) {
+  const isImport = item.import_item_id != null;
+  if (!isImport) {
+    if (!item.lot_id || !item.location_id || !item.quantity_mc || item.quantity_mc <= 0) {
+      throw new Error('Each bulk item must have lot_id, location_id, and quantity_mc > 0');
+    }
+    const [balance] = await conn.query(`
+      SELECT
+        COALESCE(SUM(CASE WHEN movement_type = 'IN' THEN quantity_mc ELSE 0 END), 0) -
+        COALESCE(SUM(CASE WHEN movement_type = 'OUT' THEN quantity_mc ELSE 0 END), 0) AS hand_on
+      FROM movements WHERE lot_id = ? AND location_id = ?
+    `, [item.lot_id, item.location_id]);
+    if (item.quantity_mc > balance[0].hand_on) {
+      throw new Error(`Insufficient stock: requested ${item.quantity_mc} MC but only ${balance[0].hand_on} MC available`);
+    }
+    await conn.query(
+      `INSERT INTO withdraw_items (request_id, import_item_id, lot_id, location_id, requested_mc, quantity_mc, weight_kg, production_process)
+       VALUES (?, NULL, ?, ?, ?, ?, ?, ?)`,
+      [requestId, item.lot_id, item.location_id, item.requested_mc ?? item.quantity_mc, item.quantity_mc, item.weight_kg || 0, item.production_process || null]
+    );
+    return;
+  }
+  if (!item.import_item_id || !item.quantity_mc || item.quantity_mc <= 0) {
+    throw new Error('Each import item must have import_item_id and quantity_mc > 0');
+  }
+  const imp = await getImportItemBalanceMc(conn, item.import_item_id);
+  if (!imp) throw new Error(`Import item ${item.import_item_id} not found`);
+  if (item.quantity_mc > imp.balance_mc) {
+    throw new Error(`Insufficient import stock: requested ${item.quantity_mc} MC but only ${imp.balance_mc} MC available`);
+  }
+  const wKg = item.weight_kg != null && item.weight_kg !== ''
+    ? Number(item.weight_kg)
+    : item.quantity_mc * imp.wet_mc;
+  await conn.query(
+    `INSERT INTO withdraw_items (request_id, import_item_id, lot_id, location_id, requested_mc, quantity_mc, weight_kg, production_process)
+     VALUES (?, ?, NULL, NULL, ?, ?, ?, ?)`,
+    [requestId, item.import_item_id, item.requested_mc ?? item.quantity_mc, item.quantity_mc, wKg, item.production_process || null]
+  );
+}
+
 async function getImportItemBalanceMc(conn, importItemId) {
   const [rows] = await conn.query(
     `SELECT ii.id, ii.factory_mc, ii.wet_mc, ii.shipment_id,
@@ -80,7 +132,7 @@ router.get('/:id', async (req, res) => {
         p.glazing,
         COALESCE(p.stock_type, IF(wi.import_item_id IS NULL, 'BULK', 'IMPORT')) AS stock_type,
         COALESCE(p.order_code, s.inv_no) AS order_code,
-        l.lot_no, l.cs_in_date, l.sticker,
+        l.lot_no, l.lot_no_numeric, COALESCE(l.cs_in_date, s.eta) AS cs_in_date, l.sticker,
         COALESCE(loc.line_place, NULLIF(TRIM(ii.lines), '')) AS line_place,
         loc.stack_no, loc.stack_total,
         s.inv_no AS import_inv_no,
@@ -108,10 +160,150 @@ router.get('/:id', async (req, res) => {
       WHERE wi.request_id = ?
     `, [req.params.id]);
 
-    res.json({ ...requests[0], items });
+    const row = requests[0];
+    let pickRouteBackup = row.pick_route_backup;
+    if (pickRouteBackup && typeof pickRouteBackup === 'string') {
+      try { pickRouteBackup = JSON.parse(pickRouteBackup); } catch { pickRouteBackup = null; }
+    }
+    res.json({
+      ...row,
+      items,
+      pick_route_mode: row.pick_route_mode || null,
+      pick_route_saved: Boolean(pickRouteBackup && pickRouteBackup.items),
+      pick_route_backup: pickRouteBackup,
+    });
   } catch (error) {
     console.error('Error fetching withdrawal:', error);
     res.status(500).json({ error: 'Failed to fetch withdrawal' });
+  }
+});
+
+// ─── PUT apply pick route (nearest / FIFO) — PENDING only ──
+router.put('/:id/pick-route', async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { mode, items } = req.body;
+    if (!['nearest', 'fifo'].includes(mode)) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'mode must be nearest or fifo' });
+    }
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'items array is required' });
+    }
+
+    const [requests] = await conn.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
+    if (requests.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'Request not found' });
+    }
+    if (requests[0].status !== 'PENDING') {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Pick route can only be saved in PENDING status' });
+    }
+
+    const [existingItems] = await conn.query('SELECT * FROM withdraw_items WHERE request_id = ?', [req.params.id]);
+    let backup = requests[0].pick_route_backup;
+    if (backup && typeof backup === 'string') {
+      try { backup = JSON.parse(backup); } catch { backup = null; }
+    }
+    if (!backup || !backup.items) {
+      backup = { items: existingItems.map(serializeWithdrawItemRow) };
+      await conn.query(
+        'UPDATE withdraw_requests SET pick_route_backup = ? WHERE id = ?',
+        [JSON.stringify(backup), req.params.id]
+      );
+    }
+
+    await conn.query('DELETE FROM withdraw_items WHERE request_id = ?', [req.params.id]);
+    for (const item of items) {
+      await insertWithdrawItemLine(conn, req.params.id, item);
+    }
+    await conn.query(
+      'UPDATE withdraw_requests SET pick_route_mode = ?, updated_at = NOW() WHERE id = ?',
+      [mode, req.params.id]
+    );
+
+    await conn.commit();
+    const [updated] = await pool.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
+    const [newItems] = await pool.query(`
+      SELECT wi.*,
+        COALESCE(p.fish_name, ii.item_name) AS fish_name,
+        COALESCE(p.size, ii.size) AS size,
+        COALESCE(p.bulk_weight_kg, ii.wet_mc) AS bulk_weight_kg,
+        p.type, p.glazing,
+        COALESCE(p.stock_type, IF(wi.import_item_id IS NULL, 'BULK', 'IMPORT')) AS stock_type,
+        COALESCE(p.order_code, s.inv_no) AS order_code,
+        l.lot_no, l.lot_no_numeric, COALESCE(l.cs_in_date, s.eta) AS cs_in_date, l.sticker,
+        COALESCE(loc.line_place, NULLIF(TRIM(ii.lines), '')) AS line_place,
+        loc.stack_no
+      FROM withdraw_items wi
+      LEFT JOIN lots l ON wi.lot_id = l.id
+      LEFT JOIN products p ON l.product_id = p.id
+      LEFT JOIN locations loc ON wi.location_id = loc.id
+      LEFT JOIN import_items ii ON wi.import_item_id = ii.id
+      LEFT JOIN import_shipments s ON ii.shipment_id = s.id
+      WHERE wi.request_id = ?
+    `, [req.params.id]);
+    res.json({
+      message: 'Pick route saved',
+      request: updated[0],
+      items: newItems,
+      pick_route_mode: mode,
+      pick_route_saved: true,
+    });
+  } catch (error) {
+    await conn.rollback();
+    console.error('Error saving pick route:', error);
+    res.status(500).json({ error: error.message || 'Failed to save pick route' });
+  } finally {
+    conn.release();
+  }
+});
+
+// ─── POST undo saved pick route — restore backup ───────
+router.post('/:id/undo-pick-route', async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [requests] = await conn.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
+    if (requests.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'Request not found' });
+    }
+    if (requests[0].status !== 'PENDING') {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Pick route can only be undone in PENDING status' });
+    }
+
+    let backup = requests[0].pick_route_backup;
+    if (backup && typeof backup === 'string') {
+      try { backup = JSON.parse(backup); } catch { backup = null; }
+    }
+    if (!backup || !backup.items || !backup.items.length) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Nothing to undo — pick route was not saved' });
+    }
+
+    await conn.query('DELETE FROM withdraw_items WHERE request_id = ?', [req.params.id]);
+    for (const item of backup.items) {
+      await insertWithdrawItemLine(conn, req.params.id, item);
+    }
+    await conn.query(
+      'UPDATE withdraw_requests SET pick_route_mode = NULL, pick_route_backup = NULL, updated_at = NOW() WHERE id = ?',
+      [req.params.id]
+    );
+
+    await conn.commit();
+    const [updated] = await pool.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Pick route undone — restored previous allocation', request: updated[0] });
+  } catch (error) {
+    await conn.rollback();
+    console.error('Error undoing pick route:', error);
+    res.status(500).json({ error: error.message || 'Failed to undo pick route' });
+  } finally {
+    conn.release();
   }
 });
 

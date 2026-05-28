@@ -70,6 +70,8 @@ export const getWithdrawals = (params) => api.get('/withdrawals', { params });
 export const getWithdrawal = (id) => api.get(`/withdrawals/${id}`);
 export const createWithdrawal = (data) => api.post('/withdrawals', data);
 export const updateWithdrawalItems = (id, data) => api.put(`/withdrawals/${id}/items`, data);
+export const saveWithdrawalPickRoute = (id, data) => api.put(`/withdrawals/${id}/pick-route`, data);
+export const undoWithdrawalPickRoute = (id) => api.post(`/withdrawals/${id}/undo-pick-route`);
 export const updateWithdrawalStatus = (id, data) => api.put(`/withdrawals/${id}/status`, data);
 export const cancelWithdrawal = (id) => api.delete(`/withdrawals/${id}`);
 /** Superadmin: remove request and all linked stock-out / import-out rows everywhere */

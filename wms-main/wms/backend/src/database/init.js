@@ -329,6 +329,24 @@ async function initDatabase() {
       // ignore migration errors
     }
 
+    // Migration: pick route (FIFO / nearest) save + undo backup on withdraw_requests
+    try {
+      const [prCols] = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'withdraw_requests' AND COLUMN_NAME = 'pick_route_mode'
+      `, [dbName]);
+      if (prCols.length === 0) {
+        await connection.query(
+          `ALTER TABLE withdraw_requests
+           ADD COLUMN pick_route_mode VARCHAR(20) DEFAULT NULL AFTER managed_by,
+           ADD COLUMN pick_route_backup JSON DEFAULT NULL AFTER pick_route_mode`
+        );
+        console.log('  Migration: pick_route_mode / pick_route_backup on withdraw_requests');
+      }
+    } catch (e) {
+      console.error('  Migration pick_route columns:', e.message);
+    }
+
     // Withdraw items table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS withdraw_items (
