@@ -5267,10 +5267,35 @@ body {
   margin-top: 12px;
 }
 
-/* ── Manager name field in Manage page ────────────── */
+/* ── Manager name field on expanded request card ────────────── */
 .mg-manager-field {
   margin-bottom: 12px;
-  max-width: 320px;
+  max-width: 360px;
+}
+
+.mg-card-manager-field {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #f0fdfa 0%, #f8fafc 100%);
+  border: 1px solid #99f6e4;
+  border-radius: 8px;
+  max-width: none;
+}
+
+.mg-manager-hint {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  color: var(--gray-600);
+}
+
+.mg-manager-readonly {
+  padding: 8px 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--gray-800);
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
 }
 
 .mg-manager-field label {

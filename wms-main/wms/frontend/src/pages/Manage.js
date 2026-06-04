@@ -26,6 +26,12 @@ import {
   linesToPickRoutePayload,
 } from '../utils/withdrawItemGrouping';
 
+const MANAGER_NAME_STORAGE_KEY = 'wms_manager_preparer_name';
+
+function managerNameStorageKey(userId) {
+  return userId ? `${MANAGER_NAME_STORAGE_KEY}_${userId}` : MANAGER_NAME_STORAGE_KEY;
+}
+
 /** Same labels as withdraw LINE: invoice (import), order no (extra), BULK + lot. */
 function withdrawalItemRefSuffix(item) {
   const st = String(item.stock_type || 'BULK').toUpperCase();
@@ -188,6 +194,58 @@ function Manage() {
   const [inventory, setInventory] = useState([]);
   const [pickRouteTab, setPickRouteTab] = useState('nearest');
   const [managerName, setManagerName] = useState('');
+  const [managerNameSaved, setManagerNameSaved] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(managerNameStorageKey(user?.id));
+      if (saved?.trim()) {
+        setManagerName(saved.trim());
+        setManagerNameSaved(true);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [user?.id]);
+
+  const persistManagerName = useCallback((name) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    try {
+      localStorage.setItem(managerNameStorageKey(user?.id), trimmed);
+      setManagerNameSaved(true);
+    } catch {
+      /* ignore */
+    }
+  }, [user?.id]);
+
+  const handleManagerNameChange = (e) => {
+    const v = e.target.value;
+    setManagerName(v);
+    if (!v.trim()) setManagerNameSaved(false);
+  };
+
+  const handleManagerNameBlur = () => {
+    persistManagerName(managerName);
+  };
+
+  /** Name is entered once at Receive Request; later steps use the saved name (read-only on card). */
+  const applyManagerNameFromRequest = useCallback((data) => {
+    const fromReq = (data?.managed_by || '').trim();
+    if (fromReq && fromReq !== 'system' && fromReq !== 'admin') {
+      setManagerName(fromReq);
+      setManagerNameSaved(true);
+      persistManagerName(fromReq);
+    }
+  }, [persistManagerName]);
+
+  const resolveManagerNameForAdvance = useCallback((req, detail) => {
+    const fromState = (managerName || '').trim();
+    if (fromState) return fromState;
+    const fromReq = (detail?.managed_by || req?.managed_by || '').trim();
+    if (fromReq && fromReq !== 'system' && fromReq !== 'admin') return fromReq;
+    return '';
+  }, [managerName]);
 
   const fetchRequests = useCallback(async () => {
     setLoading(true);
@@ -222,6 +280,7 @@ function Manage() {
       ]);
       setExpandedData(wRes.data);
       setExpandedId(id);
+      applyManagerNameFromRequest(wRes.data);
       setEditedQty({});
       setInventory(invRes.data || []);
       const savedMode = wRes.data.pick_route_saved
@@ -362,9 +421,9 @@ function Manage() {
     const config = STATUS_CONFIG[req.status];
     if (!config?.next) return;
 
-    // Manager name is required
-    if (!managerName.trim()) {
-      toast.error('Please enter your name (Manager / Preparer) before proceeding');
+    const name = resolveManagerNameForAdvance(req, expandedData);
+    if (!name) {
+      toast.error('Please enter your name (Manager / Preparer) on Receive Request before proceeding');
       return;
     }
 
@@ -382,12 +441,14 @@ function Manage() {
 
     setProcessing(req.id);
     try {
-      await updateWithdrawalStatus(req.id, { status: config.next, managed_by: managerName.trim() });
+      persistManagerName(name);
+      await updateWithdrawalStatus(req.id, { status: config.next, managed_by: name });
       toast.success(`Status updated to ${STATUS_CONFIG[config.next].label}`);
       fetchRequests();
       if (expandedId === req.id) {
         const res = await getWithdrawal(req.id);
         setExpandedData(res.data);
+        applyManagerNameFromRequest(res.data);
         setEditedQty({});
       }
     } catch (err) {
@@ -836,19 +897,42 @@ function Manage() {
                         )}
                       </div>
 
-                      {/* Manager name input */}
-                      {canAdvance && (
-                        <div className="mg-manager-field">
-                          <label>Manager / Preparer Name</label>
-                          <input
-                            type="text"
-                            className="form-control"
-                            placeholder="Enter your name..."
-                            value={managerName}
-                            onChange={e => setManagerName(e.target.value)}
-                          />
-                        </div>
-                      )}
+                      {canAdvance && (() => {
+                        const displayName = resolveManagerNameForAdvance(req, expandedData);
+                        const nameLocked = req.status !== 'PENDING' && Boolean(displayName);
+                        return (
+                          <div className="mg-manager-field mg-card-manager-field">
+                            <label>Manager / Preparer Name</label>
+                            {nameLocked ? (
+                              <>
+                                <div className="mg-manager-readonly" title="Set at Receive Request">
+                                  {displayName}
+                                </div>
+                                <p className="mg-manager-hint">
+                                  Name saved from Receive Request — used for <strong>{config.nextLabel}</strong>
+                                </p>
+                              </>
+                            ) : (
+                              <>
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  placeholder="Enter your name once — saved for later steps"
+                                  value={managerName}
+                                  onChange={handleManagerNameChange}
+                                  onBlur={handleManagerNameBlur}
+                                  autoComplete="name"
+                                />
+                                {managerNameSaved && managerName.trim() && (
+                                  <p className="mg-manager-hint">
+                                    Saved — used when you click <strong>{config.nextLabel}</strong>
+                                  </p>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Action buttons */}
                       <div className="mg-actions">
