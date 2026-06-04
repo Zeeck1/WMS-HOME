@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
+const { pruneLocationMasterAfterStockRemoved } = require('../utils/locationMaster');
 const { bangkokYYYYMMDDCompact } = require('../utils/bangkokTime');
 const { authMiddleware, superadminOnly } = require('../middleware/auth');
 
@@ -614,6 +615,7 @@ router.put('/:id/status', async (req, res) => {
         );
 
         await conn.query('UPDATE withdraw_items SET movement_id = ? WHERE id = ?', [movResult.insertId, item.id]);
+        await pruneLocationMasterAfterStockRemoved(conn, item.location_id);
       }
     }
 

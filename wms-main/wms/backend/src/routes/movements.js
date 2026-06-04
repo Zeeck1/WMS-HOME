@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
+const { pruneLocationMasterAfterStockRemoved } = require('../utils/locationMaster');
 
 // GET all movements with details
 router.get('/', async (req, res) => {
@@ -115,6 +116,8 @@ router.post('/stock-out', async (req, res) => {
       [lot_id, location_id, quantity_mc, weight_kg || 0, reference_no || null, notes || null, created_by || 'system']
     );
 
+    await pruneLocationMasterAfterStockRemoved(conn, location_id);
+
     await conn.commit();
 
     const [newMovement] = await pool.query(`
@@ -193,6 +196,10 @@ router.post('/adjust', async (req, res) => {
          VALUES (?, ?, ?, ?, 'OUT', ?, ?, 'manual')`,
         [lot_id, location_id, qty, weightKg, ref, note]
       );
+    }
+
+    if (newBalance <= 0) {
+      await pruneLocationMasterAfterStockRemoved(conn, location_id);
     }
 
     await conn.commit();

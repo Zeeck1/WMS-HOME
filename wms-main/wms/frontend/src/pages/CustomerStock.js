@@ -34,7 +34,7 @@ function CustomerStock() {
   const [outLotActive, setOutLotActive] = useState(false);
   const [outLotDate, setOutLotDate] = useState(bangkokYYYYMMDD());
   const [outLotLabel, setOutLotLabel] = useState('');
-  const [outSearch, setOutSearch] = useState({ cs_in_date: '', fish_name: '', lot_no: '' });
+  const [outSearch, setOutSearch] = useState({ arrival_date: '', fish_name: '', lot_no: '' });
   const [availableItems, setAvailableItems] = useState([]);
   const [outCart, setOutCart] = useState([]);
   const [outMeta, setOutMeta] = useState({ withdrawer_name: '', inspector_name: '' });
@@ -393,9 +393,9 @@ function CustomerStock() {
                     <div className="cs-out-search">
                       <h4>ค้นหาสินค้าที่ฝาก</h4>
                       <div className="cs-meta-row">
-                        <div className="form-group"><label>วันที่รับ (CS-IN)</label>
-                          <input type="date" className="form-control" value={outSearch.cs_in_date}
-                            onChange={e => setOutSearch(s => ({ ...s, cs_in_date: e.target.value }))} /></div>
+                        <div className="form-group"><label>Arrival Date</label>
+                          <input type="date" className="form-control" value={outSearch.arrival_date}
+                            onChange={e => setOutSearch(s => ({ ...s, arrival_date: e.target.value }))} /></div>
                         <div className="form-group"><label>รายการ (Fish Name)</label>
                           <input className="form-control" value={outSearch.fish_name}
                             onChange={e => setOutSearch(s => ({ ...s, fish_name: e.target.value }))} /></div>
@@ -417,7 +417,7 @@ function CustomerStock() {
                         ) : (
                           <div className="table-container" style={{ overflow: 'auto', maxHeight: '30vh' }}>
                             <table className="excel-table">
-                              <thead><tr><th>วันที่รับ</th><th>รายการ</th><th>LOT No.</th><th>กล่อง (ฝาก)</th><th>Kg รายละเอียด</th><th>Kg. รวม (ฝาก)</th><th>คงเหลือ กล่อง</th><th title="ยอดคงเหลือแบบรายละเอียด (คั่นด้วยจุลภาค)">Balance amount</th><th>คงเหลือ Kg.</th><th></th></tr></thead>
+                              <thead><tr><th>Arrival Date</th><th>รายการ</th><th>LOT No.</th><th>กล่อง (ฝาก)</th><th>Kg รายละเอียด</th><th>Kg. รวม (ฝาก)</th><th>คงเหลือ กล่อง</th><th title="ยอดคงเหลือแบบรายละเอียด (คั่นด้วยจุลภาค)">Balance amount</th><th>คงเหลือ Kg.</th><th></th></tr></thead>
                               <tbody>
                                 {availableItems.map(it => (
                                   <tr key={it.id}>
@@ -453,6 +453,7 @@ function CustomerStock() {
                             <thead>
                               <tr>
                                 <th style={{ width: 40 }}>#</th>
+                                <th>Arrival Date</th>
                                 <th>รายการ</th>
                                 <th>LOT No.</th>
                                 <th style={{ width: 90 }}>คงเหลือ กล่อง</th>
@@ -467,6 +468,7 @@ function CustomerStock() {
                               {outCart.map((it, i) => (
                                 <tr key={i}>
                                   <td className="text-center">{i + 1}</td>
+                                  <td>{toDate(it.receive_date) || '—'}</td>
                                   <td><strong>{it.item_name}</strong></td>
                                   <td>{it.lot_no || '-'}</td>
                                   <td className="num-cell" style={{ color: '#16a34a' }}>{it.balance_boxes}</td>

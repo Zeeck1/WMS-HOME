@@ -137,6 +137,59 @@ async function initDatabase() {
       // ignore migration errors
     }
 
+    // Location Master: one row per line_place — merge duplicate lines, drop (line+stack) unique
+    try {
+      const [dupGroups] = await connection.query(`
+        SELECT UPPER(TRIM(line_place)) AS lp,
+          GROUP_CONCAT(id ORDER BY is_active DESC, updated_at DESC, id ASC) AS ids
+        FROM locations
+        GROUP BY UPPER(TRIM(line_place))
+        HAVING COUNT(*) > 1
+      `);
+      for (const g of dupGroups) {
+        const ids = String(g.ids).split(',').map((x) => parseInt(x, 10)).filter(Boolean);
+        const keeperId = ids[0];
+        const [wiTable] = await connection.query(`
+          SELECT TABLE_NAME FROM information_schema.TABLES
+          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'withdraw_items'
+        `, [dbName]);
+        for (let i = 1; i < ids.length; i++) {
+          await connection.query(
+            'UPDATE movements SET location_id = ? WHERE location_id = ?',
+            [keeperId, ids[i]]
+          );
+          if (wiTable.length > 0) {
+            await connection.query(
+              'UPDATE withdraw_items SET location_id = ? WHERE location_id = ?',
+              [keeperId, ids[i]]
+            );
+          }
+          await connection.query('DELETE FROM locations WHERE id = ?', [ids[i]]);
+        }
+        console.log(`  Merged duplicate location rows for ${g.lp} → id ${keeperId} (old rows deleted)`);
+      }
+
+      const [hasStackUq] = await connection.query(`
+        SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'locations' AND CONSTRAINT_NAME = 'uq_line_place_stack'
+      `, [dbName]);
+      if (hasStackUq.length > 0) {
+        await connection.query('ALTER TABLE locations DROP INDEX uq_line_place_stack');
+        console.log('  Dropped uq_line_place_stack (line + stack unique)');
+      }
+
+      const [hasLineUq] = await connection.query(`
+        SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'locations' AND CONSTRAINT_NAME = 'uq_line_place'
+      `, [dbName]);
+      if (hasLineUq.length === 0) {
+        await connection.query('ALTER TABLE locations ADD UNIQUE KEY uq_line_place (line_place)');
+        console.log('  Added uq_line_place (one row per line_place)');
+      }
+    } catch (e) {
+      console.error('  Migration locations line_place unique:', e.message);
+    }
+
     await connection.query(`
       CREATE TABLE IF NOT EXISTS lots (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -714,6 +767,32 @@ async function initDatabase() {
         [hash]
       );
       console.log('  Seeded superadmin user');
+    }
+
+    // Remove leftover duplicate / unused location rows (old stack 555 etc.) from Location Master
+    try {
+      const { purgeDuplicateLocationsForLine, purgeUnusedLocationRows } = require('../utils/locationMaster');
+      const [dupGroups] = await connection.query(`
+        SELECT UPPER(TRIM(line_place)) AS lp,
+          GROUP_CONCAT(id ORDER BY is_active DESC, updated_at DESC, id ASC) AS ids
+        FROM locations
+        GROUP BY UPPER(TRIM(line_place))
+        HAVING COUNT(*) > 1
+      `);
+      for (const g of dupGroups) {
+        const ids = String(g.ids).split(',').map((x) => parseInt(x, 10)).filter(Boolean);
+        const keeperId = ids[0];
+        const [keeper] = await connection.query('SELECT line_place FROM locations WHERE id = ?', [keeperId]);
+        if (keeper.length) {
+          await purgeDuplicateLocationsForLine(connection, keeperId, keeper[0].line_place);
+        }
+      }
+      const purged = await purgeUnusedLocationRows(connection);
+      if (purged > 0) {
+        console.log(`  Purged ${purged} unused location row(s) from Location Master`);
+      }
+    } catch (e) {
+      console.error('  Location Master cleanup:', e.message);
     }
 
     console.log('\nDatabase schema initialized successfully!');

@@ -5,10 +5,10 @@ import ColumnFilterDropdown from '../components/ColumnFilterDropdown';
 import { toast } from 'react-toastify';
 import { useAuth } from '../context/AuthContext';
 import { getInventory, deleteAllStockData } from '../services/api';
-import * as XLSX from 'xlsx';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { bangkokYYYYMMDD, bangkokLocaleString } from '../utils/bangkokTime';
+import { downloadStockSummaryExcel } from '../utils/stockSummaryExcelExport';
 
 const TABS = [
   { id: 'BULK', label: 'Bulk', icon: <FiPackage /> },
@@ -358,111 +358,26 @@ function StockTable() {
     [displayRows]
   );
 
-  const exportExcel = () => {
-    let data;
-    const source = filteredInventory;
-    if (isNonBulk) {
-      const orderLabel = isImport ? 'Invoice No' : 'Order';
-      if (isCE) {
-        data = source.map((r, i) => {
-          const row = {
-            '#': i + 1,
-            [orderLabel]: r.order_code || '',
-            'Fish Name': r.fish_name,
-            'Size': r.size,
-            'KG': Number(r.bulk_weight_kg),
-            'Production Date': r.production_date || '',
-            'Expiration Date': r.expiration_date || '',
-            'Balance MC': Number(r.hand_on_balance_mc),
-            'Total KG': Number(r.hand_on_balance_kg),
-            'Remark': r.remark || ''
-          };
-          if (showCElinePlace) row['Line'] = r.line_place || '';
-          if (showCEstNo) row['ST NO'] = r.st_no || '';
-          return row;
-        });
-        const totalRow = {
-          '#': '',
-          [orderLabel]: '',
-          'Fish Name': 'TOTAL',
-          'Size': '',
-          'KG': '',
-          'Production Date': '',
-          'Expiration Date': '',
-          'Balance MC': totalMC,
-          'Total KG': totalKG,
-          'Remark': ''
-        };
-        if (showCElinePlace) totalRow['Line'] = '';
-        if (showCEstNo) totalRow['ST NO'] = '';
-        data.push(totalRow);
-      } else {
-        data = source.map((r, i) => ({
-          '#': i + 1, [orderLabel]: r.order_code || '', 'Fish Name': r.fish_name,
-          'Size': r.size, 'KG': Number(r.bulk_weight_kg), 'Arrival Date': r.cs_in_date || '',
-          'Country': r.country || '',
-          'Line': r.line_place, 'Balance MC': Number(r.hand_on_balance_mc),
-          'Total KG': Number(r.hand_on_balance_kg), 'Remark': r.remark || ''
-        }));
-        data.push({ '#': '', [orderLabel]: '', 'Fish Name': 'TOTAL', 'Size': '', 'KG': '',
-          'Arrival Date': '', 'Country': '', 'Line': '', 'Balance MC': totalMC, 'Total KG': totalKG, 'Remark': '' });
-      }
-    } else {
-      const bulkExcelKeyToLabel = {
-        fish_name: 'Fish Name',
-        size: 'Size',
-        bulk_weight_kg: 'Bulk Weight (KG)',
-        type: 'Type',
-        glazing: 'Glazing',
-        cs_in_date: 'CS In Date',
-        sticker: 'Sticker',
-        line_place: 'Lines / Place',
-        stack_no: 'Stack No',
-        stack_total: 'Stack Total',
-        old_balance_mc: 'Old Balance',
-        new_income_mc: 'New Income',
-        hand_on_balance_mc: 'Hand On Balance',
-        hand_on_balance_kg: 'Weight (KG)'
-      };
-      const rowFromBulkCols = (r, i, isTotal) => {
-        const o = {};
-        o['#'] = isTotal ? '' : i + 1;
-        bulkTableColumns.forEach((col) => {
-          const L = bulkExcelKeyToLabel[col.key];
-          if (!L) return;
-          if (isTotal) {
-            if (col.key === 'fish_name') o[L] = 'TOTAL';
-            else if (col.key === 'stack_total') o[L] = totalStacks;
-            else if (col.key === 'old_balance_mc' || col.key === 'new_income_mc') o[L] = '';
-            else if (col.key === 'hand_on_balance_mc') o[L] = totalMC;
-            else if (col.key === 'hand_on_balance_kg') o[L] = totalKG;
-            else o[L] = '';
-            return;
-          }
-          switch (col.key) {
-            case 'bulk_weight_kg':
-            case 'old_balance_mc':
-            case 'new_income_mc':
-            case 'hand_on_balance_mc':
-            case 'hand_on_balance_kg':
-              o[L] = Number(r[col.key] ?? 0);
-              break;
-            default:
-              o[L] = r[col.key] ?? '';
-          }
-        });
-        return o;
-      };
-      data = source.map((r, i) => rowFromBulkCols(r, i, false));
-      data.push(rowFromBulkCols({}, 0, true));
+  const exportExcel = async () => {
+    if (filteredInventory.length === 0) {
+      toast.warn('No data to export');
+      return;
     }
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    const sheetName = isCE ? 'Container Extra Stock' : isImport ? 'Import Stock' : 'Bulk Stock';
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    const prefix = isCE ? 'Container_Extra' : isImport ? 'Import' : 'Bulk';
-    XLSX.writeFile(wb, `WMS_${prefix}_Stock_${bangkokYYYYMMDD()}.xlsx`);
-    toast.success('Excel file downloaded');
+    try {
+      await downloadStockSummaryExcel({
+        activeTab,
+        rows: filteredInventory,
+        totals: { totalMC, totalKG, totalStacks },
+        bulkTableColumns: activeTab === 'BULK' ? bulkTableColumns : [],
+        visibleColumns: activeTab === 'CONTAINER_EXTRA' ? visibleColumns : [],
+        searchQuery,
+        filterCount: activeFilterCount,
+      });
+      toast.success('Excel file downloaded');
+    } catch (err) {
+      console.error('Stock Summary Excel export:', err);
+      toast.error('Failed to generate Excel file');
+    }
   };
 
   const exportPDF = async () => {

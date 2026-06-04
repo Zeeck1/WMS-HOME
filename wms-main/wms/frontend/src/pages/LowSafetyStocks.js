@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { toast } from 'react-toastify';
-import { FiPackage, FiRefreshCw, FiTrendingDown, FiSearch, FiPrinter } from 'react-icons/fi';
+import { FiPackage, FiRefreshCw, FiTrendingDown, FiSearch, FiPrinter, FiDownload } from 'react-icons/fi';
 import { getLowStockStocks } from '../services/api';
 import { bangkokLocaleString } from '../utils/bangkokTime';
+import { downloadLowSafetyExcel } from '../utils/lowSafetyExcelExport';
 
 const THRESHOLD_OPTIONS = [1000, 2000, 3000, 5000];
 
@@ -51,6 +52,23 @@ export default function LowSafetyStocks() {
   /** Same text as the “Below … KG” dropdown option (screen + print) */
   const belowKgLabel = `Below ${thresholdKg.toLocaleString()} KG`;
 
+  const handleDownloadExcel = async () => {
+    if (filteredItems.length === 0) {
+      toast.warn('No data to export for the current filters.');
+      return;
+    }
+    try {
+      await downloadLowSafetyExcel(filteredItems, {
+        thresholdKg,
+        searchQuery,
+      });
+      toast.success('Excel file downloaded');
+    } catch (err) {
+      console.error('Low Safety Excel export:', err);
+      toast.error('Failed to generate Excel file');
+    }
+  };
+
   const handlePrint = () => {
     if (filteredItems.length === 0) {
       toast.warn('No rows to print for the current filters.');
@@ -94,6 +112,15 @@ export default function LowSafetyStocks() {
                 <FiRefreshCw className={loading ? 'spin' : ''} /> Refresh
               </button>
             </div>
+            <button
+              type="button"
+              onClick={handleDownloadExcel}
+              className="ls-btn ls-btn-success no-print"
+              disabled={filteredItems.length === 0 || loading}
+              title="Download Excel (current filters)"
+            >
+              <FiDownload /> Excel
+            </button>
             <button
               type="button"
               onClick={handlePrint}

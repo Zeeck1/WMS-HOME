@@ -41,10 +41,9 @@ function Locations() {
     setShowModal(true);
   };
 
-  // Check if a location with the same line_place code already exists
   const isDuplicate = (formData, editingId) => {
     const code = formData.line_place.trim().toUpperCase();
-    return locations.find(loc => {
+    return locations.find((loc) => {
       if (editingId && loc.id === editingId) return false;
       return loc.line_place.toUpperCase() === code;
     });
@@ -57,9 +56,8 @@ function Locations() {
       return;
     }
 
-    // Frontend duplicate check — by line_place only
     const dup = isDuplicate(form, editing?.id);
-    if (dup) {
+    if (dup && editing) {
       toast.error(`Location "${dup.line_place}" already exists. Each location code must be unique.`);
       return;
     }
@@ -69,6 +67,9 @@ function Locations() {
       if (editing) {
         await updateLocation(editing.id, payload);
         toast.success('Location updated');
+      } else if (dup) {
+        await updateLocation(dup.id, payload);
+        toast.success('Location updated (stack overwritten)');
       } else {
         await createLocation(payload);
         toast.success('Location created');
@@ -129,8 +130,7 @@ function Locations() {
       </div>
       <div className="page-body">
         <div className="alert alert-info">
-          Each location code (e.g. <strong>A01R-1</strong>, <strong>A03R-2</strong>) must be unique.
-          Multiple products can be stored at the same location — the location is only listed once here.
+          Each location code (e.g. <strong>H01R-1</strong>) appears once. When stock is removed on <strong>Manual</strong> or <strong>Stock OUT</strong>, that line disappears here. Adding the line again on Manual restores it with the new stack number.
         </div>
 
         {/* Search Bar */}

@@ -11,13 +11,13 @@ import {
   bangkokLocaleString,
   bangkokLocaleDateString,
 } from '../utils/bangkokTime';
-
 export default function NoMovementStocks() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [months, setMonths] = useState(3);
   const [sendingLine, setSendingLine] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [downloadingExcel, setDownloadingExcel] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const reportRef = useRef(null);
 
@@ -96,17 +96,8 @@ export default function NoMovementStocks() {
 
   const generatePdfBase64 = async () => {
     try {
-      const html2canvas = (await import('html2canvas')).default;
-      const jsPDF = (await import('jspdf')).default;
-      const el = reportRef.current;
-      if (!el) return null;
-      const canvas = await html2canvas(el, { scale: 2, useCORS: true });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfW = pdf.internal.pageSize.getWidth();
-      const pdfH = (canvas.height * pdfW) / canvas.width;
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfW, pdfH);
-      return pdf.output('datauristring').split(',')[1];
+      const { noMovementPdfBase64 } = await import('../utils/noMovementPdfExport');
+      return noMovementPdfBase64(filteredItems, { months, searchQuery });
     } catch {
       return null;
     }
@@ -129,30 +120,29 @@ export default function NoMovementStocks() {
     window.print();
   };
 
+  const handleDownloadExcel = async () => {
+    if (filteredItems.length === 0) {
+      toast.warning('No data to download');
+      return;
+    }
+    setDownloadingExcel(true);
+    try {
+      const { downloadNoMovementExcel } = await import('../utils/noMovementExcelExport');
+      await downloadNoMovementExcel(filteredItems, { months, searchQuery });
+      toast.success('Excel downloaded!');
+    } catch (err) {
+      console.error('Excel export failed:', err);
+      toast.error(err?.message || 'Failed to generate Excel');
+    } finally {
+      setDownloadingExcel(false);
+    }
+  };
+
   const handleDownloadPdf = async () => {
     if (filteredItems.length === 0) { toast.warning('No data to download'); return; }
     try {
-      const html2canvas = (await import('html2canvas')).default;
-      const jsPDF = (await import('jspdf')).default;
-      const el = reportRef.current;
-      if (!el) return;
-      const canvas = await html2canvas(el, { scale: 2, useCORS: true });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfW = pdf.internal.pageSize.getWidth();
-      const pdfH = (canvas.height * pdfW) / canvas.width;
-      let position = 0;
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      if (pdfH <= pageHeight) {
-        pdf.addImage(imgData, 'PNG', 0, 0, pdfW, pdfH);
-      } else {
-        while (position < pdfH) {
-          if (position > 0) pdf.addPage();
-          pdf.addImage(imgData, 'PNG', 0, -position, pdfW, pdfH);
-          position += pageHeight;
-        }
-      }
-      pdf.save(`no-movement-stocks-${bangkokYYYYMMDD()}.pdf`);
+      const { downloadNoMovementPdf } = await import('../utils/noMovementPdfExport');
+      downloadNoMovementPdf(filteredItems, { months, searchQuery });
       toast.success('PDF downloaded!');
     } catch {
       toast.error('Failed to generate PDF');
@@ -190,6 +180,14 @@ export default function NoMovementStocks() {
               </select>
               <button type="button" onClick={load} className="nm-btn nm-btn-outline" disabled={loading}>
                 <FiRefreshCw className={loading ? 'spin' : ''} /> Refresh
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadExcel}
+                className="nm-btn nm-btn-excel"
+                disabled={downloadingExcel || filteredItems.length === 0}
+              >
+                <FiDownload /> {downloadingExcel ? 'Exporting...' : 'Excel'}
               </button>
               <button type="button" onClick={handleDownloadPdf} className="nm-btn nm-btn-primary" disabled={filteredItems.length === 0}>
                 <FiDownload /> PDF

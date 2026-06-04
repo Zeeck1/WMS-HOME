@@ -221,7 +221,8 @@ router.post('/:id/deposits', async (req, res) => {
 // ── Deposit items with balance (for OUT page) ──────────────────────────
 router.get('/:id/deposit-items', async (req, res) => {
   try {
-    const { cs_in_date, fish_name, lot_no } = req.query;
+    const { cs_in_date, arrival_date, fish_name, lot_no } = req.query;
+    const arrivalFilter = arrival_date || cs_in_date;
     let sql = `
       SELECT di.*, d.deposit_date, d.doc_ref,
         COALESCE((SELECT SUM(wi.boxes_out) FROM customer_withdrawal_items wi WHERE wi.deposit_item_id = di.id), 0) AS total_withdrawn_boxes,
@@ -233,7 +234,7 @@ router.get('/:id/deposit-items', async (req, res) => {
       WHERE d.customer_id = ?`;
     const params = [req.params.id];
 
-    if (cs_in_date) { sql += ' AND di.receive_date = ?'; params.push(cs_in_date); }
+    if (arrivalFilter) { sql += ' AND di.receive_date = ?'; params.push(arrivalFilter); }
     if (fish_name) { sql += ' AND di.item_name LIKE ?'; params.push(`%${fish_name}%`); }
     if (lot_no) { sql += ' AND di.lot_no LIKE ?'; params.push(`%${lot_no}%`); }
 

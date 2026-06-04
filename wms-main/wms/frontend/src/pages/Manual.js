@@ -8,6 +8,24 @@ import { bangkokYYYYMMDD, dateToYYYYMMDDInBangkok } from '../utils/bangkokTime';
 
 const normLotNoNumeric = (v) => String(v ?? '').replace(/\D/g, '');
 
+/** Stack no / stack total and other numeric columns — keep actual integers for save & display. */
+const normNumberField = (v) => {
+  if (v == null || v === '') return '';
+  const n = parseInt(String(v).trim(), 10);
+  return Number.isFinite(n) ? String(n) : '';
+};
+
+/** Parse stack fields for API — preserve user value (e.g. 222), not default to 1 when valid. */
+const parseStackFromDraft = (v, fallback = 1) => {
+  const n = parseInt(String(v ?? '').trim(), 10);
+  return Number.isFinite(n) && n >= 1 ? n : fallback;
+};
+
+const rowIdentity = (r) => {
+  if (r._imp_item_id != null) return { import_item_id: r._imp_item_id };
+  return { lot_id: r.lot_id, location_id: r.location_id };
+};
+
 // ─── Column Definitions ────────────────────────────────────────────────
 const BULK_COLS = [
   { key: 'fish_name', field: 'fish_name', label: 'Fish Name', editable: true, type: 'text', w: 140 },
@@ -61,7 +79,7 @@ const LINE_OPTIONS = [
   { value: 'R', label: 'R (Right)' },
 ];
 
-const rk = (r) => `${r.lot_id}-${r.location_id}`;
+const rk = (r) => (r._imp_item_id != null ? `imp-${r._imp_item_id}` : `${r.lot_id}-${r.location_id}`);
 /** Pending edits use keys `${rowKey}-${field}` — keep those rows visible even if table search no longer matches. */
 const rowKeyHasPendingEdits = (rowKey, pendingMap) => {
   const prefix = `${rowKey}-`;
@@ -69,10 +87,29 @@ const rowKeyHasPendingEdits = (rowKey, pendingMap) => {
 };
 const MANUAL_FETCH_LIMIT = 2000;
 
+/** Save line/place before stack so stack updates the final location after merges. */
+const MANUAL_SAVE_FIELD_ORDER = { line_place: 0, stack_no: 1, stack_total: 2 };
+
+function rowKeyFromEdit(edit) {
+  if (edit.import_item_id != null) return `imp-${edit.import_item_id}`;
+  return `${edit.lot_id}-${edit.location_id}`;
+}
+
 /** Ensures each tab only shows rows for that stock type (API must match; this guards stale UI or bad responses). */
 function filterInventoryRowsByTab(rows, tab) {
   const t = String(tab || '').toUpperCase();
   return (rows || []).filter((r) => String(r.stock_type || '').toUpperCase() === t);
+}
+
+/** Ensure stack columns from API display as the saved integers (not stale / wrong types). */
+function normalizeManualInventoryRow(r) {
+  const stack = r.stack_no;
+  const stackTotal = r.stack_total;
+  return {
+    ...r,
+    stack_no: stack != null && stack !== '' ? Number(stack) : '',
+    stack_total: stackTotal != null && stackTotal !== '' ? Number(stackTotal) : '',
+  };
 }
 const ROW_WINDOW_SIZE = 150;
 const toDateOnly = (d) => {
@@ -137,6 +174,7 @@ const getCellDisplay = (row, col) => {
   if (col.type === 'date') return toDateOnly(v);
   if (col.type === 'month_year') return toMonthYearDisplay(v);
   if (col.field === 'lot_no_numeric') return normLotNoNumeric(v);
+  if (col.type === 'number') return normNumberField(v);
   return v ?? '';
 };
 
@@ -154,6 +192,10 @@ function manualCellFilterValue(row, col) {
   }
   if (col.field === 'lot_no_numeric') {
     const n = normLotNoNumeric(v);
+    return n || null;
+  }
+  if (col.type === 'number') {
+    const n = normNumberField(v);
     return n || null;
   }
   if (v == null || v === '') return null;
@@ -203,7 +245,7 @@ function buildInitialFromDraft(activeTab, d) {
       remark: d.remark?.trim() || null,
       hand_on_balance_mc: parseInt(d.hand_on_balance_mc, 10) || 1,
       line_place: line || undefined,
-      stack_no: parseInt(d.stack_no, 10) || 1,
+      stack_no: parseStackFromDraft(d.stack_no),
       stack_total: 1,
     };
   }
@@ -225,8 +267,8 @@ function buildInitialFromDraft(activeTab, d) {
       lot_no_numeric: d.lot_no_numeric || null,
       hand_on_balance_mc: parseInt(d.hand_on_balance_mc, 10) || 1,
       line_place: line || undefined,
-      stack_no: parseInt(d.stack_no, 10) || 1,
-      stack_total: 1,
+      stack_no: parseStackFromDraft(d.stack_no),
+      stack_total: parseStackFromDraft(d.stack_total),
     };
   }
   return {
@@ -243,8 +285,8 @@ function buildInitialFromDraft(activeTab, d) {
     lot_no_numeric: d.lot_no_numeric || null,
     hand_on_balance_mc: parseInt(d.hand_on_balance_mc, 10) || 1,
     line_place: line || undefined,
-    stack_no: parseInt(d.stack_no, 10) || 1,
-    stack_total: parseInt(d.stack_total, 10) || 1,
+    stack_no: parseStackFromDraft(d.stack_no),
+    stack_total: parseStackFromDraft(d.stack_total),
   };
 }
 
@@ -328,8 +370,9 @@ function Manual() {
         ...params,
         limit: MANUAL_FETCH_LIMIT,
         stock_type: activeTab,
+        _t: Date.now(),
       });
-      const list = filterInventoryRowsByTab(res.data, activeTab);
+      const list = filterInventoryRowsByTab(res.data, activeTab).map(normalizeManualInventoryRow);
       setRows(list);
       setOriginalRows(list.map(r => ({ ...r })));
     } catch { toast.error('Failed to load data'); }
@@ -481,7 +524,9 @@ function Manual() {
             ? parseMonthYearInput(orig[col.key])
             : col.field === 'lot_no_numeric'
               ? normLotNoNumeric(orig[col.key])
-              : String(orig[col.key] ?? ''))
+              : col.type === 'number'
+                ? normNumberField(orig[col.key])
+                : String(orig[col.key] ?? ''))
       : '';
     const normNew = col.type === 'date'
       ? toDateOnly(newVal)
@@ -489,31 +534,82 @@ function Manual() {
         ? parseMonthYearInput(newVal)
         : col.field === 'lot_no_numeric'
           ? normLotNoNumeric(newVal)
-          : String(newVal ?? '');
+          : col.type === 'number'
+            ? normNumberField(newVal)
+            : String(newVal ?? '');
     const editKey = `${rowKey}-${col.field}`;
     setRows(prev => prev.map((r, i) => i !== rowIdx ? r : { ...r, [col.key]: normNew }));
     setPendingEditsMap(prev => {
       const next = { ...prev };
       if (normNew === origVal) delete next[editKey];
-      else next[editKey] = { lot_id: row.lot_id, location_id: row.location_id, field: col.field, value: normNew };
+      else next[editKey] = { ...rowIdentity(row), field: col.field, value: normNew };
       return next;
     });
     setUndoStack(prev => [...prev, { type: 'edit', rowKey, colKey: col.key, oldValue: row[col.key], newValue: newVal }]);
   };
 
-  // ─── Save All ────────────────────────────────────────────────────────
+  // ─── Save All (line_place before stack_no so stack hits the correct location) ─
   const handleSaveAll = async () => {
     const edits = Object.values(pendingEdits);
     if (edits.length === 0) return;
     setSaving(true);
     let ok = 0;
     let fail = 0;
+
+    const groups = {};
     for (const edit of edits) {
-      try {
-        await manualUpdateCell(edit);
-        ok++;
-      } catch { fail++; }
+      const gk = rowKeyFromEdit(edit);
+      if (!groups[gk]) groups[gk] = [];
+      groups[gk].push(edit);
     }
+
+    for (const group of Object.values(groups)) {
+      group.sort(
+        (a, b) => (MANUAL_SAVE_FIELD_ORDER[a.field] ?? 50) - (MANUAL_SAVE_FIELD_ORDER[b.field] ?? 50)
+      );
+      let locationId = group[0].location_id;
+      const lotId = group[0].lot_id;
+      const importItemId = group[0].import_item_id;
+
+      for (const edit of group) {
+        try {
+          const payload = {
+            ...edit,
+            lot_id: lotId,
+            location_id: locationId,
+            import_item_id: importItemId,
+          };
+          const res = await manualUpdateCell(payload);
+          ok++;
+
+          if (res.data?.new_location_id) {
+            locationId = res.data.new_location_id;
+          }
+          if ((edit.field === 'stack_no' || edit.field === 'stack_total') && res.data) {
+            const savedStack = res.data.stack_no;
+            const savedTotal = res.data.stack_total;
+            if (savedStack != null || savedTotal != null) {
+              setRows((prev) => prev.map((r) => {
+                const match = importItemId != null
+                  ? r._imp_item_id === importItemId
+                  : r.lot_id === lotId;
+                if (!match) return r;
+                return normalizeManualInventoryRow({
+                  ...r,
+                  location_id: locationId,
+                  ...(savedStack != null ? { stack_no: savedStack } : {}),
+                  ...(savedTotal != null ? { stack_total: savedTotal } : {}),
+                });
+              }));
+            }
+          }
+        } catch (err) {
+          fail++;
+          console.error('Manual save failed:', edit, err?.response?.data || err);
+        }
+      }
+    }
+
     setSaving(false);
     if (fail > 0) toast.error(`${fail} edit(s) failed to save`);
     if (ok > 0) toast.success(`${ok} edit(s) saved successfully`);
@@ -539,7 +635,7 @@ function Manual() {
       if (col.type === 'date') v = toDateOnly(rawVal);
       else if (col.type === 'month_year') v = parseMonthYearInput(rawVal);
       else if (col.field === 'lot_no_numeric') v = normLotNoNumeric(rawVal);
-      else if (col.type === 'number') v = String(rawVal ?? '');
+      else if (col.type === 'number') v = normNumberField(rawVal);
       else v = String(rawVal ?? '');
       return { ...prev, [col.key]: v };
     });
@@ -570,7 +666,12 @@ function Manual() {
       const res = await manualAddRow({ stock_type: activeTab, initial });
       setDraftRow(null);
       if (res.data?.row) {
-        toast.success('Row added — it appears in the list sorted by Line / Place.');
+        const added = res.data.row;
+        if (res.data.stack_no != null) added.stack_no = res.data.stack_no;
+        if (res.data.stack_total != null) added.stack_total = res.data.stack_total;
+        toast.success(
+          `Row added at ${added.line_place || initial.line_place} — Stack No ${added.stack_no ?? initial.stack_no}.`
+        );
       } else {
         toast.success('Row added.');
       }
@@ -655,17 +756,21 @@ function Manual() {
             ? parseMonthYearInput(origRow[col.key])
             : col.field === 'lot_no_numeric'
               ? normLotNoNumeric(origRow[col.key])
-              : String(origRow[col.key] ?? '');
+              : col.type === 'number'
+                ? normNumberField(origRow[col.key])
+                : String(origRow[col.key] ?? '');
         const reverted = col.type === 'date'
           ? toDateOnly(action.oldValue)
           : col.type === 'month_year'
             ? parseMonthYearInput(action.oldValue)
             : col.field === 'lot_no_numeric'
               ? normLotNoNumeric(action.oldValue)
-              : String(action.oldValue ?? '');
+              : col.type === 'number'
+                ? normNumberField(action.oldValue)
+                : String(action.oldValue ?? '');
         setPendingEditsMap(prev => {
           const next = { ...prev };
-          if (reverted === origVal) delete next[editKey]; else next[editKey] = { lot_id: origRow.lot_id, location_id: origRow.location_id, field: col.field, value: reverted };
+          if (reverted === origVal) delete next[editKey]; else next[editKey] = { ...rowIdentity(origRow), field: col.field, value: reverted };
           return next;
         });
       }
@@ -725,7 +830,7 @@ function Manual() {
         const oldVal = r[cKey];
         setRows(prev => prev.map(row => rk(row) === key ? { ...row, [cKey]: fillVal } : row));
         setUndoStack(prev => [...prev, { type: 'edit', rowKey: key, colKey: cKey, oldValue: oldVal, newValue: fillVal }]);
-        if (col?.field) editsToAdd[`${key}-${col.field}`] = { lot_id: r.lot_id, location_id: r.location_id, field: col.field, value: fillVal };
+        if (col?.field) editsToAdd[`${key}-${col.field}`] = { ...rowIdentity(r), field: col.field, value: col.type === 'number' ? normNumberField(fillVal) : fillVal };
       }
       if (Object.keys(editsToAdd).length > 0) setPendingEditsMap(prev => ({ ...prev, ...editsToAdd }));
     };
@@ -997,12 +1102,16 @@ function Manual() {
                         ? parseMonthYearInput(draftRow[col.key])
                         : col.field === 'lot_no_numeric'
                           ? normLotNoNumeric(draftRow[col.key])
-                          : (draftRow[col.key] ?? '');
+                          : col.type === 'number'
+                            ? normNumberField(draftRow[col.key])
+                            : (draftRow[col.key] ?? '');
                     const inputDisplayVal = col.type === 'month_year'
                       ? toMonthYearDisplay(draftRow[col.key])
                       : col.field === 'lot_no_numeric'
                         ? normLotNoNumeric(draftRow[col.key])
-                        : valNormalized;
+                        : col.type === 'number'
+                          ? normNumberField(draftRow[col.key])
+                          : valNormalized;
                     return (
                       <td key={col.key} className="ms-cell ms-cell-ed ms-draft-cell">
                         <input
@@ -1061,7 +1170,9 @@ function Manual() {
                           ? parseMonthYearInput(row[col.key])
                           : col.field === 'lot_no_numeric'
                             ? normLotNoNumeric(row[col.key])
-                            : (row[col.key] ?? '');
+                            : col.type === 'number'
+                              ? normNumberField(row[col.key])
+                              : (row[col.key] ?? '');
                       const origValNormalized = orig
                         ? (col.type === 'date'
                             ? toDateOnly(orig[col.key])
@@ -1069,14 +1180,18 @@ function Manual() {
                               ? parseMonthYearInput(orig[col.key])
                               : col.field === 'lot_no_numeric'
                                 ? normLotNoNumeric(orig[col.key])
-                                : String(orig[col.key] ?? ''))
+                                : col.type === 'number'
+                                  ? normNumberField(orig[col.key])
+                                  : String(orig[col.key] ?? ''))
                         : valNormalized;
                       const isChanged = String(valNormalized) !== String(origValNormalized);
                       const inputDisplayVal = col.type === 'month_year'
                         ? toMonthYearDisplay(row[col.key])
                         : col.field === 'lot_no_numeric'
                           ? normLotNoNumeric(row[col.key])
-                          : valNormalized;
+                          : col.type === 'number'
+                            ? normNumberField(row[col.key])
+                            : valNormalized;
                       return (
                         <td key={col.key} className={`ms-cell ms-cell-ed ${isActive ? 'ms-cell-active' : ''} ${isChanged ? 'ms-cell-dirty' : ''}`}>
                           <input

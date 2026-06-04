@@ -2,7 +2,13 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { FiArrowUpCircle, FiPackage, FiBox, FiAnchor } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { getInventory, stockOut, createImportStockOut } from '../services/api';
-import { bangkokYYYYMMDD } from '../utils/bangkokTime';
+import { bangkokYYYYMMDD, dateToYYYYMMDDInBangkok } from '../utils/bangkokTime';
+
+const formatArrivalDate = (d) => {
+  if (!d) return '—';
+  if (typeof d === 'string') return d.split('T')[0];
+  return dateToYYYYMMDDInBangkok(d) || '—';
+};
 
 const TABS = [
   { id: 'BULK', label: 'Bulk', icon: <FiPackage /> },
@@ -39,6 +45,7 @@ function StockOut() {
     date_out: ''
   });
   const [searchQuery, setSearchQuery] = useState('');
+  const [arrivalFilter, setArrivalFilter] = useState('');
 
   const isCE = activeTab === 'CONTAINER_EXTRA';
   const isImport = activeTab === 'IMPORT';
@@ -46,7 +53,11 @@ function StockOut() {
 
   const fetchInventory = useCallback(async () => {
     try {
-      const res = await getInventory({ stock_type: activeTab });
+      const params = { stock_type: activeTab };
+      if (activeTab === 'IMPORT' && arrivalFilter) {
+        params.arrival_date = arrivalFilter;
+      }
+      const res = await getInventory(params);
       const rows = res.data || [];
       setInventory(rows.filter((item) => {
         if (item.lot_id != null && item.location_id != null) return true;
@@ -60,7 +71,7 @@ function StockOut() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab]);
+  }, [activeTab, arrivalFilter]);
 
   useEffect(() => { setLoading(true); fetchInventory(); }, [activeTab, fetchInventory]);
 
@@ -68,6 +79,7 @@ function StockOut() {
     setActiveTab(tab);
     setSelectedRow(null);
     setSearchQuery('');
+    setArrivalFilter('');
     setForm({ quantity_mc: '', weight_kg: '', reference_no: '', notes: '', date_out: '' });
   };
 
@@ -86,9 +98,10 @@ function StockOut() {
       const country = lc(item.country);
       const stack = lc(item.stack_no);
       const remark = lc(item.remark);
+      const arrival = lc(formatArrivalDate(item.cs_in_date));
       return fish.includes(q) || size.includes(q) || lot.includes(q) ||
         location.includes(q) || order.includes(q) || handMc.includes(q) || handKg.includes(q) ||
-        country.includes(q) || stack.includes(q) || remark.includes(q);
+        country.includes(q) || stack.includes(q) || remark.includes(q) || arrival.includes(q);
     });
   }, [inventory, searchQuery]);
 
@@ -164,7 +177,7 @@ function StockOut() {
 
   if (loading) return <div className="loading"><div className="spinner"></div>Loading...</div>;
 
-  const tableColSpan = 7;
+  const tableColSpan = isImport ? 8 : 7;
   const selectedKey = selectedRow ? stockOutRowKey(selectedRow) : null;
   const selectedIsImportShipment = selectedRow && isImportShipmentRow(selectedRow);
 
@@ -204,7 +217,13 @@ function StockOut() {
                 {!isNonBulk && <> Lot: {selectedRow.lot_no} |</>}
                 {' '}
                 {selectedIsImportShipment
-                  ? <>Line: {selectedRow.line_place || selectedRow.stack_no || '—'} {selectedRow.country ? `| From: ${selectedRow.country}` : ''} |</>
+                  ? (
+                    <>
+                      Arrival Date: <strong>{formatArrivalDate(selectedRow.cs_in_date)}</strong> |
+                      Line: {selectedRow.line_place || selectedRow.stack_no || '—'}
+                      {selectedRow.country ? ` | From: ${selectedRow.country}` : ''} |
+                    </>
+                  )
                   : <>Location: {selectedRow.line_place} |</>}
                 <strong> Hand On: {selectedRow.hand_on_balance_mc} MC</strong>
               </div>
@@ -257,17 +276,31 @@ function StockOut() {
         )}
 
         <div className="card">
-          <div className="card-header">
+          <div className="card-header" style={{ flexWrap: 'wrap', gap: 12 }}>
             <h3>Select Item to Stock Out ({isCE ? 'Container Extra' : isImport ? 'Import' : 'Bulk'})</h3>
-            <div className="search-inline" style={{ minWidth: 260 }}>
-              <input
-                type="text"
-                className="form-control"
-                placeholder={isImport ? 'Search fish, invoice, line, country, remark...' : 'Search fish, size, lot, location, order...'}
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                style={{ maxWidth: 320 }}
-              />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end', marginLeft: 'auto' }}>
+              {isImport && (
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: '0.75rem', marginBottom: 4 }}>Arrival Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={arrivalFilter}
+                    onChange={e => setArrivalFilter(e.target.value)}
+                    style={{ width: 160 }}
+                  />
+                </div>
+              )}
+              <div className="search-inline" style={{ minWidth: 260 }}>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder={isImport ? 'Search fish, invoice, arrival date, line, country...' : 'Search fish, size, lot, location, order...'}
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  style={{ maxWidth: 320 }}
+                />
+              </div>
             </div>
           </div>
           <div className="table-container">
@@ -275,6 +308,7 @@ function StockOut() {
               <thead>
                 <tr>
                   {isNonBulk && <th>{isImport ? 'Invoice No' : 'Order'}</th>}
+                  {isImport && <th>Arrival Date</th>}
                   <th>Fish Name</th>
                   <th>Size</th>
                   {!isNonBulk && <th>Lot No</th>}
@@ -294,6 +328,7 @@ function StockOut() {
                   return (
                   <tr key={k} style={{ background: selectedKey === k ? '#dbeafe' : undefined, cursor: 'pointer' }} onClick={() => selectItem(item)}>
                     {isNonBulk && <td><strong>{item.order_code || '-'}</strong></td>}
+                    {isImport && <td>{formatArrivalDate(item.cs_in_date)}</td>}
                     <td><strong>{item.fish_name}</strong></td>
                     <td>{item.size}</td>
                     {!isNonBulk && <td>{item.lot_no}</td>}

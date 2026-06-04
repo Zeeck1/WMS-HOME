@@ -1,13 +1,25 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
+const { purgeDuplicateLocationsForLine } = require('../utils/locationMaster');
 
-// GET all locations
+// GET all locations (active only; Manual creates/updates these rows)
 router.get('/', async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      'SELECT * FROM locations WHERE is_active = 1 ORDER BY line_place'
-    );
+    // One visible row per line_place (latest stack from Manual wins)
+    const [rows] = await pool.query(`
+      SELECT l.*
+      FROM locations l
+      INNER JOIN (
+        SELECT UPPER(TRIM(line_place)) AS lp,
+          SUBSTRING_INDEX(GROUP_CONCAT(id ORDER BY updated_at DESC, id ASC), ',', 1) AS keeper_id
+        FROM locations
+        WHERE is_active = 1
+        GROUP BY UPPER(TRIM(line_place))
+      ) k ON l.id = k.keeper_id
+      WHERE l.is_active = 1
+      ORDER BY l.line_place ASC
+    `);
     res.json(rows);
   } catch (error) {
     console.error('Error fetching locations:', error);
@@ -27,7 +39,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST create location — unique by line_place only
+// POST create location — one row per line_place (stack fields overwrite on update)
 router.post('/', async (req, res) => {
   try {
     const { line_place, stack_no, stack_total, description } = req.body;
@@ -36,19 +48,32 @@ router.post('/', async (req, res) => {
     }
 
     const code = line_place.trim().toUpperCase();
+    const stack = parseInt(stack_no, 10) || 1;
+    const total = parseInt(stack_total, 10) || 1;
 
-    // Check if this location code already exists
     const [existing] = await pool.query(
-      'SELECT id, line_place FROM locations WHERE line_place = ? AND is_active = 1',
+      'SELECT id FROM locations WHERE UPPER(TRIM(line_place)) = ? AND is_active = 1 LIMIT 1',
       [code]
     );
     if (existing.length > 0) {
-      return res.status(409).json({ error: `Location "${code}" already exists. Each location code must be unique.` });
+      const keeperId = existing[0].id;
+      await pool.query(
+        'UPDATE locations SET stack_no=?, stack_total=?, description=?, updated_at=NOW() WHERE id=?',
+        [stack, total, description || null, keeperId]
+      );
+      const conn = await pool.getConnection();
+      try {
+        await purgeDuplicateLocationsForLine(conn, keeperId, code);
+      } finally {
+        conn.release();
+      }
+      const [updated] = await pool.query('SELECT * FROM locations WHERE id = ?', [keeperId]);
+      return res.status(200).json(updated[0]);
     }
 
     const [result] = await pool.query(
       'INSERT INTO locations (line_place, stack_no, stack_total, description) VALUES (?, ?, ?, ?)',
-      [code, stack_no || 1, stack_total || 1, description || null]
+      [code, stack, total, description || null]
     );
     const [newLoc] = await pool.query('SELECT * FROM locations WHERE id = ?', [result.insertId]);
     res.status(201).json(newLoc[0]);
@@ -66,20 +91,29 @@ router.put('/:id', async (req, res) => {
   try {
     const { line_place, stack_no, stack_total, description } = req.body;
     const code = line_place.trim().toUpperCase();
+    const stack = parseInt(stack_no, 10) || 1;
+    const total = parseInt(stack_total, 10) || 1;
 
-    // Check for duplicate line_place (excluding self)
     const [existing] = await pool.query(
-      'SELECT id FROM locations WHERE line_place = ? AND id != ? AND is_active = 1',
+      'SELECT id FROM locations WHERE UPPER(TRIM(line_place)) = ? AND id != ? AND is_active = 1 LIMIT 1',
       [code, req.params.id]
     );
     if (existing.length > 0) {
-      return res.status(409).json({ error: `Location "${code}" already exists. Each location code must be unique.` });
+      return res.status(409).json({
+        error: `Location "${code}" already exists. Each location code must be unique.`,
+      });
     }
 
     await pool.query(
-      'UPDATE locations SET line_place=?, stack_no=?, stack_total=?, description=? WHERE id=?',
-      [code, stack_no || 1, stack_total || 1, description || null, req.params.id]
+      'UPDATE locations SET line_place=?, stack_no=?, stack_total=?, description=?, is_active=1, updated_at=NOW() WHERE id=?',
+      [code, stack, total, description || null, req.params.id]
     );
+    const conn = await pool.getConnection();
+    try {
+      await purgeDuplicateLocationsForLine(conn, parseInt(req.params.id, 10), code);
+    } finally {
+      conn.release();
+    }
     const [updated] = await pool.query('SELECT * FROM locations WHERE id = ?', [req.params.id]);
     res.json(updated[0]);
   } catch (error) {

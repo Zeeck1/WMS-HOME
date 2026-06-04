@@ -10,7 +10,7 @@ function isLineOnlyLocationFilter(location) {
 }
 
 async function fetchImportShipmentRows(filters = {}) {
-  const { fish_name, location } = filters;
+  const { fish_name, location, arrival_date } = filters;
   let sql = `
     SELECT
       ii.id AS _imp_item_id,
@@ -51,6 +51,7 @@ async function fetchImportShipmentRows(filters = {}) {
   `;
   const params = [];
   if (fish_name) { sql += ' AND ii.item_name LIKE ?'; params.push(`%${fish_name}%`); }
+  if (arrival_date) { sql += ' AND s.eta = ?'; params.push(arrival_date); }
   if (location) { sql += ' AND (s.origin_country LIKE ? OR ii.lines LIKE ?)'; params.push(`%${location}%`, `%${location}%`); }
   sql += ' ORDER BY s.inv_no ASC, ii.seq_no ASC';
   const [rows] = await pool.query(sql, params);
@@ -98,7 +99,11 @@ router.get('/', async (req, res) => {
 
     if (mergeImportShipments) {
       try {
-        const impRows = await fetchImportShipmentRows({ fish_name, location });
+        const impRows = await fetchImportShipmentRows({
+          fish_name,
+          location,
+          arrival_date: req.query.arrival_date || req.query.eta || null,
+        });
         rows.push(...impRows);
       } catch (e) {
         console.error('Failed to fetch import shipment items for inventory:', e);

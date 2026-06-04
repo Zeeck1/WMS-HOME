@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const XLSX = require('xlsx');
 const path = require('path');
 const pool = require('../config/db');
+const { purgeDuplicateLocationsForLine } = require('../utils/locationMaster');
 const {
   bangkokYYYYMMDD,
   dateToYYYYMMDDInBangkok,
@@ -107,8 +108,7 @@ async function findOrCreateProduct(conn, fishName, size, bulkWeight, type, glazi
   return { id: result.insertId, isNew: true };
 }
 
-// Helper: find or create location by line_place only (one code = one location).
-// Must not filter is_active: inactive rows still hold UNIQUE(line_place); skipping them caused INSERT duplicate errors.
+// Helper: one Location Master row per line_place; overwrite stack on existing line.
 async function findOrCreateLocation(conn, linePlace, stackNo, stackTotal) {
   const code = normalizeLocationCode(linePlace);
   const stack = parseExcelInt(stackNo) || 1;
@@ -117,18 +117,17 @@ async function findOrCreateLocation(conn, linePlace, stackNo, stackTotal) {
     throw new Error('Missing location / Lines-Place');
   }
   const [existing] = await conn.query(
-    'SELECT id, is_active FROM locations WHERE line_place = ? LIMIT 1',
+    'SELECT id FROM locations WHERE UPPER(TRIM(line_place)) = ? ORDER BY is_active DESC, updated_at DESC, id ASC',
     [code]
   );
   if (existing.length > 0) {
-    const loc = existing[0];
-    if (!loc.is_active) {
-      await conn.query(
-        'UPDATE locations SET is_active = 1, stack_no = ?, stack_total = ? WHERE id = ?',
-        [stack, total, loc.id]
-      );
-    }
-    return { id: loc.id, isNew: false };
+    const keeperId = existing[0].id;
+    await conn.query(
+      'UPDATE locations SET stack_no = ?, stack_total = ?, is_active = 1, updated_at = NOW() WHERE id = ?',
+      [stack, total, keeperId]
+    );
+    await purgeDuplicateLocationsForLine(conn, keeperId, code);
+    return { id: keeperId, isNew: false };
   }
   const [result] = await conn.query(
     'INSERT INTO locations (line_place, stack_no, stack_total, is_active) VALUES (?, ?, ?, 1)',

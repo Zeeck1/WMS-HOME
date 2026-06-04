@@ -5806,6 +5806,15 @@ body {
 }
 .nm-btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
 
+.nm-btn-excel {
+  background: #217346;
+  color: #fff;
+  border: 1px solid #1a5c38;
+}
+.nm-btn-excel:hover:not(:disabled) {
+  background: #1a5c38;
+}
+
 .nm-btn-line {
   background: #06c755;
   color: #fff;
@@ -6148,6 +6157,13 @@ body {
 }
 
 .ls-btn-outline:hover:not(:disabled) { background: var(--gray-50); }
+
+.ls-btn-success {
+  background: #16a34a;
+  color: #fff;
+}
+
+.ls-btn-success:hover:not(:disabled) { background: #15803d; }
 
 .ls-summary {
   display: grid;
