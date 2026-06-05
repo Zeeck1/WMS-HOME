@@ -400,6 +400,22 @@ async function initDatabase() {
       console.error('  Migration pick_route columns:', e.message);
     }
 
+    // Migration: dispatcher name (entered at Ready to Take on Manage page)
+    try {
+      const [dispCols] = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'withdraw_requests' AND COLUMN_NAME = 'dispatcher'
+      `, [dbName]);
+      if (dispCols.length === 0) {
+        await connection.query(
+          'ALTER TABLE withdraw_requests ADD COLUMN dispatcher VARCHAR(100) DEFAULT NULL AFTER managed_by'
+        );
+        console.log('  Migration: dispatcher on withdraw_requests');
+      }
+    } catch (e) {
+      console.error('  Migration dispatcher column:', e.message);
+    }
+
     // Withdraw items table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS withdraw_items (

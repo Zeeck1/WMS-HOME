@@ -417,7 +417,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// ─── PUT update items (edit quantities in PENDING state) ──
+// ─── PUT update items (edit quantities in PENDING or TAKING_OUT state) ──
 router.put('/:id/items', async (req, res) => {
   const conn = await pool.getConnection();
   try {
@@ -434,9 +434,9 @@ router.put('/:id/items', async (req, res) => {
       await conn.rollback();
       return res.status(404).json({ error: 'Request not found' });
     }
-    if (requests[0].status !== 'PENDING') {
+    if (requests[0].status !== 'PENDING' && requests[0].status !== 'TAKING_OUT') {
       await conn.rollback();
-      return res.status(400).json({ error: 'Items can only be edited in PENDING status' });
+      return res.status(400).json({ error: 'Items can only be edited in PENDING or TAKING_OUT status' });
     }
 
     for (const item of items) {
@@ -516,12 +516,83 @@ router.put('/:id/items', async (req, res) => {
   }
 });
 
+// ─── POST add item to withdrawal (superadmin, TAKING_OUT only) ─────────
+router.post('/:id/add-item', authMiddleware, superadminOnly, async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { lot_id, location_id, quantity_mc, production_process } = req.body;
+
+    if (!lot_id || !location_id || !quantity_mc || quantity_mc <= 0) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'lot_id, location_id, and quantity_mc > 0 are required' });
+    }
+
+    const [requests] = await conn.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
+    if (requests.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'Request not found' });
+    }
+    if (requests[0].status !== 'TAKING_OUT') {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Items can only be added during TAKING_OUT status' });
+    }
+
+    const [balance] = await conn.query(`
+      SELECT
+        COALESCE(SUM(CASE WHEN movement_type = 'IN' THEN quantity_mc ELSE 0 END), 0) -
+        COALESCE(SUM(CASE WHEN movement_type = 'OUT' THEN quantity_mc ELSE 0 END), 0) AS hand_on
+      FROM movements WHERE lot_id = ? AND location_id = ?
+    `, [lot_id, location_id]);
+
+    if (quantity_mc > balance[0].hand_on) {
+      await conn.rollback();
+      return res.status(400).json({
+        error: `Insufficient stock: requested ${quantity_mc} MC but only ${balance[0].hand_on} MC available`
+      });
+    }
+
+    const [prodRows] = await conn.query(`
+      SELECT p.bulk_weight_kg FROM lots l JOIN products p ON l.product_id = p.id WHERE l.id = ?
+    `, [lot_id]);
+    const bulkKg = prodRows.length > 0 ? Number(prodRows[0].bulk_weight_kg) : 0;
+
+    const [ins] = await conn.query(
+      `INSERT INTO withdraw_items (request_id, lot_id, location_id, requested_mc, quantity_mc, weight_kg, production_process)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [req.params.id, lot_id, location_id, quantity_mc, quantity_mc, quantity_mc * bulkKg, production_process || null]
+    );
+
+    await conn.commit();
+
+    const [newItem] = await pool.query(`
+      SELECT wi.*,
+        p.fish_name, p.size, p.bulk_weight_kg, p.type, p.glazing, p.stock_type, p.order_code,
+        l.lot_no, l.lot_no_numeric, l.cs_in_date, l.sticker,
+        loc.line_place, loc.stack_no, loc.stack_total
+      FROM withdraw_items wi
+      LEFT JOIN lots l ON wi.lot_id = l.id
+      LEFT JOIN products p ON l.product_id = p.id
+      LEFT JOIN locations loc ON wi.location_id = loc.id
+      WHERE wi.id = ?
+    `, [ins.insertId]);
+
+    res.status(201).json({ message: 'Item added', item: newItem[0] });
+  } catch (error) {
+    await conn.rollback();
+    console.error('Error adding withdrawal item:', error);
+    res.status(500).json({ error: 'Failed to add item' });
+  } finally {
+    conn.release();
+  }
+});
+
 // ─── PUT update status (used by Manage page) ─────────
 router.put('/:id/status', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const { status, managed_by } = req.body;
+    const { status, managed_by, dispatcher } = req.body;
     const validStatuses = ['PENDING', 'TAKING_OUT', 'READY', 'FINISHED', 'CANCELLED'];
     if (!validStatuses.includes(status)) {
       await conn.rollback();
@@ -535,6 +606,14 @@ router.put('/:id/status', async (req, res) => {
     }
 
     const request = requests[0];
+
+    if (status === 'FINISHED' && request.status === 'READY') {
+      const disp = String(dispatcher || request.dispatcher || '').trim();
+      if (!disp) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'Dispatcher name is required before finishing' });
+      }
+    }
 
     if (status === 'FINISHED' && request.status !== 'FINISHED') {
       const [items] = await conn.query(`
@@ -622,8 +701,8 @@ router.put('/:id/status', async (req, res) => {
     const finishedAt = (status === 'FINISHED' && request.status !== 'FINISHED') ? new Date() : request.finished_at;
 
     await conn.query(
-      'UPDATE withdraw_requests SET status = ?, managed_by = ?, finished_at = ?, updated_at = NOW() WHERE id = ?',
-      [status, managed_by || request.managed_by, finishedAt, req.params.id]
+      'UPDATE withdraw_requests SET status = ?, managed_by = ?, dispatcher = ?, finished_at = ?, updated_at = NOW() WHERE id = ?',
+      [status, managed_by || request.managed_by, dispatcher || request.dispatcher, finishedAt, req.params.id]
     );
 
     await conn.commit();

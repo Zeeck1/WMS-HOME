@@ -194,21 +194,20 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
             <div className="wf-sig-label-en">Requester</div>
           </div>
           <div className="wf-sig-block">
-            <div className="wf-sig-line"></div>
-            <div className="wf-sig-label">ผู้อนุมัติ</div>
-            <div className="wf-sig-label-en">Approver</div>
-          </div>
-          <div className="wf-sig-block">
             <div className="wf-sig-line">
               {data.managed_by && data.managed_by !== 'system' && data.managed_by !== 'admin' && (
                 <span className="wf-sig-name">{data.managed_by}</span>
               )}
             </div>
-            <div className="wf-sig-label">ผู้จัด</div>
-            <div className="wf-sig-label-en">Preparer</div>
+            <div className="wf-sig-label">ผู้อนุมัติ</div>
+            <div className="wf-sig-label-en">Approver</div>
           </div>
           <div className="wf-sig-block">
-            <div className="wf-sig-line"></div>
+            <div className="wf-sig-line">
+              {data.dispatcher && (
+                <span className="wf-sig-name">{data.dispatcher}</span>
+              )}
+            </div>
             <div className="wf-sig-label">ผลจ่าย</div>
             <div className="wf-sig-label-en">Dispatcher</div>
           </div>

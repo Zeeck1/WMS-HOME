@@ -4843,7 +4843,7 @@ body {
 /* Signatures */
 .wf-signatures {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   margin-top: 40px;
   padding-top: 20px;
@@ -5298,6 +5298,12 @@ body {
   border-radius: 6px;
 }
 
+.mg-dispatcher-field {
+  margin-top: 10px;
+  background: linear-gradient(135deg, #f5f3ff 0%, #f8fafc 100%);
+  border-color: #c4b5fd;
+}
+
 .mg-manager-field label {
   display: block;
   font-size: 0.72rem;
@@ -5310,6 +5316,76 @@ body {
 
 .mg-manager-field .form-control {
   font-size: 0.85rem;
+}
+
+/* ── Superadmin: Add Item panel on Manage page ── */
+.mg-add-item-section {
+  margin-top: 16px;
+  padding: 14px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+  border: 1px solid #93c5fd;
+  border-radius: 10px;
+}
+
+.mg-add-item-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.mg-add-item-panel {
+  margin-top: 12px;
+}
+
+.mg-add-item-filters {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+
+.mg-add-item-field {
+  flex: 1;
+  min-width: 140px;
+}
+
+.mg-add-item-field label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--gray-500);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 3px;
+}
+
+.mg-add-item-field .form-control {
+  font-size: 0.85rem;
+}
+
+.mg-add-item-table {
+  font-size: 0.82rem;
+  margin-top: 8px;
+}
+
+.mg-add-item-table th {
+  background: #dbeafe;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--gray-700);
+  padding: 6px 8px;
+}
+
+.mg-add-item-table td {
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+
+.mg-add-item-table .mg-qty-input {
+  width: 70px;
 }
 
 /* ── Editable signature field (visible on screen only) ── */

@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import {
   FiSettings, FiSearch, FiCheck, FiClock, FiTruck, FiPackage,
   FiCheckCircle, FiXCircle, FiChevronDown, FiChevronUp, FiRefreshCw, FiPrinter, FiFileText, FiTrash2,
-  FiMapPin, FiCalendar, FiRotateCcw, FiSave
+  FiMapPin, FiCalendar, FiRotateCcw, FiSave, FiPlus
 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import {
   getWithdrawals, getWithdrawal, getInventory, updateWithdrawalStatus, updateWithdrawalItems,
-  saveWithdrawalPickRoute, undoWithdrawalPickRoute, cancelWithdrawal, permanentlyDeleteWithdrawal, sendLineNotification
+  saveWithdrawalPickRoute, undoWithdrawalPickRoute, cancelWithdrawal, permanentlyDeleteWithdrawal, sendLineNotification,
+  addWithdrawalItem
 } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -96,7 +97,7 @@ function currentItemQty(item, editedQty) {
     : Number(item.quantity_mc);
 }
 
-function ManageWithdrawItemRow({ item, rowNum, isPending, editedQty, setEditedQty }) {
+function ManageWithdrawItemRow({ item, rowNum, isEditable, editedQty, setEditedQty }) {
   const balance = Number(item.hand_on_balance || 0);
   const requestedMc = Number(item.requested_mc || item.quantity_mc);
   const currentQty = currentItemQty(item, editedQty);
@@ -107,7 +108,7 @@ function ManageWithdrawItemRow({ item, rowNum, isPending, editedQty, setEditedQt
   const actualDiffers = currentQty !== requestedMc;
 
   return (
-    <tr className={`mg-group-detail-row ${isInsufficient && isPending ? 'mg-row-warn' : ''}`}>
+    <tr className={`mg-group-detail-row ${isInsufficient && isEditable ? 'mg-row-warn' : ''}`}>
       <td>{rowNum}</td>
       <td><strong>{item.fish_name}</strong></td>
       <td>{item.size}</td>
@@ -122,7 +123,7 @@ function ManageWithdrawItemRow({ item, rowNum, isPending, editedQty, setEditedQt
         <span className="mg-requested-val">{requestedMc}</span>
       </td>
       <td className="num-cell">
-        {isPending ? (
+        {isEditable ? (
           <div className="mg-qty-edit">
             <input
               type="number"
@@ -155,7 +156,7 @@ function ManageWithdrawItemRow({ item, rowNum, isPending, editedQty, setEditedQt
       </td>
       <td className="num-cell">{weightKg.toFixed(0)}</td>
       <td>
-        {isInsufficient && isPending && editedQty[qtyKey] === undefined ? (
+        {isInsufficient && isEditable && editedQty[qtyKey] === undefined ? (
           <span className="mg-stock-warn">Low Stock</span>
         ) : (
           <span className="mg-stock-ok">
@@ -195,6 +196,14 @@ function Manage() {
   const [pickRouteTab, setPickRouteTab] = useState('nearest');
   const [managerName, setManagerName] = useState('');
   const [managerNameSaved, setManagerNameSaved] = useState(false);
+  const [dispatcherName, setDispatcherName] = useState('');
+
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [addItemSearch, setAddItemSearch] = useState({ fish_name: '', location: '', stack_no: '' });
+  const [addItemResults, setAddItemResults] = useState([]);
+  const [addItemLoading, setAddItemLoading] = useState(false);
+  const [addItemQty, setAddItemQty] = useState({});
+  const [addingItem, setAddingItem] = useState(null);
 
   useEffect(() => {
     try {
@@ -247,6 +256,17 @@ function Manage() {
     return '';
   }, [managerName]);
 
+  const applyDispatcherFromRequest = useCallback((data) => {
+    const fromReq = (data?.dispatcher || '').trim();
+    setDispatcherName(fromReq);
+  }, []);
+
+  const resolveDispatcherForAdvance = useCallback((req, detail) => {
+    const fromState = (dispatcherName || '').trim();
+    if (fromState) return fromState;
+    return (detail?.dispatcher || req?.dispatcher || '').trim();
+  }, [dispatcherName]);
+
   const fetchRequests = useCallback(async () => {
     setLoading(true);
     try {
@@ -271,6 +291,9 @@ function Manage() {
       setExpandedData(null);
       setEditedQty({});
       setInventory([]);
+      setShowAddItem(false);
+      setAddItemResults([]);
+      setDispatcherName('');
       return;
     }
     try {
@@ -281,6 +304,7 @@ function Manage() {
       setExpandedData(wRes.data);
       setExpandedId(id);
       applyManagerNameFromRequest(wRes.data);
+      applyDispatcherFromRequest(wRes.data);
       setEditedQty({});
       setInventory(invRes.data || []);
       const savedMode = wRes.data.pick_route_saved
@@ -368,12 +392,75 @@ function Manage() {
     ]);
     setExpandedData(wRes.data);
     setInventory(invRes.data || []);
+    applyDispatcherFromRequest(wRes.data);
     const savedMode = wRes.data.pick_route_saved
       ? (wRes.data.pick_route_mode || 'nearest')
       : 'nearest';
     setPickRouteTab(savedMode);
     setEditedQty({});
     fetchRequests();
+  };
+
+  const handleSearchAddItem = async () => {
+    const { fish_name, location, stack_no } = addItemSearch;
+    if (!fish_name.trim() && !location.trim() && !stack_no.trim()) {
+      toast.error('Enter at least one search criterion');
+      return;
+    }
+    setAddItemLoading(true);
+    try {
+      const params = { merge_import_shipments: 1 };
+      if (fish_name.trim()) params.fish_name = fish_name.trim();
+      if (location.trim()) params.location = location.trim();
+      const res = await getInventory(params);
+      let results = res.data || [];
+      if (stack_no.trim()) {
+        const sn = stack_no.trim().toLowerCase();
+        results = results.filter(r => String(r.stack_no || '').toLowerCase().includes(sn));
+      }
+      if (location.trim()) {
+        const loc = location.trim().toUpperCase();
+        results = results.filter(r => String(r.line_place || '').toUpperCase().includes(loc));
+      }
+      results = results.filter(r => Number(r.hand_on_balance_mc || 0) > 0);
+      setAddItemResults(results);
+      setAddItemQty({});
+      if (results.length === 0) toast.info('No matching stock found');
+    } catch {
+      toast.error('Failed to search inventory');
+    } finally {
+      setAddItemLoading(false);
+    }
+  };
+
+  const addItemRowKey = (r) => r._imp_item_id ? `imp_${r._imp_item_id}` : `${r.lot_id}_${r.location_id}`;
+
+  const handleAddItemToRequest = async (invItem) => {
+    const rk = addItemRowKey(invItem);
+    const qty = Number(addItemQty[rk] || 0);
+    if (qty <= 0) {
+      toast.error('Enter a quantity > 0');
+      return;
+    }
+    if (qty > Number(invItem.hand_on_balance_mc || 0)) {
+      toast.error(`Maximum available is ${invItem.hand_on_balance_mc} MC`);
+      return;
+    }
+    setAddingItem(rk);
+    try {
+      await addWithdrawalItem(expandedId, {
+        lot_id: invItem.lot_id,
+        location_id: invItem.location_id,
+        quantity_mc: qty,
+      });
+      toast.success('Item added to withdrawal');
+      await reloadExpanded(expandedId);
+      setAddItemResults(prev => prev.filter(r => addItemRowKey(r) !== rk));
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to add item');
+    } finally {
+      setAddingItem(null);
+    }
   };
 
   const handleSavePickRoute = async (requestId) => {
@@ -427,6 +514,14 @@ function Manage() {
       return;
     }
 
+    if (req.status === 'READY') {
+      const dispatcher = resolveDispatcherForAdvance(req, expandedData);
+      if (!dispatcher) {
+        toast.error('Please enter Dispatcher name before finishing');
+        return;
+      }
+    }
+
     // If PENDING and quantities were edited, save first
     if (req.status === 'PENDING' && hasQtyChanges) {
       if (!window.confirm('You have unsaved quantity changes. Save them and then advance?')) return;
@@ -442,13 +537,18 @@ function Manage() {
     setProcessing(req.id);
     try {
       persistManagerName(name);
-      await updateWithdrawalStatus(req.id, { status: config.next, managed_by: name });
+      const payload = { status: config.next, managed_by: name };
+      if (req.status === 'READY') {
+        payload.dispatcher = resolveDispatcherForAdvance(req, expandedData);
+      }
+      await updateWithdrawalStatus(req.id, payload);
       toast.success(`Status updated to ${STATUS_CONFIG[config.next].label}`);
       fetchRequests();
       if (expandedId === req.id) {
         const res = await getWithdrawal(req.id);
         setExpandedData(res.data);
         applyManagerNameFromRequest(res.data);
+        applyDispatcherFromRequest(res.data);
         setEditedQty({});
       }
     } catch (err) {
@@ -741,7 +841,7 @@ function Manage() {
                           <tbody>
                             {(() => {
                               let rowNum = 0;
-                              const isPending = req.status === 'PENDING';
+                              const isEditable = req.status === 'PENDING' || req.status === 'TAKING_OUT';
                               return itemGroups.flatMap((group) => {
                                 const multiLine = group.lines.length > 1;
                                 const groupActualTotal = group.lines.reduce(
@@ -752,7 +852,7 @@ function Manage() {
                                   (s, item) => s + currentItemQty(item, editedQty) * Number(item.bulk_weight_kg),
                                   0
                                 );
-                                const groupHasLowStock = isPending && group.lines.some((item) => {
+                                const groupHasLowStock = isEditable && group.lines.some((item) => {
                                   const balance = Number(item.hand_on_balance || 0);
                                   const requestedMc = Number(item.requested_mc || item.quantity_mc);
                                   return balance < requestedMc && editedQty[lineQtyKey(item)] === undefined;
@@ -801,7 +901,7 @@ function Manage() {
                                     rows.push(
                                       <tr
                                         key={item.id}
-                                        className={`mg-group-detail-row ${isPending && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) ? 'mg-row-warn' : ''}`}
+                                        className={`mg-group-detail-row ${isEditable && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) ? 'mg-row-warn' : ''}`}
                                       >
                                         <td>{rowNum}</td>
                                         <td colSpan={2} className="mg-group-detail-spacer" aria-hidden="true" />
@@ -819,7 +919,7 @@ function Manage() {
                                           <span className="mg-requested-val">{Number(item.requested_mc || item.quantity_mc)}</span>
                                         </td>
                                         <td className="num-cell">
-                                          {isPending ? (
+                                          {isEditable ? (
                                             <div className="mg-qty-edit">
                                               <input
                                                 type="number"
@@ -864,7 +964,7 @@ function Manage() {
                                           {(currentItemQty(item, editedQty) * Number(item.bulk_weight_kg)).toFixed(0)}
                                         </td>
                                         <td>
-                                          {isPending && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) && editedQty[lineQtyKey(item)] === undefined ? (
+                                          {isEditable && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) && editedQty[lineQtyKey(item)] === undefined ? (
                                             <span className="mg-stock-warn">Low Stock</span>
                                           ) : (
                                             <span className="mg-stock-ok"><FiCheck size={12} /> OK</span>
@@ -878,7 +978,7 @@ function Manage() {
                                         key={item.id}
                                         item={item}
                                         rowNum={rowNum}
-                                        isPending={isPending}
+                                        isEditable={isEditable}
                                         editedQty={editedQty}
                                         setEditedQty={setEditedQty}
                                       />
@@ -897,40 +997,172 @@ function Manage() {
                         )}
                       </div>
 
+                      {/* Superadmin: Add item during TAKING_OUT */}
+                      {isSuperadmin && req.status === 'TAKING_OUT' && (
+                        <div className="mg-add-item-section">
+                          <button
+                            type="button"
+                            className="btn btn-outline btn-sm mg-add-item-toggle"
+                            onClick={() => { setShowAddItem(v => !v); setAddItemResults([]); setAddItemSearch({ fish_name: '', location: '', stack_no: '' }); setAddItemQty({}); }}
+                          >
+                            <FiPlus /> {showAddItem ? 'Close Add Item' : 'Add Item (Superadmin)'}
+                          </button>
+                          {showAddItem && (
+                            <div className="mg-add-item-panel">
+                              <div className="mg-add-item-filters">
+                                <div className="mg-add-item-field">
+                                  <label>Fish Name</label>
+                                  <input
+                                    type="text"
+                                    className="form-control"
+                                    placeholder="Search fish name..."
+                                    value={addItemSearch.fish_name}
+                                    onChange={e => setAddItemSearch(s => ({ ...s, fish_name: e.target.value }))}
+                                    onKeyDown={e => e.key === 'Enter' && handleSearchAddItem()}
+                                  />
+                                </div>
+                                <div className="mg-add-item-field">
+                                  <label>Location</label>
+                                  <input
+                                    type="text"
+                                    className="form-control"
+                                    placeholder="e.g. H01R-1"
+                                    value={addItemSearch.location}
+                                    onChange={e => setAddItemSearch(s => ({ ...s, location: e.target.value }))}
+                                    onKeyDown={e => e.key === 'Enter' && handleSearchAddItem()}
+                                  />
+                                </div>
+                                <div className="mg-add-item-field">
+                                  <label>Stack No</label>
+                                  <input
+                                    type="text"
+                                    className="form-control"
+                                    placeholder="e.g. 111"
+                                    value={addItemSearch.stack_no}
+                                    onChange={e => setAddItemSearch(s => ({ ...s, stack_no: e.target.value }))}
+                                    onKeyDown={e => e.key === 'Enter' && handleSearchAddItem()}
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn btn-primary btn-sm"
+                                  onClick={handleSearchAddItem}
+                                  disabled={addItemLoading}
+                                >
+                                  <FiSearch /> {addItemLoading ? 'Searching...' : 'Search'}
+                                </button>
+                              </div>
+                              {addItemResults.length > 0 && (
+                                <table className="table mg-add-item-table">
+                                  <thead>
+                                    <tr>
+                                      <th>Fish Name</th>
+                                      <th>Size</th>
+                                      <th>Location</th>
+                                      <th>Stack No</th>
+                                      <th>Lot</th>
+                                      <th>Balance (MC)</th>
+                                      <th>Qty (MC)</th>
+                                      <th>Action</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {addItemResults.map(r => {
+                                      const rk = addItemRowKey(r);
+                                      return (
+                                        <tr key={rk}>
+                                          <td><strong>{r.fish_name}</strong></td>
+                                          <td>{r.size}</td>
+                                          <td>{r.line_place}</td>
+                                          <td>{r.stack_no || '—'}</td>
+                                          <td>{r.lot_no || '—'}</td>
+                                          <td className="num-cell">{r.hand_on_balance_mc}</td>
+                                          <td className="num-cell" style={{ width: 100 }}>
+                                            <input
+                                              type="number"
+                                              className="mg-qty-input"
+                                              min={1}
+                                              max={Number(r.hand_on_balance_mc || 0)}
+                                              value={addItemQty[rk] || ''}
+                                              onChange={e => setAddItemQty(prev => ({ ...prev, [rk]: e.target.value }))}
+                                            />
+                                          </td>
+                                          <td>
+                                            <button
+                                              type="button"
+                                              className="btn btn-success btn-sm"
+                                              disabled={addingItem === rk}
+                                              onClick={() => handleAddItemToRequest(r)}
+                                            >
+                                              {addingItem === rk ? 'Adding...' : <><FiPlus /> Add</>}
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {canAdvance && (() => {
                         const displayName = resolveManagerNameForAdvance(req, expandedData);
                         const nameLocked = req.status !== 'PENDING' && Boolean(displayName);
                         return (
-                          <div className="mg-manager-field mg-card-manager-field">
-                            <label>Manager / Preparer Name</label>
-                            {nameLocked ? (
-                              <>
-                                <div className="mg-manager-readonly" title="Set at Receive Request">
-                                  {displayName}
-                                </div>
-                                <p className="mg-manager-hint">
-                                  Name saved from Receive Request — used for <strong>{config.nextLabel}</strong>
-                                </p>
-                              </>
-                            ) : (
-                              <>
+                          <>
+                            <div className="mg-manager-field mg-card-manager-field">
+                              <label>Manager / Preparer Name</label>
+                              {nameLocked ? (
+                                <>
+                                  <div className="mg-manager-readonly" title="Set at Receive Request">
+                                    {displayName}
+                                  </div>
+                                  <p className="mg-manager-hint">
+                                    Shown as <strong>Approver</strong> on print form
+                                    {req.status === 'PENDING' ? (
+                                      <> — used for <strong>{config.nextLabel}</strong></>
+                                    ) : null}
+                                  </p>
+                                </>
+                              ) : (
+                                <>
+                                  <input
+                                    type="text"
+                                    className="form-control"
+                                    placeholder="Enter your name once — saved for later steps"
+                                    value={managerName}
+                                    onChange={handleManagerNameChange}
+                                    onBlur={handleManagerNameBlur}
+                                    autoComplete="name"
+                                  />
+                                  {managerNameSaved && managerName.trim() && (
+                                    <p className="mg-manager-hint">
+                                      Saved — shown as <strong>Approver</strong> on print form
+                                    </p>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                            {req.status === 'READY' && (
+                              <div className="mg-manager-field mg-card-manager-field mg-dispatcher-field">
+                                <label>Dispatcher Name</label>
                                 <input
                                   type="text"
                                   className="form-control"
-                                  placeholder="Enter your name once — saved for later steps"
-                                  value={managerName}
-                                  onChange={handleManagerNameChange}
-                                  onBlur={handleManagerNameBlur}
+                                  placeholder="Enter dispatcher name for print form"
+                                  value={dispatcherName}
+                                  onChange={(e) => setDispatcherName(e.target.value)}
                                   autoComplete="name"
                                 />
-                                {managerNameSaved && managerName.trim() && (
-                                  <p className="mg-manager-hint">
-                                    Saved — used when you click <strong>{config.nextLabel}</strong>
-                                  </p>
-                                )}
-                              </>
+                                <p className="mg-manager-hint">
+                                  Required before <strong>{config.nextLabel}</strong> — shown as <strong>Dispatcher</strong> on print form
+                                </p>
+                              </div>
                             )}
-                          </div>
+                          </>
                         );
                       })()}
 
@@ -942,7 +1174,7 @@ function Manage() {
                         >
                           <FiPrinter /> Print Form
                         </button>
-                        {req.status === 'PENDING' && hasQtyChanges && (
+                        {(req.status === 'PENDING' || req.status === 'TAKING_OUT') && hasQtyChanges && (
                           <button
                             className="btn btn-warning"
                             onClick={() => handleSaveQty(req.id)}
