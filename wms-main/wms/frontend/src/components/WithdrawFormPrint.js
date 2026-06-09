@@ -64,6 +64,10 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
     : '';
 
   const totalRequestMC = items.reduce((s, it) => s + Number(it.requested_mc || it.quantity_mc), 0);
+  const totalRequestKG = items.reduce(
+    (s, it) => s + (Number(it.requested_mc || it.quantity_mc) * Number(it.bulk_weight_kg)),
+    0
+  );
   const totalActualMC = items.reduce((s, it) => s + Number(it.quantity_mc), 0);
   const totalNetKG = items.reduce((s, it) => s + (Number(it.quantity_mc) * Number(it.bulk_weight_kg)), 0);
 
@@ -173,7 +177,7 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
             <tr className="wf-total-row">
               <td colSpan="4" className="wf-right wf-bold">TOTAL</td>
               <td className="wf-center wf-bold">{totalRequestMC}</td>
-              <td></td>
+              <td className="wf-center wf-bold">{totalRequestKG.toFixed(1)}</td>
               <td className="wf-center wf-bold">{data.status !== 'PENDING' ? totalActualMC : ''}</td>
               <td className="wf-center wf-bold">{data.status !== 'PENDING' ? totalNetKG.toFixed(1) : ''}</td>
               <td></td>

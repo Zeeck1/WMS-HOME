@@ -22,6 +22,16 @@ import {
   dateToYYYYMMDDInBangkok,
 } from '../utils/bangkokTime';
 
+function BilingualLabel({ en, th }) {
+  return (
+    <label className="cm-bilingual-label wd-bilingual-label">
+      <span className="cm-label-en">{en}</span>
+      <span className="cm-label-slash"> / </span>
+      <span className="cm-label-th">{th}</span>
+    </label>
+  );
+}
+
 /** Extra ref text for LINE: invoice (import), order no (extra), BULK + lot (bulk). */
 function withdrawLineRefSuffix(r) {
   const st = String(r._stock_type || 'BULK').toUpperCase();
@@ -776,7 +786,7 @@ function Withdraw() {
                           </button>
                         </div>
                         <div className="wd-field wd-cart-item-process">
-                          <label>Production Process</label>
+                          <BilingualLabel en="Production Process" th="ขั้นตอนการผลิต" />
                           <input
                             type="text"
                             className="form-control"
@@ -793,7 +803,7 @@ function Withdraw() {
                     <div className="wd-cart-fields">
                       <div className="wd-field-row">
                         <div className="wd-field">
-                          <label>Withdraw Date</label>
+                          <BilingualLabel en="Withdraw Date" th="วันที่เบิก" />
                           <input
                             type="date"
                             className="form-control"
@@ -802,7 +812,7 @@ function Withdraw() {
                           />
                         </div>
                         <div className="wd-field">
-                          <label>Request Time</label>
+                          <BilingualLabel en="Request Time" th="เวลาที่ขอ" />
                           <input
                             type="time"
                             className="form-control"
@@ -812,7 +822,7 @@ function Withdraw() {
                         </div>
                       </div>
                       <div className="wd-field">
-                        <label>Requester Name</label>
+                        <BilingualLabel en="Requester Name" th="ชื่อผู้ขอ" />
                         <input
                           type="text"
                           className="form-control"
@@ -822,7 +832,7 @@ function Withdraw() {
                         />
                       </div>
                       <div className="wd-field">
-                        <label>Remark (optional)</label>
+                        <BilingualLabel en="Remark (optional)" th="หมายเหตุ (ระบุหรือไม่ก็ได้)" />
                         <textarea
                           className="form-control"
                           placeholder="Notes / Remark..."

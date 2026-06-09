@@ -4807,7 +4807,7 @@ body {
 .wf-col-product { width: auto; min-width: 160px; }
 .wf-col-size { width: 60px; }
 .wf-col-req-pkg { width: 65px; }
-.wf-col-req-time { width: 55px; }
+.wf-col-req-time { width: 68px; }
 .wf-col-act-pkg { width: 65px; }
 .wf-col-weight { width: 65px; }
 .wf-col-timeout { width: 55px; }
@@ -5231,6 +5231,15 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: 3px;
+}
+
+.wd-field .wd-bilingual-label {
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+  line-height: 1.35;
 }
 
 .wd-field .form-control {

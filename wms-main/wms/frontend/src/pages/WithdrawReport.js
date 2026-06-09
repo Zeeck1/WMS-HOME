@@ -78,9 +78,14 @@ function WithdrawReport() {
 
       ]);
 
-      setData(wRes.data);
-
+      const withdrawal = wRes.data;
+      setData(withdrawal);
       setInventory(invRes.data || []);
+      if (withdrawal.pick_route_saved && withdrawal.pick_route_mode === 'fifo') {
+        setSortMode('cs_in_date');
+      } else if (withdrawal.pick_route_saved) {
+        setSortMode('nearest');
+      }
 
     } catch (err) {
 

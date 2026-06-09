@@ -143,21 +143,31 @@ function inventoryBalanceForLine(inventory, line) {
   return inv != null ? Number(inv.hand_on_balance_mc) : Number(line.hand_on_balance ?? 0);
 }
 
+/** Overlay user-edited actual MC onto request lines before pick-route allocation. */
+export function applyEditedQtyToWithdrawList(withdrawItems, editedQtyByKey = {}) {
+  return (withdrawItems || []).map((wi) => {
+    const key = withdrawDisplayLineKey(wi);
+    const qty = editedQtyByKey[key] !== undefined ? Number(editedQtyByKey[key]) : actualMc(wi);
+    return { ...wi, quantity_mc: qty };
+  });
+}
+
 /**
  * Manage / report display lines for current pick-route tab.
  * @param {Record<string, number>} [editedQtyByKey] — keyed by withdrawDisplayLineKey
  */
 export function getManageDisplayItems(withdrawItems, inventory, sortMode, editedQtyByKey = {}, options = {}) {
   const { useSavedLines = false } = options;
+  const itemsForAlloc = applyEditedQtyToWithdrawList(withdrawItems, editedQtyByKey);
   let lines;
   if (useSavedLines) {
-    lines = sortWithdrawItems([...(withdrawItems || [])], sortMode);
+    lines = sortWithdrawItems([...itemsForAlloc], sortMode);
   } else if (sortMode === 'cs_in_date' && inventory?.length) {
-    lines = buildOldestLotReportFromStockSummary(withdrawItems, inventory);
+    lines = buildOldestLotReportFromStockSummary(itemsForAlloc, inventory);
   } else if (inventory?.length) {
-    lines = buildNearestLineReportFromStockSummary(withdrawItems, inventory);
+    lines = buildNearestLineReportFromStockSummary(itemsForAlloc, inventory);
   } else {
-    lines = sortWithdrawItems([...(withdrawItems || [])], 'nearest');
+    lines = sortWithdrawItems([...itemsForAlloc], 'nearest');
   }
   return lines.map((line) => {
     const key = withdrawDisplayLineKey(line);

@@ -103,7 +103,7 @@ function ManageWithdrawItemRow({ item, rowNum, isEditable, editedQty, setEditedQ
   const currentQty = currentItemQty(item, editedQty);
   const isInsufficient = balance < requestedMc;
   const qtyKey = lineQtyKey(item);
-  const isEdited = editedQty[qtyKey] !== undefined && editedQty[qtyKey] !== item.quantity_mc;
+  const isEdited = editedQty[qtyKey] !== undefined;
   const weightKg = currentQty * Number(item.bulk_weight_kg);
   const actualDiffers = currentQty !== requestedMc;
 
@@ -323,25 +323,39 @@ function Manage() {
   const pickRouteDirty = pickRouteTab !== savedPickMode;
   const canUndoPickRoute = Boolean(expandedData?.pick_route_saved);
 
+  const useSavedPickLines = !pickRouteDirty && expandedData?.pick_route_saved;
+
   const displayItems = useMemo(() => {
     if (!expandedData?.items) return [];
-    const useSaved = !pickRouteDirty && expandedData.pick_route_saved;
-    if (useSaved) {
-      return getManageDisplayItems(expandedData.items, inventory, pickRouteSortMode, editedQty);
-    }
-    return getManageDisplayItems(expandedData.items, inventory, pickRouteSortMode, editedQty);
-  }, [expandedData, inventory, pickRouteSortMode, pickRouteDirty, editedQty]);
+    return getManageDisplayItems(expandedData.items, inventory, pickRouteSortMode, editedQty, {
+      useSavedLines: useSavedPickLines,
+    });
+  }, [expandedData, inventory, pickRouteSortMode, useSavedPickLines, editedQty]);
+
+  const baselineQtyByKey = useMemo(() => {
+    if (!expandedData?.items) return {};
+    const baseline = getManageDisplayItems(expandedData.items, inventory, pickRouteSortMode, {}, {
+      useSavedLines: useSavedPickLines,
+    });
+    const map = {};
+    baseline.forEach((line) => {
+      map[lineQtyKey(line)] = Number(line.quantity_mc);
+    });
+    return map;
+  }, [expandedData, inventory, pickRouteSortMode, useSavedPickLines]);
 
   const itemGroups = useMemo(
     () => groupWithdrawItems(displayItems, pickRouteSortMode),
     [displayItems, pickRouteSortMode]
   );
 
-  const hasQtyChanges = displayItems.some((item) => {
-    const key = lineQtyKey(item);
-    const edited = editedQty[key];
-    return edited !== undefined && edited !== Number(item.quantity_mc);
-  });
+  const hasQtyChanges = useMemo(
+    () => Object.entries(editedQty).some(([key, val]) => {
+      const baseline = baselineQtyByKey[key];
+      return baseline !== undefined && Number(val) !== baseline;
+    }),
+    [editedQty, baselineQtyByKey]
+  );
 
   const handleSaveQty = async (requestId) => {
     if (!hasQtyChanges) return;
@@ -463,6 +477,22 @@ function Manage() {
     }
   };
 
+  const applyCurrentPickRoute = async (requestId, mode = pickRouteTab, lines = null) => {
+    let payloadLines = lines;
+    if (!payloadLines) {
+      const [wRes, invRes] = await Promise.all([
+        getWithdrawal(requestId),
+        getInventory({ merge_import_shipments: 1 }),
+      ]);
+      const sortMode = mode === 'fifo' ? 'cs_in_date' : 'nearest';
+      payloadLines = getManageDisplayItems(wRes.data.items, invRes.data || [], sortMode, {});
+    }
+    await saveWithdrawalPickRoute(requestId, {
+      mode,
+      items: linesToPickRoutePayload(payloadLines),
+    });
+  };
+
   const handleSavePickRoute = async (requestId) => {
     if (!pickRouteDirty && expandedData?.pick_route_saved) {
       toast.info('Pick route is already saved for this tab');
@@ -522,12 +552,6 @@ function Manage() {
       }
     }
 
-    // If PENDING and quantities were edited, save first
-    if (req.status === 'PENDING' && hasQtyChanges) {
-      if (!window.confirm('You have unsaved quantity changes. Save them and then advance?')) return;
-      await handleSaveQty(req.id);
-    }
-
     const confirmMsg = config.next === 'FINISHED'
       ? `This will perform Stock OUT for all items. Continue?`
       : `Advance to "${STATUS_CONFIG[config.next].label}"?`;
@@ -536,6 +560,19 @@ function Manage() {
 
     setProcessing(req.id);
     try {
+      if (req.status === 'PENDING' && config.next === 'TAKING_OUT') {
+        const routeLines = getManageDisplayItems(
+          expandedData.items,
+          inventory,
+          pickRouteSortMode,
+          editedQty
+        );
+        if (hasQtyChanges) {
+          await handleSaveQty(req.id);
+        }
+        await applyCurrentPickRoute(req.id, pickRouteTab, routeLines);
+      }
+
       persistManagerName(name);
       const payload = { status: config.next, managed_by: name };
       if (req.status === 'READY') {
@@ -813,7 +850,8 @@ function Manage() {
                         </div>
                         {pickRouteDirty && req.status === 'PENDING' && (
                           <p className="mg-pick-route-hint">
-                            Preview — click Save to apply {pickRouteTab === 'fifo' ? 'FIFO (oldest stock from Stock Summary)' : 'nearest line'} to this request.
+                            Preview — click Save to apply early, or choose a tab and click <strong>Start Taking Out</strong> to apply{' '}
+                            {pickRouteTab === 'fifo' ? 'FIFO (oldest stock from Stock Summary)' : 'nearest line'} using your edited carton amounts.
                             {expandedData.pick_route_saved ? ' Undo restores the allocation before the first save.' : ''}
                           </p>
                         )}
@@ -934,7 +972,7 @@ function Manage() {
                                                 onChange={(e) => {
                                                   const balance = Number(item.hand_on_balance || 0);
                                                   const val = Math.max(0, Math.min(balance, Number(e.target.value) || 0));
-                                                  setEditedQty((prev) => ({ ...prev, [item.id]: val }));
+                                                  setEditedQty((prev) => ({ ...prev, [lineQtyKey(item)]: val }));
                                                 }}
                                               />
                                               {Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) && editedQty[lineQtyKey(item)] === undefined && (
