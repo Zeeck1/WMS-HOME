@@ -73,6 +73,7 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
 
   const minRows = 10;
   const emptyRows = Math.max(0, minRows - items.length);
+  const showActual = data.status === 'READY' || data.status === 'FINISHED';
 
   return (
     <div className="wf-page" ref={ref}>
@@ -142,7 +143,6 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
               const originDisplay = st === 'CONTAINER_EXTRA' ? (item.order_code || 'EXTRA')
                 : st === 'IMPORT' ? (item.order_code || 'IMPORT')
                 : 'SCK';
-              const showActual = data.status !== 'PENDING';
               return (
                 <tr key={item.id}>
                   <td className="wf-center">{i + 1}</td>
@@ -178,8 +178,8 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
               <td colSpan="4" className="wf-right wf-bold">TOTAL</td>
               <td className="wf-center wf-bold">{totalRequestMC}</td>
               <td className="wf-center wf-bold">{totalRequestKG.toFixed(1)}</td>
-              <td className="wf-center wf-bold">{data.status !== 'PENDING' ? totalActualMC : ''}</td>
-              <td className="wf-center wf-bold">{data.status !== 'PENDING' ? totalNetKG.toFixed(1) : ''}</td>
+              <td className="wf-center wf-bold">{showActual ? totalActualMC : ''}</td>
+              <td className="wf-center wf-bold">{showActual ? totalNetKG.toFixed(1) : ''}</td>
               <td></td>
               <td></td>
               <td></td>
