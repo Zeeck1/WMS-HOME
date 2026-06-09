@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   FiShoppingCart, FiPlus, FiTrash2, FiSend, FiSearch,
-  FiPackage, FiCheck, FiChevronRight, FiClock, FiCheckCircle, FiXCircle, FiRefreshCw, FiBox, FiAnchor, FiArrowLeft
+  FiPackage, FiCheck, FiChevronRight, FiClock, FiCheckCircle, FiXCircle, FiRefreshCw, FiBox, FiAnchor, FiArrowLeft, FiPrinter, FiX
 } from 'react-icons/fi';
 import { TbForklift } from 'react-icons/tb';
 import { toast } from 'react-toastify';
@@ -93,23 +93,39 @@ const STATUS_CONFIG = {
 
 const STATUS_ORDER = ['PENDING', 'TAKING_OUT', 'READY', 'FINISHED'];
 
+function withdrawFormNavState(req, { historySearch, statusFilter, dateFilter } = {}) {
+  return {
+    from: 'my-requests',
+    department: req.department,
+    historySearch: historySearch?.trim() || '',
+    statusFilter: statusFilter && statusFilter !== 'ALL' ? statusFilter : 'ALL',
+    dateFilter: dateFilter || '',
+  };
+}
+
 function Withdraw() {
   const navigate = useNavigate();
-  const [step, setStep] = useState('dept');
-  const [department, setDepartment] = useState(null);
+  const location = useLocation();
+  const returnFromForm = location.state?.showHistory && location.state?.department
+    ? location.state
+    : null;
+
+  const [step, setStep] = useState(returnFromForm ? 'select' : 'dept');
+  const [department, setDepartment] = useState(returnFromForm?.department ?? null);
   const [inventory, setInventory] = useState([]);
   const [cart, setCart] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [myRequests, setMyRequests] = useState([]);
-  const [showHistory, setShowHistory] = useState(false);
+  const [showHistory, setShowHistory] = useState(Boolean(returnFromForm));
   const [notes, setNotes] = useState('');
   const [requesterName, setRequesterName] = useState('');
   const [withdrawDate, setWithdrawDate] = useState(bangkokYYYYMMDD());
   const [requestTime, setRequestTime] = useState(bangkokHHMM());
-  const [statusFilter, setStatusFilter] = useState('ALL');
-  const [dateFilter, setDateFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState(returnFromForm?.statusFilter || 'ALL');
+  const [dateFilter, setDateFilter] = useState(returnFromForm?.dateFilter || '');
+  const [historySearch, setHistorySearch] = useState(returnFromForm?.historySearch || '');
   const [expandedRequest, setExpandedRequest] = useState(null);
   const [requestDetails, setRequestDetails] = useState(null);
   const [stockTypeTab, setStockTypeTab] = useState(null);
@@ -120,7 +136,7 @@ function Withdraw() {
       fetchMyRequests();
     }
     // eslint-disable-next-line
-  }, [department, statusFilter, dateFilter, stockTypeTab]);
+  }, [department, statusFilter, dateFilter, historySearch, stockTypeTab]);
 
   const fetchInventory = async () => {
     setLoading(true);
@@ -152,6 +168,7 @@ function Withdraw() {
       const params = { department };
       if (statusFilter !== 'ALL') params.status = statusFilter;
       if (dateFilter) params.date = dateFilter;
+      if (historySearch.trim()) params.search = historySearch.trim();
       const res = await getWithdrawals(params);
       setMyRequests(res.data);
       setExpandedRequest(null);
@@ -513,6 +530,36 @@ function Withdraw() {
               );
             })()}
 
+            {/* Search — product name, request no, lot, location, etc. */}
+            <div className="wd-orders-search-bar">
+              <div className="wd-orders-search-input-wrap">
+                <FiSearch className="wd-orders-search-icon" aria-hidden />
+                <input
+                  type="text"
+                  className="form-control wd-orders-search-input"
+                  placeholder="Search product name, request no, lot, location, invoice..."
+                  value={historySearch}
+                  onChange={e => setHistorySearch(e.target.value)}
+                />
+                {historySearch && (
+                  <button
+                    type="button"
+                    className="wd-orders-search-clear"
+                    onClick={() => setHistorySearch('')}
+                    title="Clear search"
+                    aria-label="Clear search"
+                  >
+                    <FiX />
+                  </button>
+                )}
+              </div>
+              {historySearch.trim() && (
+                <p className="wd-orders-search-hint">
+                  Click a result to open the <strong>Print Form</strong>
+                </p>
+              )}
+            </div>
+
             {/* Status Tabs */}
             <div className="wd-orders-tabs">
               {['ALL', 'PENDING', 'TAKING_OUT', 'READY', 'FINISHED', 'CANCELLED'].map(s => (
@@ -526,8 +573,57 @@ function Withdraw() {
               ))}
             </div>
 
-            {/* Order Cards — day by day */}
-            {myRequests.length === 0 ? (
+            {/* Search results — click to open print form */}
+            {historySearch.trim() ? (
+              myRequests.length === 0 ? (
+                <div className="wd-orders-empty">
+                  <div className="wd-orders-empty-icon">🔍</div>
+                  <h3>No matching requests</h3>
+                  <p>Try another product name, request no, lot, or location.</p>
+                </div>
+              ) : (
+                <div className="wd-orders-search-results">
+                  <p className="wd-orders-search-count">{myRequests.length} request{myRequests.length !== 1 ? 's' : ''} found</p>
+                  {myRequests.map(req => {
+                    const StatusIcon = STATUS_CONFIG[req.status]?.icon || FiClock;
+                    return (
+                      <button
+                        key={req.id}
+                        type="button"
+                        className="wd-orders-search-hit"
+                        onClick={() => navigate(`/withdraw/${req.id}/form`, {
+                          state: withdrawFormNavState(req, { historySearch, statusFilter, dateFilter }),
+                        })}
+                      >
+                        <div className="wd-orders-search-hit-main">
+                          <div className="wd-orders-search-hit-top">
+                            <span className="wd-order-dept-badge" style={{ background: DEPARTMENTS.find(d => d.id === req.department)?.color }}>
+                              {req.department}
+                            </span>
+                            <span className="wd-order-no">{req.request_no}</span>
+                            <span className="wd-order-status-badge" style={{ background: STATUS_CONFIG[req.status]?.bg, color: STATUS_CONFIG[req.status]?.color }}>
+                              <StatusIcon size={12} />
+                              {STATUS_CONFIG[req.status]?.label}
+                            </span>
+                          </div>
+                          <p className="wd-orders-search-hit-products">
+                            {req.item_summary || `${req.item_count} items`}
+                          </p>
+                          <p className="wd-orders-search-hit-meta">
+                            {req.item_count} items · {Number(req.total_mc)} MC · {Number(req.total_kg || 0).toFixed(0)} KG
+                            {' · '}
+                            {bangkokLocaleDateString(new Date(req.withdraw_date || req.created_at), { dateStyle: 'medium' })}
+                          </p>
+                        </div>
+                        <span className="wd-orders-search-hit-action">
+                          <FiPrinter /> Print Form
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )
+            ) : myRequests.length === 0 ? (
               <div className="wd-orders-empty">
                 <div className="wd-orders-empty-icon">📦</div>
                 <h3>No withdrawal requests</h3>
@@ -638,7 +734,13 @@ function Withdraw() {
                           {requestDetails.notes && (
                             <p className="wd-order-notes"><strong>Notes:</strong> {requestDetails.notes}</p>
                           )}
-                          <button className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/withdraw/${req.id}/form`)}>
+                          <button
+                            className="btn btn-primary btn-sm"
+                            style={{ marginTop: 10 }}
+                            onClick={() => navigate(`/withdraw/${req.id}/form`, {
+                              state: withdrawFormNavState(req, { historySearch, statusFilter, dateFilter }),
+                            })}
+                          >
                             View / Print Form
                           </button>
                         </div>

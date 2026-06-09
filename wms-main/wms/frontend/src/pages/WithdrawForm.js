@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { FiPrinter, FiDownload, FiArrowLeft, FiCamera } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import html2canvas from 'html2canvas';
@@ -10,6 +10,23 @@ import WithdrawFormPrint from '../components/WithdrawFormPrint';
 function WithdrawForm() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const handleBack = () => {
+    if (location.state?.from === 'my-requests' && location.state?.department) {
+      navigate('/withdraw', {
+        state: {
+          showHistory: true,
+          department: location.state.department,
+          historySearch: location.state.historySearch || '',
+          statusFilter: location.state.statusFilter || 'ALL',
+          dateFilter: location.state.dateFilter || '',
+        },
+      });
+      return;
+    }
+    navigate(-1);
+  };
   const formRef = useRef(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -101,7 +118,7 @@ function WithdrawForm() {
       <div className="page-header no-print">
         <h2>Withdraw Form</h2>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button className="btn btn-outline" onClick={() => navigate(-1)}>
+          <button className="btn btn-outline" onClick={handleBack}>
             <FiArrowLeft /> Back
           </button>
           <button className="btn btn-primary" onClick={handlePrint}>

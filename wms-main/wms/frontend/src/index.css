@@ -3591,6 +3591,135 @@ body {
   color: white;
 }
 
+.wd-orders-search-bar {
+  margin-bottom: 18px;
+}
+
+.wd-orders-search-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.wd-orders-search-icon {
+  position: absolute;
+  left: 14px;
+  color: var(--gray-400);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.wd-orders-search-input {
+  width: 100%;
+  padding-left: 42px;
+  padding-right: 40px;
+  font-size: 0.95rem;
+  border-radius: 10px;
+  border: 1px solid var(--gray-200);
+  min-height: 44px;
+}
+
+.wd-orders-search-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.wd-orders-search-clear {
+  position: absolute;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: var(--gray-100);
+  color: var(--gray-600);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.wd-orders-search-clear:hover {
+  background: var(--gray-200);
+}
+
+.wd-orders-search-hint {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  color: var(--gray-500);
+}
+
+.wd-orders-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wd-orders-search-count {
+  margin: 0 0 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--gray-500);
+}
+
+.wd-orders-search-hit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 14px 16px;
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--gray-200);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+}
+
+.wd-orders-search-hit:hover {
+  border-color: var(--primary);
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.12);
+  transform: translateY(-1px);
+}
+
+.wd-orders-search-hit-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.wd-orders-search-hit-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.wd-orders-search-hit-products {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--gray-800);
+}
+
+.wd-orders-search-hit-meta {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--gray-500);
+}
+
+.wd-orders-search-hit-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
 .wd-orders-by-day {
   display: flex;
   flex-direction: column;

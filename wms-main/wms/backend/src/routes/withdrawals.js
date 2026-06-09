@@ -84,7 +84,7 @@ async function getImportItemBalanceMc(conn, importItemId) {
 // ─── GET all withdrawal requests ─────────────────────
 router.get('/', async (req, res) => {
   try {
-    const { department, status, date } = req.query;
+    const { department, status, date, search } = req.query;
     let sql = `
       SELECT wr.*,
         (SELECT COUNT(*) FROM withdraw_items wi WHERE wi.request_id = wr.id) AS item_count,
@@ -101,7 +101,16 @@ router.get('/', async (req, res) => {
          LEFT JOIN lots l ON wi.lot_id = l.id
          LEFT JOIN products p ON l.product_id = p.id
          LEFT JOIN import_items imp ON wi.import_item_id = imp.id
-         WHERE wi.request_id = wr.id) AS total_kg
+         WHERE wi.request_id = wr.id) AS total_kg,
+        (SELECT GROUP_CONCAT(DISTINCT CONCAT(
+            COALESCE(p.fish_name, ii.item_name),
+            IF(COALESCE(p.size, ii.size) IS NOT NULL AND TRIM(COALESCE(p.size, ii.size)) != '', CONCAT(' ', COALESCE(p.size, ii.size)), '')
+          ) ORDER BY COALESCE(p.fish_name, ii.item_name) SEPARATOR ' · ')
+         FROM withdraw_items wi
+         LEFT JOIN lots l ON wi.lot_id = l.id
+         LEFT JOIN products p ON l.product_id = p.id
+         LEFT JOIN import_items ii ON wi.import_item_id = ii.id
+         WHERE wi.request_id = wr.id) AS item_summary
       FROM withdraw_requests wr
       WHERE 1=1
     `;
@@ -109,6 +118,29 @@ router.get('/', async (req, res) => {
     if (department) { sql += ' AND wr.department = ?'; params.push(department); }
     if (status) { sql += ' AND wr.status = ?'; params.push(status); }
     if (date) { sql += ' AND DATE(COALESCE(wr.withdraw_date, wr.created_at)) = ?'; params.push(date); }
+    if (search && String(search).trim()) {
+      const q = `%${String(search).trim()}%`;
+      sql += ` AND (
+        wr.request_no LIKE ?
+        OR wr.notes LIKE ?
+        OR wr.requested_by LIKE ?
+        OR EXISTS (
+          SELECT 1 FROM withdraw_items wi
+          LEFT JOIN lots l ON wi.lot_id = l.id
+          LEFT JOIN products p ON l.product_id = p.id
+          LEFT JOIN locations loc ON wi.location_id = loc.id
+          LEFT JOIN import_items ii ON wi.import_item_id = ii.id
+          LEFT JOIN import_shipments s ON ii.shipment_id = s.id
+          WHERE wi.request_id = wr.id AND (
+            p.fish_name LIKE ? OR p.size LIKE ? OR p.type LIKE ? OR p.order_code LIKE ?
+            OR l.lot_no LIKE ? OR loc.line_place LIKE ?
+            OR ii.item_name LIKE ? OR ii.size LIKE ? OR s.inv_no LIKE ?
+            OR wi.production_process LIKE ?
+          )
+        )
+      )`;
+      params.push(q, q, q, q, q, q, q, q, q, q, q, q, q);
+    }
     sql += ' ORDER BY wr.created_at DESC';
     const [rows] = await pool.query(sql, params);
     res.json(rows);
