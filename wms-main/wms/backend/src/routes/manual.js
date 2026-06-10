@@ -310,7 +310,8 @@ router.delete('/row', async (req, res) => {
 
     const [rem] = await conn.query('SELECT COUNT(*) as c FROM movements WHERE lot_id = ?', [lot_id]);
     if (rem[0].c === 0) {
-      await conn.query('DELETE FROM withdraw_items WHERE lot_id = ?', [lot_id]);
+      const { deleteWithdrawItemsForLotExcludingFinished } = require('../utils/withdrawItemSnapshot');
+      await deleteWithdrawItemsForLotExcludingFinished(conn, lot_id);
       await conn.query('DELETE FROM lots WHERE id = ?', [lot_id]);
     }
 

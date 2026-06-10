@@ -46,6 +46,7 @@ const CE_COLUMNS = [
   { key: 'hand_on_balance_mc', label: 'Balance MC' },
   { key: 'line_place', label: 'Line' },
   { key: 'st_no', label: 'ST NO' },
+  { key: 'stack_no', label: 'Stack No' },
   { key: 'remark', label: 'Remark' }
 ];
 
@@ -161,6 +162,7 @@ function StockTable() {
   // Container Extra: show/hide optional columns (default OFF)
   const [showCElinePlace, setShowCElinePlace] = useState(false);
   const [showCEstNo, setShowCEstNo] = useState(false);
+  const [showCEstackNo, setShowCEstackNo] = useState(false);
   const [showCELotNo, setShowCELotNo] = useState(false);
 
   const bulkTableColumns = useMemo(() => {
@@ -190,14 +192,16 @@ function StockTable() {
       if (col.key === 'lot_no_numeric') return showCELotNo;
       if (col.key === 'line_place') return showCElinePlace;
       if (col.key === 'st_no') return showCEstNo;
+      if (col.key === 'stack_no') return showCEstackNo;
       return true;
     });
-  }, [activeTab, columns, showCELotNo, showCElinePlace, showCEstNo]);
+  }, [activeTab, columns, showCELotNo, showCElinePlace, showCEstNo, showCEstackNo]);
 
   useEffect(() => {
     if (activeTab !== 'CONTAINER_EXTRA') {
       setShowCElinePlace(false);
       setShowCEstNo(false);
+      setShowCEstackNo(false);
       setShowCELotNo(false);
       return;
     }
@@ -205,10 +209,11 @@ function StockTable() {
       const next = { ...prev };
       if (!showCElinePlace) delete next.line_place;
       if (!showCEstNo) delete next.st_no;
+      if (!showCEstackNo) delete next.stack_no;
       if (!showCELotNo) delete next.lot_no_numeric;
       return next;
     });
-  }, [activeTab, showCElinePlace, showCEstNo, showCELotNo]);
+  }, [activeTab, showCElinePlace, showCEstNo, showCEstackNo, showCELotNo]);
 
   useEffect(() => {
     if (activeTab !== 'BULK') return;
@@ -737,7 +742,7 @@ function StockTable() {
           <div className="st-bulk-col-toggles no-print">
             <div className="st-bulk-col-left">
               <span className="st-bulk-col-label">Columns (Container Extra)</span>
-              <span className="st-bulk-col-hint">LINE, ST NO, Lot No — normally OFF</span>
+              <span className="st-bulk-col-hint">LINE, ST NO, Stack No, Lot No — normally OFF</span>
             </div>
             <div className="st-bulk-col-right">
               <button
@@ -753,6 +758,13 @@ function StockTable() {
                 onClick={() => setShowCEstNo(v => !v)}
               >
                 ST NO
+              </button>
+              <button
+                type="button"
+                className={`st-bulk-pill ${showCEstackNo ? 'active' : ''}`}
+                onClick={() => setShowCEstackNo(v => !v)}
+              >
+                Stack No
               </button>
               <button
                 type="button"
@@ -809,8 +821,9 @@ function StockTable() {
                       const isOrder = col.key === 'order_code';
                       const isLine = col.key === 'line_place';
                       const isStNo = col.key === 'st_no';
+                      const isStackNo = col.key === 'stack_no';
                       return (
-                        <td key={col.key} className={isKg || isMC ? 'num-cell' : ''} style={isMC ? { background: '#fef2f2', fontWeight: 700, fontSize: '0.9rem' } : {}}>
+                        <td key={col.key} className={isKg || isMC || isStackNo ? 'num-cell' : ''} style={isMC ? { background: '#fef2f2', fontWeight: 700, fontSize: '0.9rem' } : {}}>
                           {isOrder && isImport && r._imp_shipment_id ? (
                             <button
                               type="button"
@@ -822,6 +835,8 @@ function StockTable() {
                             </button>
                           ) : isOrder || isLine || isStNo ? (
                             <strong>{val ?? '-'}</strong>
+                          ) : isStackNo ? (
+                            val != null && val !== '' ? String(val) : '-'
                           ) : isKg ? (
                             `${Number(val || 0).toFixed(0)} KG`
                           ) : (

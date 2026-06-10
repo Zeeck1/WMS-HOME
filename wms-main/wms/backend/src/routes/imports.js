@@ -213,6 +213,18 @@ router.put('/:id', async (req, res) => {
     // Delete items that were removed (cascade deletes their stock outs)
     for (const eid of existingIds) {
       if (!incomingIds.has(eid)) {
+        const [finishedRefs] = await conn.query(
+          `SELECT 1 FROM withdraw_items wi
+           INNER JOIN withdraw_requests wr ON wr.id = wi.request_id
+           WHERE wi.import_item_id = ? AND wr.status = 'FINISHED' LIMIT 1`,
+          [eid]
+        );
+        if (finishedRefs.length > 0) {
+          await conn.rollback();
+          return res.status(400).json({
+            error: 'Cannot remove import item referenced by a finished withdrawal. Finished withdrawal data is permanent.',
+          });
+        }
         await conn.query('DELETE FROM import_items WHERE id = ?', [eid]);
       }
     }

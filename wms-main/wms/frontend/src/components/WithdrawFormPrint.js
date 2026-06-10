@@ -73,11 +73,12 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
 
   const minRows = 10;
   const emptyRows = Math.max(0, minRows - items.length);
-  const showActual = data.status === 'READY' || data.status === 'FINISHED';
+  const showActualMc = data.status === 'READY' || data.status === 'FINISHED';
+  const showFinalFields = data.status === 'FINISHED';
 
   return (
-    <div className="wf-page" ref={ref}>
-      <div className="wf-form">
+    <div className="wf-page">
+      <div className="wf-form" ref={ref}>
         <div className="wf-header">
           <div className="wf-title-area">
             <h1 className="wf-title-th">ขอเบิกสินค้าออกจากห้องเย็น</h1>
@@ -151,9 +152,9 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
                   <td className="wf-center">{item.size}</td>
                   <td className="wf-center wf-bold">{requestedMc}</td>
                   <td className="wf-center">{requestTimeStr}</td>
-                  <td className="wf-center wf-bold">{showActual ? actualMc : ''}</td>
-                  <td className="wf-center">{showActual ? netKg.toFixed(1) : ''}</td>
-                  <td className="wf-center">{finishedAtStr}</td>
+                  <td className="wf-center wf-bold">{showActualMc ? actualMc : ''}</td>
+                  <td className="wf-center">{showFinalFields ? netKg.toFixed(1) : ''}</td>
+                  <td className="wf-center">{showFinalFields ? finishedAtStr : ''}</td>
                   <td className="wf-center">{item.production_process || ''}</td>
                   <td className="wf-center wf-remark">{i === 0 ? (data.notes || '') : ''}</td>
                 </tr>
@@ -178,8 +179,8 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
               <td colSpan="4" className="wf-right wf-bold">TOTAL</td>
               <td className="wf-center wf-bold">{totalRequestMC}</td>
               <td className="wf-center wf-bold">{totalRequestKG.toFixed(1)}</td>
-              <td className="wf-center wf-bold">{showActual ? totalActualMC : ''}</td>
-              <td className="wf-center wf-bold">{showActual ? totalNetKG.toFixed(1) : ''}</td>
+              <td className="wf-center wf-bold">{showActualMc ? totalActualMC : ''}</td>
+              <td className="wf-center wf-bold">{showFinalFields ? totalNetKG.toFixed(1) : ''}</td>
               <td></td>
               <td></td>
               <td></td>

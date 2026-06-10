@@ -1,13 +1,18 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  FiSettings, FiSearch, FiCheck, FiClock, FiTruck, FiPackage,
-  FiCheckCircle, FiXCircle, FiChevronDown, FiChevronUp, FiRefreshCw, FiPrinter, FiFileText, FiTrash2,
-  FiMapPin, FiCalendar, FiRotateCcw, FiSave, FiPlus
+  FiSettings, FiSearch, FiCheck, FiXCircle, FiChevronDown, FiChevronUp, FiRefreshCw, FiPrinter, FiFileText, FiTrash2,
+  FiMapPin, FiCalendar, FiRotateCcw, FiSave, FiPlus, FiEdit3
 } from 'react-icons/fi';
+import ManageManualAdjust from '../components/ManageManualAdjust';
+import {
+  STATUS_FLOW, STATUS_CONFIG, withdrawDeptBadgeClass,
+  loadWithdrawApproverName, saveWithdrawApproverName,
+} from './manageShared';
 import { toast } from 'react-toastify';
 import {
   getWithdrawals, getWithdrawal, getInventory, updateWithdrawalStatus, updateWithdrawalItems,
+  superadminStockAdjustWithdrawal,
   saveWithdrawalPickRoute, undoWithdrawalPickRoute, cancelWithdrawal, permanentlyDeleteWithdrawal, sendLineNotification,
   addWithdrawalItem
 } from '../services/api';
@@ -26,12 +31,6 @@ import {
   getManageDisplayItems,
   linesToPickRoutePayload,
 } from '../utils/withdrawItemGrouping';
-
-const MANAGER_NAME_STORAGE_KEY = 'wms_manager_preparer_name';
-
-function managerNameStorageKey(userId) {
-  return userId ? `${MANAGER_NAME_STORAGE_KEY}_${userId}` : MANAGER_NAME_STORAGE_KEY;
-}
 
 /** Same labels as withdraw LINE: invoice (import), order no (extra), BULK + lot. */
 function withdrawalItemRefSuffix(item) {
@@ -75,17 +74,6 @@ function formatWithdrawalQtyChangeLineMessage(expandedData, displayItems, edited
   return text;
 }
 
-const STATUS_FLOW = ['PENDING', 'TAKING_OUT', 'READY', 'FINISHED'];
-
-function withdrawDeptBadgeClass(department) {
-  switch (department) {
-    case 'PK': return 'mg-dept-PK';
-    case 'RM': return 'mg-dept-RM';
-    case 'Branch.05 (SM)': return 'mg-dept-B05SM';
-    default: return 'mg-dept-other';
-  }
-}
-
 function lineQtyKey(item) {
   return item._lineKey || withdrawDisplayLineKey(item);
 }
@@ -97,11 +85,11 @@ function currentItemQty(item, editedQty) {
     : Number(item.quantity_mc);
 }
 
-function ManageWithdrawItemRow({ item, rowNum, isEditable, editedQty, setEditedQty }) {
+function ManageWithdrawItemRow({ item, rowNum, isEditable, editedQty, setEditedQty, unlimitedQty = false }) {
   const balance = Number(item.hand_on_balance || 0);
   const requestedMc = Number(item.requested_mc || item.quantity_mc);
   const currentQty = currentItemQty(item, editedQty);
-  const isInsufficient = balance < requestedMc;
+  const isInsufficient = !unlimitedQty && balance < requestedMc;
   const qtyKey = lineQtyKey(item);
   const isEdited = editedQty[qtyKey] !== undefined;
   const weightKg = currentQty * Number(item.bulk_weight_kg);
@@ -127,16 +115,17 @@ function ManageWithdrawItemRow({ item, rowNum, isEditable, editedQty, setEditedQ
           <div className="mg-qty-edit">
             <input
               type="number"
-              className={`mg-qty-input ${isEdited ? 'edited' : ''} ${isInsufficient && editedQty[qtyKey] === undefined ? 'warn' : ''}`}
+              className={`mg-qty-input ${isEdited ? 'edited' : ''} ${isInsufficient && editedQty[qtyKey] === undefined ? 'warn' : ''} ${unlimitedQty ? 'mg-qty-superadmin' : ''}`}
               min={0}
-              max={balance}
+              max={unlimitedQty ? undefined : balance}
               value={currentQty}
               onChange={(e) => {
-                const val = Math.max(0, Math.min(balance, Number(e.target.value) || 0));
+                const raw = Number(e.target.value) || 0;
+                const val = unlimitedQty ? Math.max(0, raw) : Math.max(0, Math.min(balance, raw));
                 setEditedQty((prev) => ({ ...prev, [qtyKey]: val }));
               }}
             />
-            {isInsufficient && editedQty[qtyKey] === undefined && (
+            {isInsufficient && !unlimitedQty && editedQty[qtyKey] === undefined && (
               <button
                 type="button"
                 className="mg-qty-fix-btn"
@@ -156,7 +145,9 @@ function ManageWithdrawItemRow({ item, rowNum, isEditable, editedQty, setEditedQ
       </td>
       <td className="num-cell">{weightKg.toFixed(0)}</td>
       <td>
-        {isInsufficient && isEditable && editedQty[qtyKey] === undefined ? (
+        {unlimitedQty ? (
+          <span className="mg-stock-superadmin" title="Superadmin — no stock cap">SA</span>
+        ) : isInsufficient && isEditable && editedQty[qtyKey] === undefined ? (
           <span className="mg-stock-warn">Low Stock</span>
         ) : (
           <span className="mg-stock-ok">
@@ -168,18 +159,12 @@ function ManageWithdrawItemRow({ item, rowNum, isEditable, editedQty, setEditedQ
   );
 }
 
-const STATUS_CONFIG = {
-  PENDING:     { label: 'Receive Request', icon: <FiClock />,       color: '#f59e0b', bg: '#fffbeb', next: 'TAKING_OUT', nextLabel: 'Start Taking Out' },
-  TAKING_OUT:  { label: 'Taking Out',      icon: <FiTruck />,       color: '#3b82f6', bg: '#eff6ff', next: 'READY',      nextLabel: 'Mark as Ready' },
-  READY:       { label: 'Ready to Take',   icon: <FiPackage />,     color: '#8b5cf6', bg: '#f5f3ff', next: 'FINISHED',   nextLabel: 'Finish Take Out' },
-  FINISHED:    { label: 'Finished',         icon: <FiCheckCircle />, color: '#22c55e', bg: '#f0fdf4', next: null,         nextLabel: null },
-  CANCELLED:   { label: 'Cancelled',        icon: <FiXCircle />,    color: '#ef4444', bg: '#fef2f2', next: null,         nextLabel: null }
-};
-
 function Manage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const isSuperadmin = user?.role === 'superadmin';
+  const [manageTab, setManageTab] = useState('manage'); // manage | manual
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState(null);
@@ -205,27 +190,29 @@ function Manage() {
   const [addItemQty, setAddItemQty] = useState({});
   const [addingItem, setAddingItem] = useState(null);
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(managerNameStorageKey(user?.id));
-      if (saved?.trim()) {
-        setManagerName(saved.trim());
-        setManagerNameSaved(true);
-      }
-    } catch {
-      /* ignore */
+  const syncManagerNameFromStorage = useCallback(() => {
+    const saved = loadWithdrawApproverName(user?.id);
+    if (saved) {
+      setManagerName(saved);
+      setManagerNameSaved(true);
     }
   }, [user?.id]);
+
+  useEffect(() => {
+    syncManagerNameFromStorage();
+  }, [user?.id, syncManagerNameFromStorage]);
+
+  useEffect(() => {
+    if (location.pathname === '/manage') {
+      syncManagerNameFromStorage();
+    }
+  }, [location.pathname, syncManagerNameFromStorage]);
 
   const persistManagerName = useCallback((name) => {
     const trimmed = (name || '').trim();
     if (!trimmed) return;
-    try {
-      localStorage.setItem(managerNameStorageKey(user?.id), trimmed);
-      setManagerNameSaved(true);
-    } catch {
-      /* ignore */
-    }
+    saveWithdrawApproverName(user?.id, trimmed);
+    setManagerNameSaved(true);
   }, [user?.id]);
 
   const handleManagerNameChange = (e) => {
@@ -245,8 +232,16 @@ function Manage() {
       setManagerName(fromReq);
       setManagerNameSaved(true);
       persistManagerName(fromReq);
+      return;
     }
-  }, [persistManagerName]);
+    if (data?.status === 'PENDING') {
+      const saved = loadWithdrawApproverName(user?.id);
+      if (saved) {
+        setManagerName(saved);
+        setManagerNameSaved(true);
+      }
+    }
+  }, [persistManagerName, user?.id]);
 
   const resolveManagerNameForAdvance = useCallback((req, detail) => {
     const fromState = (managerName || '').trim();
@@ -323,7 +318,8 @@ function Manage() {
   const pickRouteDirty = pickRouteTab !== savedPickMode;
   const canUndoPickRoute = Boolean(expandedData?.pick_route_saved);
 
-  const useSavedPickLines = !pickRouteDirty && expandedData?.pick_route_saved;
+  const useSavedPickLines = expandedData?.status === 'FINISHED'
+    || (!pickRouteDirty && expandedData?.pick_route_saved);
 
   const displayItems = useMemo(() => {
     if (!expandedData?.items) return [];
@@ -375,8 +371,13 @@ function Manage() {
 
       if (items.length === 0) return;
       const lineMessage = formatWithdrawalQtyChangeLineMessage(expandedData, displayItems, editedQty);
-      await updateWithdrawalItems(requestId, { items });
-      toast.success('Quantities updated successfully');
+      if (isSuperadmin && expandedData?.status !== 'CANCELLED') {
+        const res = await superadminStockAdjustWithdrawal(requestId, { items });
+        toast.success(res.data?.message || 'Stock amounts updated');
+      } else {
+        await updateWithdrawalItems(requestId, { items });
+        toast.success('Quantities updated successfully');
+      }
 
       if (lineMessage) {
         try {
@@ -552,14 +553,20 @@ function Manage() {
       }
     }
 
+    const isManualNoStock = Boolean(req.manual_adjust || expandedData?.manual_adjust);
     const confirmMsg = config.next === 'FINISHED'
-      ? `This will perform Stock OUT for all items. Continue?`
+      ? (isManualNoStock
+        ? 'This request is manual adjust — finish without deducting stock?'
+        : 'This will perform Stock OUT for all items. Continue?')
       : `Advance to "${STATUS_CONFIG[config.next].label}"?`;
 
     if (!window.confirm(confirmMsg)) return;
 
     setProcessing(req.id);
     try {
+      if (hasQtyChanges) {
+        await handleSaveQty(req.id);
+      }
       if (req.status === 'PENDING' && config.next === 'TAKING_OUT') {
         const routeLines = getManageDisplayItems(
           expandedData.items,
@@ -567,9 +574,6 @@ function Manage() {
           pickRouteSortMode,
           editedQty
         );
-        if (hasQtyChanges) {
-          await handleSaveQty(req.id);
-        }
         await applyCurrentPickRoute(req.id, pickRouteTab, routeLines);
       }
 
@@ -672,25 +676,26 @@ function Manage() {
       </div>
       <div className="page-body">
 
-        {/* Status summary cards */}
-        <div className="mg-status-cards">
-          {STATUS_FLOW.map(s => (
-            <div
-              key={s}
-              className={`mg-status-card ${filterStatus === s ? 'active' : ''}`}
-              style={{ '--sc-color': STATUS_CONFIG[s].color, '--sc-bg': STATUS_CONFIG[s].bg }}
-              onClick={() => setFilterStatus(filterStatus === s ? '' : s)}
+        {isSuperadmin && (
+          <div className="mg-main-tabs">
+            <button
+              type="button"
+              className={`mg-main-tab ${manageTab === 'manage' ? 'mg-main-tab--active' : ''}`}
+              onClick={() => setManageTab('manage')}
             >
-              <div className="mg-sc-icon">{STATUS_CONFIG[s].icon}</div>
-              <div className="mg-sc-info">
-                <div className="mg-sc-count">{counts[s] || 0}</div>
-                <div className="mg-sc-label">{STATUS_CONFIG[s].label}</div>
-              </div>
-            </div>
-          ))}
-        </div>
+              <FiSettings style={{ marginRight: 6 }} /> Manage
+            </button>
+            <button
+              type="button"
+              className={`mg-main-tab ${manageTab === 'manual' ? 'mg-main-tab--active' : ''}`}
+              onClick={() => setManageTab('manual')}
+            >
+              <FiEdit3 style={{ marginRight: 6 }} /> Manual Adjust
+            </button>
+          </div>
+        )}
 
-        {/* Filters */}
+        {/* Filters — shared by Manage + Manual Adjust */}
         <div className="filter-bar" style={{ marginBottom: 16 }}>
           <div style={{ position: 'relative', flex: 1, maxWidth: 300 }}>
             <FiSearch style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--gray-400)' }} />
@@ -708,7 +713,6 @@ function Manage() {
           </select>
         </div>
 
-        {/* Date filter — find by date */}
         <div className="mg-date-bar">
           <label className="mg-date-label">Date:</label>
           <input
@@ -731,6 +735,28 @@ function Manage() {
               );
             })()}
           </div>
+        </div>
+
+        {isSuperadmin && manageTab === 'manual' ? (
+          <ManageManualAdjust requests={filtered} loading={loading} onRefresh={fetchRequests} />
+        ) : (
+        <>
+        {/* Status summary cards */}
+        <div className="mg-status-cards">
+          {STATUS_FLOW.map(s => (
+            <div
+              key={s}
+              className={`mg-status-card ${filterStatus === s ? 'active' : ''}`}
+              style={{ '--sc-color': STATUS_CONFIG[s].color, '--sc-bg': STATUS_CONFIG[s].bg }}
+              onClick={() => setFilterStatus(filterStatus === s ? '' : s)}
+            >
+              <div className="mg-sc-icon">{STATUS_CONFIG[s].icon}</div>
+              <div className="mg-sc-info">
+                <div className="mg-sc-count">{counts[s] || 0}</div>
+                <div className="mg-sc-label">{STATUS_CONFIG[s].label}</div>
+              </div>
+            </div>
+          ))}
         </div>
 
         {/* Request list — day by day */}
@@ -761,6 +787,9 @@ function Manage() {
                       <span className={`mg-dept-badge ${withdrawDeptBadgeClass(req.department)}`}>{req.department}</span>
                       <div className="mg-req-info">
                         <span className="mg-req-no">{req.request_no}</span>
+                        {req.manual_adjust ? (
+                          <span className="mg-manual-badge" title="Manual adjust — no stock deduction"><FiEdit3 /> Manual</span>
+                        ) : null}
                         <span className="mg-req-date">{bangkokLocaleString(new Date(req.created_at))}</span>
                       </div>
                     </div>
@@ -801,8 +830,14 @@ function Manage() {
                   {isExpanded && expandedData && (
                     <div className="mg-req-detail">
                       <div className="mg-detail-items">
+                        {isSuperadmin && req.status !== 'CANCELLED' && (
+                          <p className="mg-superadmin-stock-hint">
+                            <strong>Superadmin:</strong> Actual MC can be adjusted without stock balance limits
+                            {req.status === 'FINISHED' ? ' — saving updates linked stock OUT records' : ''}.
+                          </p>
+                        )}
                         <div className="mg-pick-route-bar">
-                          <h5>Items</h5>
+                        <h5>Items</h5>
                           <div className="mg-pick-route-controls">
                             <div className="wr-sort-switch" role="tablist" aria-label="Pick route">
                               <button
@@ -879,7 +914,9 @@ function Manage() {
                           <tbody>
                             {(() => {
                               let rowNum = 0;
-                              const isEditable = req.status === 'PENDING' || req.status === 'TAKING_OUT';
+                              const isQtyEditable = req.status === 'PENDING' || req.status === 'TAKING_OUT'
+                                || (isSuperadmin && req.status !== 'CANCELLED');
+                              const unlimitedQty = isSuperadmin && req.status !== 'CANCELLED';
                               return itemGroups.flatMap((group) => {
                                 const multiLine = group.lines.length > 1;
                                 const groupActualTotal = group.lines.reduce(
@@ -890,9 +927,9 @@ function Manage() {
                                   (s, item) => s + currentItemQty(item, editedQty) * Number(item.bulk_weight_kg),
                                   0
                                 );
-                                const groupHasLowStock = isEditable && group.lines.some((item) => {
-                                  const balance = Number(item.hand_on_balance || 0);
-                                  const requestedMc = Number(item.requested_mc || item.quantity_mc);
+                                const groupHasLowStock = isQtyEditable && !unlimitedQty && group.lines.some((item) => {
+                              const balance = Number(item.hand_on_balance || 0);
+                              const requestedMc = Number(item.requested_mc || item.quantity_mc);
                                   return balance < requestedMc && editedQty[lineQtyKey(item)] === undefined;
                                 });
                                 const groupActualDiffers = groupActualTotal !== group.totalReqMc;
@@ -939,47 +976,48 @@ function Manage() {
                                     rows.push(
                                       <tr
                                         key={item.id}
-                                        className={`mg-group-detail-row ${isEditable && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) ? 'mg-row-warn' : ''}`}
+                                        className={`mg-group-detail-row ${isQtyEditable && !unlimitedQty && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) ? 'mg-row-warn' : ''}`}
                                       >
                                         <td>{rowNum}</td>
                                         <td colSpan={2} className="mg-group-detail-spacer" aria-hidden="true" />
-                                        <td>{item.line_place}</td>
-                                        <td className="mg-lot-cell">{item.lot_no || item.order_code || '—'}</td>
-                                        <td className="num-cell">
+                                  <td>{item.line_place}</td>
+                                  <td className="mg-lot-cell">{item.lot_no || item.order_code || '—'}</td>
+                                  <td className="num-cell">
                                           <span className={`mg-balance-badge ${
                                             Number(item.hand_on_balance || 0) <= 0 ? 'empty'
                                               : Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) ? 'low' : 'ok'
                                           }`}>
                                             {Number(item.hand_on_balance || 0)}
-                                          </span>
-                                        </td>
-                                        <td className="num-cell">
+                                    </span>
+                                  </td>
+                                  <td className="num-cell">
                                           <span className="mg-requested-val">{Number(item.requested_mc || item.quantity_mc)}</span>
-                                        </td>
-                                        <td className="num-cell">
-                                          {isEditable ? (
-                                            <div className="mg-qty-edit">
-                                              <input
-                                                type="number"
+                                  </td>
+                                  <td className="num-cell">
+                                          {isQtyEditable ? (
+                                      <div className="mg-qty-edit">
+                                        <input
+                                          type="number"
                                                 className={`mg-qty-input ${
                                                   editedQty[lineQtyKey(item)] !== undefined && editedQty[lineQtyKey(item)] !== item.quantity_mc ? 'edited' : ''
                                                 } ${
-                                                  Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) && editedQty[lineQtyKey(item)] === undefined ? 'warn' : ''
-                                                }`}
-                                                min={0}
-                                                max={Number(item.hand_on_balance || 0)}
+                                                  !unlimitedQty && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) && editedQty[lineQtyKey(item)] === undefined ? 'warn' : ''
+                                                } ${unlimitedQty ? 'mg-qty-superadmin' : ''}`}
+                                          min={0}
+                                                max={unlimitedQty ? undefined : Number(item.hand_on_balance || 0)}
                                                 value={currentItemQty(item, editedQty)}
                                                 onChange={(e) => {
                                                   const balance = Number(item.hand_on_balance || 0);
-                                                  const val = Math.max(0, Math.min(balance, Number(e.target.value) || 0));
+                                            const raw = Number(e.target.value) || 0;
+                                            const val = unlimitedQty ? Math.max(0, raw) : Math.max(0, Math.min(balance, raw));
                                                   setEditedQty((prev) => ({ ...prev, [lineQtyKey(item)]: val }));
-                                                }}
-                                              />
-                                              {Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) && editedQty[lineQtyKey(item)] === undefined && (
-                                                <button
+                                          }}
+                                        />
+                                              {!unlimitedQty && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) && editedQty[lineQtyKey(item)] === undefined && (
+                                          <button
                                                   type="button"
-                                                  className="mg-qty-fix-btn"
-                                                  title="Set to max available balance"
+                                            className="mg-qty-fix-btn"
+                                            title="Set to max available balance"
                                                   onClick={() => setEditedQty((prev) => ({
                                                     ...prev,
                                                     [lineQtyKey(item)]: Math.min(
@@ -987,38 +1025,41 @@ function Manage() {
                                                       Number(item.requested_mc || item.quantity_mc)
                                                     ),
                                                   }))}
-                                                >
-                                                  Fix
-                                                </button>
-                                              )}
-                                            </div>
-                                          ) : (
+                                          >
+                                            Fix
+                                          </button>
+                                        )}
+                                      </div>
+                                    ) : (
                                             <span className={currentItemQty(item, editedQty) !== Number(item.requested_mc || item.quantity_mc) ? 'mg-actual-changed' : ''}>
-                                              <strong>{item.quantity_mc}</strong>
-                                            </span>
-                                          )}
-                                        </td>
+                                        <strong>{item.quantity_mc}</strong>
+                                      </span>
+                                    )}
+                                  </td>
                                         <td className="num-cell">
                                           {(currentItemQty(item, editedQty) * Number(item.bulk_weight_kg)).toFixed(0)}
                                         </td>
                                         <td>
-                                          {isEditable && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) && editedQty[lineQtyKey(item)] === undefined ? (
+                                          {unlimitedQty ? (
+                                            <span className="mg-stock-superadmin" title="Superadmin — no stock cap">SA</span>
+                                          ) : isQtyEditable && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) && editedQty[lineQtyKey(item)] === undefined ? (
                                             <span className="mg-stock-warn">Low Stock</span>
                                           ) : (
                                             <span className="mg-stock-ok"><FiCheck size={12} /> OK</span>
-                                          )}
-                                        </td>
-                                      </tr>
-                                    );
+                                    )}
+                                  </td>
+                                </tr>
+                              );
                                   } else {
                                     rows.push(
                                       <ManageWithdrawItemRow
                                         key={item.id}
                                         item={item}
                                         rowNum={rowNum}
-                                        isEditable={isEditable}
+                                        isEditable={isQtyEditable}
                                         editedQty={editedQty}
                                         setEditedQty={setEditedQty}
+                                        unlimitedQty={unlimitedQty}
                                       />
                                     );
                                   }
@@ -1152,7 +1193,7 @@ function Manage() {
                         return (
                           <>
                             <div className="mg-manager-field mg-card-manager-field">
-                              <label>Manager / Preparer Name</label>
+                          <label>Manager / Preparer Name</label>
                               {nameLocked ? (
                                 <>
                                   <div className="mg-manager-readonly" title="Set at Receive Request">
@@ -1167,11 +1208,11 @@ function Manage() {
                                 </>
                               ) : (
                                 <>
-                                  <input
-                                    type="text"
-                                    className="form-control"
+                          <input
+                            type="text"
+                            className="form-control"
                                     placeholder="Enter your name once — saved for later steps"
-                                    value={managerName}
+                            value={managerName}
                                     onChange={handleManagerNameChange}
                                     onBlur={handleManagerNameBlur}
                                     autoComplete="name"
@@ -1198,8 +1239,8 @@ function Manage() {
                                 <p className="mg-manager-hint">
                                   Required before <strong>{config.nextLabel}</strong> — shown as <strong>Dispatcher</strong> on print form
                                 </p>
-                              </div>
-                            )}
+                        </div>
+                      )}
                           </>
                         );
                       })()}
@@ -1212,13 +1253,17 @@ function Manage() {
                         >
                           <FiPrinter /> Print Form
                         </button>
-                        {(req.status === 'PENDING' || req.status === 'TAKING_OUT') && hasQtyChanges && (
+                        {((req.status === 'PENDING' || req.status === 'TAKING_OUT' || (isSuperadmin && req.status !== 'CANCELLED')) && hasQtyChanges) && (
                           <button
                             className="btn btn-warning"
                             onClick={() => handleSaveQty(req.id)}
                             disabled={saving}
                           >
-                            {saving ? 'Saving...' : 'Save Quantity Changes'}
+                            {saving ? 'Saving...' : (
+                              isSuperadmin && (req.status === 'READY' || req.status === 'FINISHED')
+                                ? 'Save Stock Adjust (Superadmin)'
+                                : 'Save Quantity Changes'
+                            )}
                           </button>
                         )}
                         {canAdvance && (
@@ -1271,6 +1316,8 @@ function Manage() {
               </div>
             ))}
           </div>
+        )}
+        </>
         )}
       </div>
     </>

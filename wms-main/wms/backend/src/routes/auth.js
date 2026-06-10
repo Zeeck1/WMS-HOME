@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const pool = require('../config/db');
 const { authMiddleware, JWT_SECRET } = require('../middleware/auth');
 
@@ -55,6 +56,92 @@ router.post('/login', async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// POST /api/auth/employee-login — login by employee ID only (no password)
+router.post('/employee-login', async (req, res) => {
+  try {
+    const { employee_id } = req.body;
+    if (!employee_id) {
+      return res.status(400).json({ error: 'Employee ID is required' });
+    }
+
+    const empId = String(employee_id).trim();
+
+    // Must exist in employee directory
+    const [empRows] = await pool.query(
+      'SELECT * FROM employees WHERE employee_id = ?',
+      [empId]
+    );
+    if (empRows.length === 0) {
+      return res.status(404).json({ error: 'Employee ID not found. Please contact your administrator.' });
+    }
+    const emp = empRows[0];
+
+    // Check if a user account already exists for this employee_id
+    const [userRows] = await pool.query(
+      'SELECT * FROM users WHERE employee_id = ?',
+      [empId]
+    );
+
+    let user;
+    if (userRows.length === 0) {
+      // First login — create a pending user account
+      const randomHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10);
+      const username = `emp_${empId}`;
+      const [result] = await pool.query(
+        `INSERT INTO users (username, password_hash, display_name, role, is_active, employee_id, approval_status)
+         VALUES (?, ?, ?, 'user', 0, ?, 'pending')`,
+        [username, randomHash, emp.full_name, empId]
+      );
+      user = {
+        id: result.insertId,
+        username,
+        display_name: emp.full_name,
+        role: 'user',
+        is_active: 0,
+        employee_id: empId,
+        approval_status: 'pending',
+      };
+    } else {
+      user = userRows[0];
+    }
+
+    if (user.approval_status === 'pending' || user.is_active === 0) {
+      return res.status(403).json({
+        error: 'PENDING_APPROVAL',
+        display_name: user.display_name,
+        employee_id: empId,
+      });
+    }
+
+    // Approved — issue token
+    const [perms] = await pool.query(
+      'SELECT page_key FROM user_permissions WHERE user_id = ? AND can_access = 1',
+      [user.id]
+    );
+    const permissions = perms.map((p) => p.page_key);
+
+    const token = jwt.sign(
+      { id: user.id, username: user.username, role: user.role, display_name: user.display_name },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        display_name: user.display_name,
+        role: user.role,
+        permissions,
+      },
+    });
+  } catch (error) {
+    console.error('Employee login error:', error);
     res.status(500).json({ error: 'Login failed' });
   }
 });

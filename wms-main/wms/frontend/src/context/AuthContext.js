@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import api, { login as loginApi, getMe } from '../services/api';
+import api, { login as loginApi, getMe, employeeLogin as employeeLoginApi } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -16,6 +16,7 @@ export const ALL_PAGES = [
   { key: 'stock-out',        label: 'Stock OUT',             path: '/stock-out' },
   { key: 'imports',          label: 'Import Stock',          path: '/imports' },
   { key: 'withdraw',         label: 'Withdraw',              path: '/withdraw' },
+  { key: 'approval',         label: 'Approval',              path: '/approval' },
   { key: 'manage',           label: 'Manage',                path: '/manage' },
   { key: 'manual',           label: 'Manual',                path: '/manual' },
   { key: 'lines-reformat',   label: 'Lines Re-format',       path: '/lines-reformat' },
@@ -34,6 +35,7 @@ export const ALL_PAGES = [
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [pendingApproval, setPendingApproval] = useState(null); // { display_name, employee_id }
 
   const applyToken = useCallback((token) => {
     if (token) {
@@ -61,12 +63,34 @@ export function AuthProvider({ children }) {
     const res = await loginApi({ username, password });
     applyToken(res.data.token);
     setUser(res.data.user);
+    setPendingApproval(null);
     return res.data.user;
   };
+
+  const employeeLogin = async (employee_id) => {
+    try {
+      const res = await employeeLoginApi(employee_id);
+      // Approved — normal login
+      applyToken(res.data.token);
+      setUser(res.data.user);
+      setPendingApproval(null);
+      return { status: 'approved', user: res.data.user };
+    } catch (err) {
+      const data = err.response?.data;
+      if (err.response?.status === 403 && data?.error === 'PENDING_APPROVAL') {
+        setPendingApproval({ display_name: data.display_name, employee_id: data.employee_id });
+        return { status: 'pending', display_name: data.display_name };
+      }
+      throw err;
+    }
+  };
+
+  const clearPendingApproval = () => setPendingApproval(null);
 
   const logout = () => {
     applyToken(null);
     setUser(null);
+    setPendingApproval(null);
   };
 
   const hasAccess = (pageKey) => {
@@ -76,7 +100,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, hasAccess }}>
+    <AuthContext.Provider value={{ user, loading, login, employeeLogin, logout, hasAccess, pendingApproval, clearPendingApproval }}>
       {children}
     </AuthContext.Provider>
   );

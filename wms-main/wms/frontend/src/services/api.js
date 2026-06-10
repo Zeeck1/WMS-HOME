@@ -70,6 +70,10 @@ export const getWithdrawals = (params) => api.get('/withdrawals', { params });
 export const getWithdrawal = (id) => api.get(`/withdrawals/${id}`);
 export const createWithdrawal = (data) => api.post('/withdrawals', data);
 export const updateWithdrawalItems = (id, data) => api.put(`/withdrawals/${id}/items`, data);
+export const manualAdjustWithdrawal = (id, data) => api.put(`/withdrawals/${id}/manual-adjust`, data);
+/** Superadmin: adjust actual MC without stock balance checks; syncs FINISHED stock OUT records */
+export const superadminStockAdjustWithdrawal = (id, data) =>
+  api.put(`/withdrawals/${id}/superadmin-stock-adjust`, data, withAuth());
 export const saveWithdrawalPickRoute = (id, data) => api.put(`/withdrawals/${id}/pick-route`, data);
 export const undoWithdrawalPickRoute = (id) => api.post(`/withdrawals/${id}/undo-pick-route`);
 export const updateWithdrawalStatus = (id, data) => api.put(`/withdrawals/${id}/status`, data);
@@ -191,6 +195,7 @@ export const geminiChat = (messages) => api.post('/gemini/chat', { messages });
 
 // ─── Auth ────────────────────────────────────────────
 export const login = (data) => api.post('/auth/login', data);
+export const employeeLogin = (employee_id) => api.post('/auth/employee-login', { employee_id });
 export const getMe = () => api.get('/auth/me');
 
 // ─── Users (superadmin) ──────────────────────────────
@@ -198,5 +203,12 @@ export const getUsers = () => api.get('/users');
 export const createUser = (data) => api.post('/users', data);
 export const updateUser = (id, data) => api.put(`/users/${id}`, data);
 export const deleteUser = (id) => api.delete(`/users/${id}`);
+export const getPendingUsers = () => api.get('/users/pending');
+export const approveUser = (id, data) => api.put(`/users/${id}/approve`, data);
+
+// ─── Employees (superadmin) ──────────────────────────
+export const getEmployees = () => api.get('/employees');
+export const uploadEmployees = (data) => api.post('/employees/upload', data);
+export const deleteAllEmployees = () => api.delete('/employees');
 
 export default api;

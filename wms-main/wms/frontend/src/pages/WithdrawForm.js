@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { FiPrinter, FiDownload, FiArrowLeft, FiCamera } from 'react-icons/fi';
+import { FiPrinter, FiDownload, FiArrowLeft, FiCamera, FiCopy } from 'react-icons/fi';
 import { toast } from 'react-toastify';
-import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { getWithdrawal } from '../services/api';
 import WithdrawFormPrint from '../components/WithdrawFormPrint';
+import { captureWithdrawFormCanvas, copyWithdrawFormImageToClipboard } from '../utils/captureWithdrawFormImage';
 
 function WithdrawForm() {
   const { id } = useParams();
@@ -30,6 +30,7 @@ function WithdrawForm() {
   const formRef = useRef(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [copyingImage, setCopyingImage] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -55,12 +56,8 @@ function WithdrawForm() {
     if (!formRef.current) return;
     try {
       toast.info('Generating PDF...');
-      const canvas = await html2canvas(formRef.current, {
-        useCORS: true,
-        scale: 2,
-        logging: false,
-        backgroundColor: '#ffffff'
-      });
+      const canvas = await captureWithdrawFormCanvas(formRef);
+      if (!canvas) return;
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pageW = pdf.internal.pageSize.getWidth();
@@ -92,12 +89,8 @@ function WithdrawForm() {
     if (!formRef.current) return;
     try {
       toast.info('Capturing screenshot...');
-      const canvas = await html2canvas(formRef.current, {
-        useCORS: true,
-        scale: 2,
-        logging: false,
-        backgroundColor: '#ffffff'
-      });
+      const canvas = await captureWithdrawFormCanvas(formRef);
+      if (!canvas) return;
       const link = document.createElement('a');
       const fileName = `withdraw-form-${data?.request_no || id || 'form'}.png`.replace(/\s+/g, '-');
       link.download = fileName;
@@ -107,6 +100,24 @@ function WithdrawForm() {
     } catch (err) {
       console.error(err);
       toast.error('Failed to capture screenshot');
+    }
+  };
+
+  const handleCopyImage = async () => {
+    if (!formRef.current) return;
+    setCopyingImage(true);
+    try {
+      const ok = await copyWithdrawFormImageToClipboard(formRef);
+      if (!ok) {
+        toast.error('Failed to create image');
+        return;
+      }
+      toast.success('Form image copied to clipboard');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to copy image — try Chrome/Edge on HTTPS or localhost');
+    } finally {
+      setCopyingImage(false);
     }
   };
 
@@ -129,6 +140,10 @@ function WithdrawForm() {
           </button>
           <button className="btn btn-outline" onClick={handleScreenShot}>
             <FiCamera /> Screen Shot
+          </button>
+          <button className="btn btn-outline" onClick={handleCopyImage} disabled={copyingImage}>
+            {copyingImage ? <span className="login-spinner" /> : <FiCopy />}
+            {copyingImage ? 'Copying...' : 'Copy Image'}
           </button>
         </div>
       </div>

@@ -26,6 +26,7 @@ import Withdraw from './pages/Withdraw';
 import WithdrawForm from './pages/WithdrawForm';
 import WithdrawReport from './pages/WithdrawReport';
 import Manage from './pages/Manage';
+import Approval from './pages/Approval';
 import Manual from './pages/Manual';
 import LinesReformat from './pages/LinesReformat';
 import CustomerMaster from './pages/CustomerMaster';
@@ -78,6 +79,7 @@ const SIDEBAR_SECTIONS = [
       { to: '/stock-out', Icon: FiArrowUpCircle, label: 'Stock OUT', pageKey: 'stock-out' },
       { to: '/imports', Icon: FiAnchor, label: 'Import Stock', pageKey: 'imports' },
       { to: '/withdraw', Icon: FiShoppingCart, label: 'Withdraw', pageKey: 'withdraw' },
+      { to: '/approval', Icon: FiUserCheck, label: 'Approval', pageKey: 'approval' },
       { to: '/manage', Icon: FiSettings, label: 'Manage', pageKey: 'manage' },
       { to: '/manual', Icon: FiBook, label: 'Manual', pageKey: 'manual' },
       { to: '/lines-reformat', Icon: FiList, label: 'Lines Re-format', pageKey: 'lines-reformat' },
@@ -123,8 +125,9 @@ function SidebarNav({ collapsed, mobileOpen, onNavClick }) {
   }, [location.pathname]);
 
   const canManage = hasAccess('manage');
+  const canApproval = hasAccess('approval');
   useEffect(() => {
-    if (!canManage) {
+    if (!canManage && !canApproval) {
       setPendingReceiveCount(0);
       return;
     }
@@ -144,11 +147,11 @@ function SidebarNav({ collapsed, mobileOpen, onNavClick }) {
       cancelled = true;
       clearInterval(id);
     };
-  }, [canManage, location.pathname]);
+  }, [canManage, canApproval, location.pathname]);
 
   const link = (to, icon, label, pageKey, end, badgeCount) => {
     if (!hasAccess(pageKey)) return null;
-    const showBadge = pageKey === 'manage' && typeof badgeCount === 'number' && badgeCount > 0;
+    const showBadge = (pageKey === 'manage' || pageKey === 'approval') && typeof badgeCount === 'number' && badgeCount > 0;
     return (
       <NavLink key={pageKey} to={to} end={end} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''} ${showBadge ? 'nav-link--badge' : ''}`}>
         {icon}
@@ -164,7 +167,7 @@ function SidebarNav({ collapsed, mobileOpen, onNavClick }) {
 
   const renderNavItem = (item) => {
     const Icon = item.Icon;
-    const badge = item.pageKey === 'manage' ? pendingReceiveCount : undefined;
+    const badge = (item.pageKey === 'manage' || item.pageKey === 'approval') ? pendingReceiveCount : undefined;
     return link(item.to, <Icon />, item.label, item.pageKey, item.end, badge);
   };
 
@@ -321,6 +324,7 @@ function AppShell() {
             <Route path="/withdraw" element={<Protected pageKey="withdraw"><Withdraw /></Protected>} />
             <Route path="/withdraw/:id/form" element={<Protected pageKey="withdraw"><WithdrawForm /></Protected>} />
             <Route path="/withdraw/:id/report" element={<Protected pageKey="withdraw"><WithdrawReport /></Protected>} />
+            <Route path="/approval" element={<Protected pageKey="approval"><Approval /></Protected>} />
             <Route path="/manage" element={<Protected pageKey="manage"><Manage /></Protected>} />
             <Route path="/movements" element={<Protected pageKey="movements"><Movements /></Protected>} />
             <Route path="/location-layout" element={<Protected pageKey="location-layout"><LocationLayout /></Protected>} />

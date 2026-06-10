@@ -4,6 +4,10 @@ const pool = require('../config/db');
 const { pruneLocationMasterAfterStockRemoved } = require('../utils/locationMaster');
 const { bangkokYYYYMMDDCompact } = require('../utils/bangkokTime');
 const { authMiddleware, superadminOnly } = require('../middleware/auth');
+const {
+  queryWithdrawItemsDetailed,
+  freezeWithdrawItemsSnapshot,
+} = require('../utils/withdrawItemSnapshot');
 
 const WITHDRAW_DEPARTMENTS = ['PK', 'RM', 'Branch.05 (SM)'];
 
@@ -90,22 +94,11 @@ router.get('/', async (req, res) => {
         (SELECT COUNT(*) FROM withdraw_items wi WHERE wi.request_id = wr.id) AS item_count,
         (SELECT COALESCE(SUM(wi.requested_mc), 0) FROM withdraw_items wi WHERE wi.request_id = wr.id) AS total_requested_mc,
         (SELECT COALESCE(SUM(wi.quantity_mc), 0) FROM withdraw_items wi WHERE wi.request_id = wr.id) AS total_mc,
-        (SELECT COALESCE(SUM(
-          CASE
-            WHEN wi.lot_id IS NOT NULL THEN wi.quantity_mc * IFNULL(p.bulk_weight_kg, 0)
-            WHEN wi.import_item_id IS NOT NULL THEN wi.quantity_mc * IFNULL(imp.wet_mc, 0)
-            ELSE 0
-          END
-        ), 0)
-         FROM withdraw_items wi
-         LEFT JOIN lots l ON wi.lot_id = l.id
-         LEFT JOIN products p ON l.product_id = p.id
-         LEFT JOIN import_items imp ON wi.import_item_id = imp.id
-         WHERE wi.request_id = wr.id) AS total_kg,
+        (SELECT COALESCE(SUM(wi.weight_kg), 0) FROM withdraw_items wi WHERE wi.request_id = wr.id) AS total_kg,
         (SELECT GROUP_CONCAT(DISTINCT CONCAT(
-            COALESCE(p.fish_name, ii.item_name),
-            IF(COALESCE(p.size, ii.size) IS NOT NULL AND TRIM(COALESCE(p.size, ii.size)) != '', CONCAT(' ', COALESCE(p.size, ii.size)), '')
-          ) ORDER BY COALESCE(p.fish_name, ii.item_name) SEPARATOR ' · ')
+            COALESCE(wi.snap_fish_name, p.fish_name, ii.item_name),
+            IF(COALESCE(wi.snap_size, p.size, ii.size) IS NOT NULL AND TRIM(COALESCE(wi.snap_size, p.size, ii.size)) != '', CONCAT(' ', COALESCE(wi.snap_size, p.size, ii.size)), '')
+          ) ORDER BY COALESCE(wi.snap_fish_name, p.fish_name, ii.item_name) SEPARATOR ' · ')
          FROM withdraw_items wi
          LEFT JOIN lots l ON wi.lot_id = l.id
          LEFT JOIN products p ON l.product_id = p.id
@@ -136,10 +129,12 @@ router.get('/', async (req, res) => {
             OR l.lot_no LIKE ? OR loc.line_place LIKE ?
             OR ii.item_name LIKE ? OR ii.size LIKE ? OR s.inv_no LIKE ?
             OR wi.production_process LIKE ?
+            OR wi.snap_fish_name LIKE ? OR wi.snap_size LIKE ? OR wi.snap_lot_no LIKE ?
+            OR wi.snap_line_place LIKE ? OR wi.snap_order_code LIKE ?
           )
         )
       )`;
-      params.push(q, q, q, q, q, q, q, q, q, q, q, q, q);
+      params.push(q, q, q, q, q, q, q, q, q, q, q, q, q, q, q, q, q, q);
     }
     sql += ' ORDER BY wr.created_at DESC';
     const [rows] = await pool.query(sql, params);
@@ -156,42 +151,7 @@ router.get('/:id', async (req, res) => {
     const [requests] = await pool.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
     if (requests.length === 0) return res.status(404).json({ error: 'Request not found' });
 
-    const [items] = await pool.query(`
-      SELECT wi.*,
-        COALESCE(p.fish_name, ii.item_name) AS fish_name,
-        COALESCE(p.size, ii.size) AS size,
-        COALESCE(p.bulk_weight_kg, ii.wet_mc) AS bulk_weight_kg,
-        p.type,
-        p.glazing,
-        COALESCE(p.stock_type, IF(wi.import_item_id IS NULL, 'BULK', 'IMPORT')) AS stock_type,
-        COALESCE(p.order_code, s.inv_no) AS order_code,
-        l.lot_no, l.lot_no_numeric, COALESCE(l.cs_in_date, s.eta) AS cs_in_date, l.sticker,
-        COALESCE(loc.line_place, NULLIF(TRIM(ii.lines), '')) AS line_place,
-        loc.stack_no, loc.stack_total,
-        s.inv_no AS import_inv_no,
-        CASE
-          WHEN wi.lot_id IS NOT NULL THEN (
-            SELECT
-              COALESCE(SUM(CASE WHEN m2.movement_type = 'IN' THEN m2.quantity_mc ELSE 0 END), 0) -
-              COALESCE(SUM(CASE WHEN m2.movement_type = 'OUT' THEN m2.quantity_mc ELSE 0 END), 0)
-            FROM movements m2
-            WHERE m2.lot_id = wi.lot_id AND m2.location_id = wi.location_id
-          )
-          WHEN wi.import_item_id IS NOT NULL THEN (
-            SELECT IFNULL(ifi.factory_mc, 0) - IFNULL((SELECT SUM(o.mc) FROM import_stock_outs o WHERE o.item_id = ifi.id), 0)
-            FROM import_items ifi
-            WHERE ifi.id = wi.import_item_id
-          )
-          ELSE NULL
-        END AS hand_on_balance
-      FROM withdraw_items wi
-      LEFT JOIN lots l ON wi.lot_id = l.id
-      LEFT JOIN products p ON l.product_id = p.id
-      LEFT JOIN locations loc ON wi.location_id = loc.id
-      LEFT JOIN import_items ii ON wi.import_item_id = ii.id
-      LEFT JOIN import_shipments s ON ii.shipment_id = s.id
-      WHERE wi.request_id = ?
-    `, [req.params.id]);
+    const items = await queryWithdrawItemsDetailed(pool, req.params.id, { includeHandOn: true });
 
     const row = requests[0];
     let pickRouteBackup = row.pick_route_backup;
@@ -260,25 +220,7 @@ router.put('/:id/pick-route', async (req, res) => {
 
     await conn.commit();
     const [updated] = await pool.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
-    const [newItems] = await pool.query(`
-      SELECT wi.*,
-        COALESCE(p.fish_name, ii.item_name) AS fish_name,
-        COALESCE(p.size, ii.size) AS size,
-        COALESCE(p.bulk_weight_kg, ii.wet_mc) AS bulk_weight_kg,
-        p.type, p.glazing,
-        COALESCE(p.stock_type, IF(wi.import_item_id IS NULL, 'BULK', 'IMPORT')) AS stock_type,
-        COALESCE(p.order_code, s.inv_no) AS order_code,
-        l.lot_no, l.lot_no_numeric, COALESCE(l.cs_in_date, s.eta) AS cs_in_date, l.sticker,
-        COALESCE(loc.line_place, NULLIF(TRIM(ii.lines), '')) AS line_place,
-        loc.stack_no
-      FROM withdraw_items wi
-      LEFT JOIN lots l ON wi.lot_id = l.id
-      LEFT JOIN products p ON l.product_id = p.id
-      LEFT JOIN locations loc ON wi.location_id = loc.id
-      LEFT JOIN import_items ii ON wi.import_item_id = ii.id
-      LEFT JOIN import_shipments s ON ii.shipment_id = s.id
-      WHERE wi.request_id = ?
-    `, [req.params.id]);
+    const newItems = await queryWithdrawItemsDetailed(pool, req.params.id);
     res.json({
       message: 'Pick route saved',
       request: updated[0],
@@ -619,6 +561,220 @@ router.post('/:id/add-item', authMiddleware, superadminOnly, async (req, res) =>
   }
 });
 
+// ─── PUT manual adjust (superadmin) — edit cartons without stock checks / deduction ──
+router.put('/:id/manual-adjust', authMiddleware, superadminOnly, async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { items, finish, managed_by, dispatcher } = req.body;
+
+    if (!Array.isArray(items) || items.length === 0) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'items array is required' });
+    }
+
+    const [requests] = await conn.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
+    if (requests.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'Request not found' });
+    }
+    const request = requests[0];
+    if (request.status === 'CANCELLED') {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Cannot adjust a cancelled request' });
+    }
+    if (request.status === 'FINISHED') {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Finished withdrawals are permanent and cannot be modified' });
+    }
+
+    for (const item of items) {
+      if (!item.id) continue;
+      const qty = Number(item.quantity_mc);
+      if (!Number.isFinite(qty) || qty < 0) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'Each item must have quantity_mc >= 0' });
+      }
+      const reqMc = item.requested_mc !== undefined ? Number(item.requested_mc) : null;
+      if (reqMc !== null && (!Number.isFinite(reqMc) || reqMc < 0)) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'requested_mc must be >= 0 when provided' });
+      }
+
+      const [wiRows] = await conn.query(`
+        SELECT wi.*, p.bulk_weight_kg, ii.wet_mc
+        FROM withdraw_items wi
+        LEFT JOIN lots l ON wi.lot_id = l.id
+        LEFT JOIN products p ON l.product_id = p.id
+        LEFT JOIN import_items ii ON wi.import_item_id = ii.id
+        WHERE wi.id = ? AND wi.request_id = ?
+      `, [item.id, req.params.id]);
+      if (wiRows.length === 0) continue;
+
+      const wi = wiRows[0];
+      const newReq = reqMc !== null ? reqMc : Number(wi.requested_mc);
+      const unitKg = wi.import_item_id
+        ? Number(wi.wet_mc) || 0
+        : Number(wi.bulk_weight_kg) || 0;
+
+      await conn.query(
+        'UPDATE withdraw_items SET quantity_mc = ?, requested_mc = ?, weight_kg = ? WHERE id = ?',
+        [qty, newReq, qty * unitKg, item.id]
+      );
+    }
+
+    const dispInput = dispatcher !== undefined ? String(dispatcher || '').trim() : null;
+
+    if (finish) {
+      const disp = dispInput || String(request.dispatcher || '').trim();
+      if (!disp) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'Dispatcher name is required before finishing' });
+      }
+      const mgr = String(managed_by || request.managed_by || 'Manual Adjust').trim();
+      await conn.query(
+        `UPDATE withdraw_requests
+         SET manual_adjust = 1,
+             status = 'FINISHED',
+             finished_at = COALESCE(finished_at, NOW()),
+             managed_by = COALESCE(NULLIF(?, ''), managed_by),
+             dispatcher = ?,
+             updated_at = NOW()
+         WHERE id = ?`,
+        [mgr, disp, req.params.id]
+      );
+      await freezeWithdrawItemsSnapshot(conn, req.params.id);
+    } else if (dispInput !== null) {
+      await conn.query(
+        'UPDATE withdraw_requests SET manual_adjust = 1, dispatcher = ?, updated_at = NOW() WHERE id = ?',
+        [dispInput || null, req.params.id]
+      );
+    } else {
+      await conn.query(
+        'UPDATE withdraw_requests SET manual_adjust = 1, updated_at = NOW() WHERE id = ?',
+        [req.params.id]
+      );
+    }
+
+    await conn.commit();
+
+    const [updated] = await pool.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
+    const newItems = await queryWithdrawItemsDetailed(pool, req.params.id);
+
+    res.json({
+      message: finish ? 'Manual adjust saved and marked finished (no stock deducted)' : 'Manual adjust saved',
+      request: updated[0],
+      items: newItems,
+    });
+  } catch (error) {
+    await conn.rollback();
+    console.error('Error manual adjust:', error);
+    res.status(500).json({ error: 'Failed to save manual adjust' });
+  } finally {
+    conn.release();
+  }
+});
+
+// ─── PUT superadmin stock adjust — edit actual MC without balance checks; syncs FINISHED stock OUT ──
+router.put('/:id/superadmin-stock-adjust', authMiddleware, superadminOnly, async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { items } = req.body;
+
+    if (!Array.isArray(items) || items.length === 0) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'items array is required' });
+    }
+
+    const [requests] = await conn.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
+    if (requests.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'Request not found' });
+    }
+    const request = requests[0];
+    if (request.status === 'CANCELLED') {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Cannot adjust a cancelled request' });
+    }
+
+    for (const item of items) {
+      if (!item.id) continue;
+      const qty = Number(item.quantity_mc);
+      if (!Number.isFinite(qty) || qty < 0) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'Each item must have quantity_mc >= 0' });
+      }
+
+      const [wiRows] = await conn.query(`
+        SELECT wi.*, p.bulk_weight_kg, ii.wet_mc, ii.shipment_id
+        FROM withdraw_items wi
+        LEFT JOIN lots l ON wi.lot_id = l.id
+        LEFT JOIN products p ON l.product_id = p.id
+        LEFT JOIN import_items ii ON wi.import_item_id = ii.id
+        WHERE wi.id = ? AND wi.request_id = ?
+      `, [item.id, req.params.id]);
+      if (wiRows.length === 0) continue;
+
+      const wi = wiRows[0];
+      const unitKg = wi.import_item_id
+        ? Number(wi.wet_mc) || 0
+        : Number(wi.bulk_weight_kg) || 0;
+      const weightKg = qty * unitKg;
+
+      await conn.query(
+        'UPDATE withdraw_items SET quantity_mc = ?, weight_kg = ? WHERE id = ?',
+        [qty, weightKg, item.id]
+      );
+
+      if (request.status === 'FINISHED' && !request.manual_adjust) {
+        if (wi.movement_id) {
+          await conn.query(
+            'UPDATE movements SET quantity_mc = ?, weight_kg = ? WHERE id = ?',
+            [qty, weightKg, wi.movement_id]
+          );
+        }
+        if (wi.import_stock_out_id) {
+          await conn.query(
+            'UPDATE import_stock_outs SET mc = ?, nw_kgs = ? WHERE id = ?',
+            [qty, weightKg, wi.import_stock_out_id]
+          );
+          if (wi.shipment_id) {
+            await conn.query(
+              'UPDATE import_shipments SET last_update_stock = NOW() WHERE id = ?',
+              [wi.shipment_id]
+            );
+          }
+        }
+      }
+    }
+
+    if (request.status === 'FINISHED') {
+      await freezeWithdrawItemsSnapshot(conn, req.params.id);
+    }
+
+    await conn.query('UPDATE withdraw_requests SET updated_at = NOW() WHERE id = ?', [req.params.id]);
+    await conn.commit();
+
+    const [updated] = await pool.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
+    const newItems = await queryWithdrawItemsDetailed(pool, req.params.id);
+
+    res.json({
+      message: request.status === 'FINISHED'
+        ? 'Stock amounts updated (linked stock OUT records synced)'
+        : 'Stock amounts updated',
+      request: updated[0],
+      items: newItems,
+    });
+  } catch (error) {
+    await conn.rollback();
+    console.error('Error superadmin stock adjust:', error);
+    res.status(500).json({ error: 'Failed to adjust stock amounts' });
+  } finally {
+    conn.release();
+  }
+});
+
 // ─── PUT update status (used by Manage page) ─────────
 router.put('/:id/status', async (req, res) => {
   const conn = await pool.getConnection();
@@ -639,6 +795,11 @@ router.put('/:id/status', async (req, res) => {
 
     const request = requests[0];
 
+    if (request.status === 'FINISHED') {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Finished withdrawals are permanent and cannot be modified' });
+    }
+
     if (status === 'FINISHED' && request.status === 'READY') {
       const disp = String(dispatcher || request.dispatcher || '').trim();
       if (!disp) {
@@ -647,7 +808,7 @@ router.put('/:id/status', async (req, res) => {
       }
     }
 
-    if (status === 'FINISHED' && request.status !== 'FINISHED') {
+    if (status === 'FINISHED' && request.status !== 'FINISHED' && !request.manual_adjust) {
       const [items] = await conn.query(`
         SELECT wi.*, p.bulk_weight_kg, ii.wet_mc AS import_wet_mc, ii.shipment_id
         FROM withdraw_items wi
@@ -736,6 +897,10 @@ router.put('/:id/status', async (req, res) => {
       'UPDATE withdraw_requests SET status = ?, managed_by = ?, dispatcher = ?, finished_at = ?, updated_at = NOW() WHERE id = ?',
       [status, managed_by || request.managed_by, dispatcher || request.dispatcher, finishedAt, req.params.id]
     );
+
+    if (status === 'FINISHED') {
+      await freezeWithdrawItemsSnapshot(conn, req.params.id);
+    }
 
     await conn.commit();
 

@@ -34,6 +34,8 @@ import {
 
   oldestCsInDateInGroup,
 
+  withdrawLineStackNo,
+
 } from '../utils/withdrawItemGrouping';
 
 
@@ -107,7 +109,7 @@ function WithdrawReport() {
 
     const raw = data?.items || [];
 
-    if (data?.pick_route_saved) {
+    if (data?.status === 'FINISHED' || data?.pick_route_saved) {
 
       return sortWithdrawItems([...raw], sortByCsIn ? 'cs_in_date' : 'nearest');
 
@@ -424,7 +426,7 @@ function WithdrawReport() {
 
                           <td className="wr-center wr-bold">{group.lines[0].line_place}</td>
 
-                          <td className="wr-center">{group.lines[0].stack_no || ''}</td>
+                          <td className="wr-center">{withdrawLineStackNo(group.lines[0])}</td>
 
                           <td className="wr-center">{group.lines[0].reqMc}</td>
 
@@ -460,7 +462,7 @@ function WithdrawReport() {
 
                           <td className="wr-center wr-bold">{line.line_place}</td>
 
-                          <td className="wr-center">{line.stack_no || ''}</td>
+                          <td className="wr-center">{withdrawLineStackNo(line)}</td>
 
                           <td className="wr-center">{line.reqMc}</td>
 

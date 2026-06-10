@@ -2,9 +2,25 @@ import { sortLocationsNearestFirst } from '../config/warehouseConfig';
 
 /** @typedef {'nearest' | 'cs_in_date'} WithdrawItemSortMode */
 
+/** FINISHED withdrawals keep saved line data even when stock is gone. */
+export function isWithdrawalFrozen(status) {
+  return status === 'FINISHED';
+}
+
 export const requestedMc = (it) => Number(it.requested_mc ?? it.quantity_mc ?? 0);
 /** Actual picked qty for this line — same as Withdraw form (not live stock balance) */
 export const actualMc = (it) => Number(it.quantity_mc ?? 0);
+
+/** Stack No column for reports — location stack; CE falls back to ST NO when stack is blank. */
+export function withdrawLineStackNo(item) {
+  const stack = item?.stack_no;
+  if (stack != null && stack !== '') return String(stack);
+  if (String(item?.stock_type || '').toUpperCase() === 'CONTAINER_EXTRA') {
+    const stNo = item?.st_no != null && String(item.st_no).trim() !== '' ? String(item.st_no).trim() : null;
+    if (stNo) return stNo;
+  }
+  return '';
+}
 
 /** Product identity key (matches Withdraw / Stock Summary grouping). */
 export function withdrawProductKey(item) {
@@ -41,8 +57,26 @@ function withdrawLineMatchesInventory(wi, inv) {
   return false;
 }
 
+function productionProcessByProduct(withdrawList) {
+  const map = {};
+  for (const wi of withdrawList || []) {
+    const pk = withdrawProductKey(wi);
+    const pp = String(wi.production_process || '').trim();
+    if (!pp) continue;
+    if (!map[pk]) {
+      map[pk] = pp;
+    } else if (map[pk] !== pp) {
+      const parts = new Set(map[pk].split(',').map((s) => s.trim()).filter(Boolean));
+      parts.add(pp);
+      map[pk] = [...parts].join(', ');
+    }
+  }
+  return map;
+}
+
 /** Allocate request MC totals onto Stock Summary rows in pick order. */
 function allocateRequestOntoStock(withdrawList, inventory, stockSortMode) {
+  const processByProduct = productionProcessByProduct(withdrawList);
   const productTotals = {};
   const productOrder = [];
   withdrawList.forEach((wi) => {
@@ -88,6 +122,8 @@ function allocateRequestOntoStock(withdrawList, inventory, stockSortMode) {
         lot_no_numeric: inv.lot_no_numeric,
         line_place: inv.line_place,
         stack_no: inv.stack_no,
+        st_no: inv.st_no,
+        production_process: processByProduct[pk] || sample.production_process || wi?.production_process || '',
         id: wi?.id ?? `pick-${pk}-${lineIdx++}`,
         requested_mc: takeReq,
         quantity_mc: takeAct,

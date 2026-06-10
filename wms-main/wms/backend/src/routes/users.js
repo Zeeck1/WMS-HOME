@@ -7,6 +7,67 @@ const router = express.Router();
 
 router.use(authMiddleware, superadminOnly);
 
+// GET /api/users/pending — list users awaiting approval
+router.get('/pending', async (req, res) => {
+  try {
+    const [users] = await pool.query(
+      `SELECT u.id, u.username, u.display_name, u.employee_id, u.approval_status, u.created_at,
+              e.position, e.division, e.department, e.work_location
+       FROM users u
+       LEFT JOIN employees e ON u.employee_id = e.employee_id
+       WHERE u.approval_status = 'pending'
+       ORDER BY u.created_at DESC`
+    );
+    res.json(users);
+  } catch (err) {
+    console.error('Error fetching pending users:', err);
+    res.status(500).json({ error: 'Failed to fetch pending users' });
+  }
+});
+
+// PUT /api/users/:id/approve — approve employee user and assign permissions
+router.put('/:id/approve', async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { permissions } = req.body; // array of page_key strings
+
+    const [rows] = await conn.query('SELECT * FROM users WHERE id = ?', [req.params.id]);
+    if (rows.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (rows[0].role === 'superadmin') {
+      await conn.rollback();
+      return res.status(403).json({ error: 'Cannot modify superadmin' });
+    }
+
+    await conn.query(
+      `UPDATE users SET is_active = 1, approval_status = 'approved', updated_at = NOW() WHERE id = ?`,
+      [req.params.id]
+    );
+
+    // Replace permissions
+    await conn.query('DELETE FROM user_permissions WHERE user_id = ?', [req.params.id]);
+    if (Array.isArray(permissions) && permissions.length > 0) {
+      const values = permissions.map((p) => [Number(req.params.id), p, 1]);
+      await conn.query(
+        'INSERT INTO user_permissions (user_id, page_key, can_access) VALUES ?',
+        [values]
+      );
+    }
+
+    await conn.commit();
+    res.json({ message: 'User approved' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('Error approving user:', err);
+    res.status(500).json({ error: 'Failed to approve user' });
+  } finally {
+    conn.release();
+  }
+});
+
 // GET /api/users — list all users with their permissions
 router.get('/', async (req, res) => {
   try {

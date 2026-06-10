@@ -416,6 +416,22 @@ async function initDatabase() {
       console.error('  Migration dispatcher column:', e.message);
     }
 
+    // Migration: manual_adjust flag (superadmin adjusts cartons without stock deduction)
+    try {
+      const [maCols] = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'withdraw_requests' AND COLUMN_NAME = 'manual_adjust'
+      `, [dbName]);
+      if (maCols.length === 0) {
+        await connection.query(
+          'ALTER TABLE withdraw_requests ADD COLUMN manual_adjust TINYINT(1) NOT NULL DEFAULT 0 AFTER dispatcher'
+        );
+        console.log('  Migration: manual_adjust on withdraw_requests');
+      }
+    } catch (e) {
+      console.error('  Migration manual_adjust column:', e.message);
+    }
+
     // Withdraw items table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS withdraw_items (
@@ -632,6 +648,111 @@ async function initDatabase() {
       console.error('  Migration withdraw_items import columns:', e.message);
     }
 
+    // Migration: snapshot columns on withdraw_items (permanent FINISHED line data)
+    try {
+      const [snapCol] = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'withdraw_items' AND COLUMN_NAME = 'snap_fish_name'
+      `, [dbName]);
+      if (snapCol.length === 0) {
+        await connection.query(`
+          ALTER TABLE withdraw_items
+            ADD COLUMN snap_fish_name VARCHAR(255) NULL DEFAULT NULL AFTER production_process,
+            ADD COLUMN snap_size VARCHAR(100) NULL DEFAULT NULL AFTER snap_fish_name,
+            ADD COLUMN snap_lot_no VARCHAR(100) NULL DEFAULT NULL AFTER snap_size,
+            ADD COLUMN snap_lot_no_numeric INT NULL DEFAULT NULL AFTER snap_lot_no,
+            ADD COLUMN snap_cs_in_date DATE NULL DEFAULT NULL AFTER snap_lot_no_numeric,
+            ADD COLUMN snap_line_place VARCHAR(100) NULL DEFAULT NULL AFTER snap_cs_in_date,
+            ADD COLUMN snap_stack_no VARCHAR(50) NULL DEFAULT NULL AFTER snap_line_place,
+            ADD COLUMN snap_order_code VARCHAR(100) NULL DEFAULT NULL AFTER snap_stack_no,
+            ADD COLUMN snap_stock_type VARCHAR(20) NULL DEFAULT NULL AFTER snap_order_code,
+            ADD COLUMN snap_bulk_weight_kg DECIMAL(10,4) NULL DEFAULT NULL AFTER snap_stock_type,
+            ADD COLUMN snap_type VARCHAR(50) NULL DEFAULT NULL AFTER snap_bulk_weight_kg,
+            ADD COLUMN snap_glazing VARCHAR(50) NULL DEFAULT NULL AFTER snap_type,
+            ADD COLUMN snap_sticker VARCHAR(100) NULL DEFAULT NULL AFTER snap_glazing,
+            ADD COLUMN snap_import_inv_no VARCHAR(100) NULL DEFAULT NULL AFTER snap_sticker,
+            ADD COLUMN snap_st_no VARCHAR(50) NULL DEFAULT NULL AFTER snap_import_inv_no,
+            ADD COLUMN frozen_at TIMESTAMP NULL DEFAULT NULL AFTER snap_st_no
+        `);
+        console.log('  Migration: added snapshot columns to withdraw_items');
+      }
+    } catch (e) {
+      console.error('  Migration withdraw_items snapshot columns:', e.message);
+    }
+
+    try {
+      const [snapStNo] = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'withdraw_items' AND COLUMN_NAME = 'snap_st_no'
+      `, [dbName]);
+      if (snapStNo.length === 0) {
+        await connection.query(
+          'ALTER TABLE withdraw_items ADD COLUMN snap_st_no VARCHAR(50) NULL DEFAULT NULL AFTER snap_import_inv_no'
+        );
+        console.log('  Migration: added snap_st_no to withdraw_items');
+      }
+    } catch (e) {
+      console.error('  Migration withdraw_items snap_st_no:', e.message);
+    }
+
+    // Migration: do not cascade-delete finished withdrawal lines when import items are removed
+    try {
+      const [fkRows] = await connection.query(`
+        SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS
+        WHERE CONSTRAINT_SCHEMA = ? AND TABLE_NAME = 'withdraw_items' AND CONSTRAINT_NAME = 'fk_wi_import_item'
+      `, [dbName]);
+      if (fkRows.length > 0 && fkRows[0].DELETE_RULE === 'CASCADE') {
+        await connection.query('ALTER TABLE withdraw_items DROP FOREIGN KEY fk_wi_import_item');
+        await connection.query(
+          'ALTER TABLE withdraw_items ADD CONSTRAINT fk_wi_import_item FOREIGN KEY (import_item_id) REFERENCES import_items(id) ON DELETE SET NULL'
+        );
+        console.log('  Migration: fk_wi_import_item ON DELETE SET NULL (preserve finished withdraw lines)');
+      }
+    } catch (e) {
+      console.error('  Migration fk_wi_import_item delete rule:', e.message);
+    }
+
+    // Migration: allow lot/location master cleanup without deleting finished withdraw lines
+    for (const col of ['lot_id', 'location_id']) {
+      try {
+        const [fkRows] = await connection.query(
+          `SELECT rc.CONSTRAINT_NAME, rc.DELETE_RULE
+           FROM information_schema.REFERENTIAL_CONSTRAINTS rc
+           INNER JOIN information_schema.KEY_COLUMN_USAGE kcu
+             ON rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME AND rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
+           WHERE rc.CONSTRAINT_SCHEMA = ? AND kcu.TABLE_NAME = 'withdraw_items' AND kcu.COLUMN_NAME = ?`,
+          [dbName, col]
+        );
+        if (fkRows.length > 0 && fkRows[0].DELETE_RULE !== 'SET NULL') {
+          const fkName = fkRows[0].CONSTRAINT_NAME;
+          const refTable = col === 'lot_id' ? 'lots' : 'locations';
+          await connection.query(`ALTER TABLE withdraw_items DROP FOREIGN KEY \`${fkName}\``);
+          await connection.query(
+            `ALTER TABLE withdraw_items ADD CONSTRAINT fk_wi_${col} FOREIGN KEY (${col}) REFERENCES ${refTable}(id) ON UPDATE CASCADE ON DELETE SET NULL`
+          );
+          console.log(`  Migration: withdraw_items.${col} ON DELETE SET NULL`);
+        }
+      } catch (e) {
+        console.error(`  Migration withdraw_items.${col} delete rule:`, e.message);
+      }
+    }
+
+    // Backfill snapshots for existing FINISHED withdrawals
+    try {
+      const { freezeWithdrawItemsSnapshot } = require('../utils/withdrawItemSnapshot');
+      const [finishedReqs] = await connection.query(
+        `SELECT id FROM withdraw_requests WHERE status = 'FINISHED'`
+      );
+      for (const row of finishedReqs) {
+        await freezeWithdrawItemsSnapshot(connection, row.id);
+      }
+      if (finishedReqs.length > 0) {
+        console.log(`  Migration: backfilled snapshots for ${finishedReqs.length} finished withdrawal(s)`);
+      }
+    } catch (e) {
+      console.error('  Migration backfill finished withdraw snapshots:', e.message);
+    }
+
     // Backfill: import_stock_outs created from withdrawals stored the request number
     // (WD-PK-YYYYMMDD-###). Replace it with Production Process (withdraw line) or Department.
     try {
@@ -746,6 +867,22 @@ async function initDatabase() {
     `);
     console.log('  Table created: ck_knowledge_entries');
 
+    // ── Employee directory ───────────────────────────────────────────
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS employees (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        employee_id VARCHAR(50) NOT NULL UNIQUE,
+        full_name VARCHAR(200) NOT NULL,
+        position VARCHAR(200) DEFAULT NULL,
+        division VARCHAR(100) DEFAULT NULL,
+        department VARCHAR(100) DEFAULT NULL,
+        work_location VARCHAR(100) DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('  Table created: employees');
+
     // ── Auth: users & permissions ────────────────────────────────────
     await connection.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -755,6 +892,8 @@ async function initDatabase() {
         display_name VARCHAR(100),
         role ENUM('superadmin','user') NOT NULL DEFAULT 'user',
         is_active TINYINT(1) NOT NULL DEFAULT 1,
+        employee_id VARCHAR(50) DEFAULT NULL,
+        approval_status ENUM('pending','approved') DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       ) ENGINE=InnoDB
@@ -772,6 +911,21 @@ async function initDatabase() {
       ) ENGINE=InnoDB
     `);
     console.log('  Table created: user_permissions');
+
+    // Migrations: add columns to users if they don't exist yet
+    const [userCols] = await connection.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users'`,
+      [process.env.DB_NAME || 'wms_db']
+    );
+    const userColNames = userCols.map((c) => c.COLUMN_NAME);
+    if (!userColNames.includes('employee_id')) {
+      await connection.query('ALTER TABLE users ADD COLUMN employee_id VARCHAR(50) DEFAULT NULL AFTER display_name');
+      console.log('  Migration: added employee_id to users');
+    }
+    if (!userColNames.includes('approval_status')) {
+      await connection.query("ALTER TABLE users ADD COLUMN approval_status ENUM('pending','approved') DEFAULT NULL AFTER employee_id");
+      console.log('  Migration: added approval_status to users');
+    }
 
     // Seed superadmin (skip if already exists)
     const bcrypt = require('bcryptjs');

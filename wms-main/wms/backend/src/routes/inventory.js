@@ -197,9 +197,11 @@ router.delete('/all', authMiddleware, superadminOnly, async (req, res) => {
     let lotsDeleted = 0;
 
     if (lotIds.length > 0) {
-      // Delete withdraw_items referencing these lots
+      // Delete withdraw_items referencing these lots (never remove FINISHED withdrawal lines)
       await conn.query(
-        `DELETE FROM withdraw_items WHERE lot_id IN (${lotIds.map(() => '?').join(',')})`,
+        `DELETE wi FROM withdraw_items wi
+         INNER JOIN withdraw_requests wr ON wr.id = wi.request_id
+         WHERE wi.lot_id IN (${lotIds.map(() => '?').join(',')}) AND wr.status != 'FINISHED'`,
         lotIds
       );
 

@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { FiSearch, FiPackage, FiBox, FiAnchor, FiPlus, FiTrash2, FiRotateCcw, FiCopy, FiSave, FiAlertTriangle, FiX, FiCheck } from 'react-icons/fi';
+import { FiSearch, FiPackage, FiBox, FiAnchor, FiPlus, FiTrash2, FiRotateCcw, FiCopy, FiSave, FiAlertTriangle, FiX, FiCheck, FiPrinter } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { getInventory, manualUpdateCell, manualDeleteRow, manualAddRow } from '../services/api';
 import { parseLocationCode } from '../config/warehouseConfig';
 import ColumnFilterDropdown from '../components/ColumnFilterDropdown';
-import { bangkokYYYYMMDD, dateToYYYYMMDDInBangkok } from '../utils/bangkokTime';
+import { bangkokYYYYMMDD, bangkokLocaleString, dateToYYYYMMDDInBangkok } from '../utils/bangkokTime';
 
 const normLotNoNumeric = (v) => String(v ?? '').replace(/\D/g, '');
 
@@ -105,11 +105,22 @@ function filterInventoryRowsByTab(rows, tab) {
 function normalizeManualInventoryRow(r) {
   const stack = r.stack_no;
   const stackTotal = r.stack_total;
+  const stNo = r.st_no;
   return {
     ...r,
+    st_no: stNo != null && stNo !== '' ? String(stNo).trim() : '',
     stack_no: stack != null && stack !== '' ? Number(stack) : '',
     stack_total: stackTotal != null && stackTotal !== '' ? Number(stackTotal) : '',
   };
+}
+
+function manualPrintCellText(row, col) {
+  const display = col.formula ? getCellDisplay(row, col) : getCellDisplay(row, col);
+  if (display == null || display === '') return '—';
+  if (col.formula) {
+    return Number(display).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+  return String(display);
 }
 const ROW_WINDOW_SIZE = 150;
 const toDateOnly = (d) => {
@@ -897,13 +908,33 @@ function Manual() {
   const editCount = Object.keys(pendingEdits).length;
 
   // ─── Render ──────────────────────────────────────────────────────────
+  const tabLabel = TABS.find((t) => t.id === activeTab)?.label || activeTab;
+  const printedAt = bangkokLocaleString();
+
+  const handlePrint = () => {
+    if (filteredRows.length === 0 && !draftRow) {
+      toast.warn('No rows to print for the current tab and filters.');
+      return;
+    }
+    const style = document.createElement('style');
+    style.id = 'manual-print-page-style';
+    style.textContent = '@page { size: A4 landscape; margin: 10mm; }';
+    document.head.appendChild(style);
+    const onAfterPrint = () => {
+      document.getElementById('manual-print-page-style')?.remove();
+      window.removeEventListener('afterprint', onAfterPrint);
+    };
+    window.addEventListener('afterprint', onAfterPrint);
+    window.print();
+  };
+
   if (loading && rows.length === 0) return <div className="loading"><div className="spinner"></div>Loading...</div>;
 
   return (
-    <>
+    <div className="manual-print-page">
       {/* Unsaved changes banner */}
       {isDirty && (
-        <div className="ms-dirty-banner">
+        <div className="ms-dirty-banner no-print">
           <FiAlertTriangle /> You have <b>{editCount}</b> unsaved change(s).
           <button className="btn btn-primary btn-sm" onClick={handleSaveAll} disabled={saving} style={{ marginLeft: 12 }}>
             <FiSave /> {saving ? 'Saving...' : 'Save All'}
@@ -914,9 +945,18 @@ function Manual() {
         </div>
       )}
 
-      <div className="page-header">
+      <div className="page-header no-print">
         <h2>Manual</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={handlePrint}
+            disabled={filteredRows.length === 0 && !draftRow}
+            title="Print stock table as shown (active tab and filters)"
+          >
+            <FiPrinter /> Print
+          </button>
           <button className="btn btn-outline btn-sm" onClick={handleUndo} disabled={undoStack.length === 0} title="Undo (Ctrl+Z)">
             <FiRotateCcw /> Undo {undoStack.length > 0 && `(${undoStack.length})`}
           </button>
@@ -929,7 +969,13 @@ function Manual() {
         </div>
       </div>
       <div className="page-body">
-        <div className="stock-type-tabs">
+        <div className="only-print-ms manual-print-banner">
+          <h1>WMS — Manual Stock Report</h1>
+          <p><strong>Stock type:</strong> {tabLabel}</p>
+          <p><strong>Rows printed:</strong> {filteredRows.length}</p>
+          <p><strong>Printed:</strong> {printedAt}</p>
+        </div>
+        <div className="stock-type-tabs no-print">
           {TABS.map(tab => (
             <button key={tab.id} type="button"
               className={`stock-type-tab ${activeTab === tab.id ? 'active' : ''}`}
@@ -942,7 +988,7 @@ function Manual() {
           ))}
         </div>
 
-        <form className="manual-search-form" onSubmit={handleSearch}>
+        <form className="manual-search-form no-print" onSubmit={handleSearch}>
           <div className="manual-search-row">
             <div className="form-group">
               <label>Fish Name</label>
@@ -1005,7 +1051,7 @@ function Manual() {
         </div>
 
         {(activeFilterCount > 0 || appliedTableSearch.trim()) && (
-          <div className="gs-active-filters-bar" style={{ marginBottom: 12 }}>
+          <div className="gs-active-filters-bar no-print" style={{ marginBottom: 12 }}>
             {activeFilterCount > 0 && (
               <span>{activeFilterCount} column filter{activeFilterCount > 1 ? 's' : ''} active</span>
             )}
@@ -1016,13 +1062,13 @@ function Manual() {
           </div>
         )}
 
-        <div className="dashboard-grid" style={{ marginBottom: 12 }}>
+        <div className="dashboard-grid no-print" style={{ marginBottom: 12 }}>
           <div className="stat-card"><div className="stat-info"><h4>Total MC</h4><div className="stat-value" style={{ fontSize: '1.3rem' }}>{totalMC.toLocaleString()}</div></div></div>
           <div className="stat-card"><div className="stat-info"><h4>Total KG</h4><div className="stat-value" style={{ fontSize: '1.3rem' }}>{totalKG.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div></div></div>
           <div className="stat-card"><div className="stat-info"><h4>Rows</h4><div className="stat-value" style={{ fontSize: '1.3rem' }}>{filteredRows.length}</div></div></div>
         </div>
 
-        <div className="ms-hint">
+        <div className="ms-hint no-print">
           <b>Add Row</b> opens a highlighted row at the top — confirm to insert (sorted by Line / Place). · Click any cell to edit · <b>Ctrl+S</b> Save · <b>Ctrl+Z</b> Undo · <b>Ctrl+C</b> Copy row · <b>Ctrl+V</b> Paste · Drag blue handle to fill down
           {rows.length >= MANUAL_FETCH_LIMIT && (
             <span className="ms-hint-limit"> · Showing up to {MANUAL_FETCH_LIMIT} rows (use Search to narrow)</span>
@@ -1030,7 +1076,7 @@ function Manual() {
         </div>
 
         {useWindow && (
-          <div className="ms-window-nav">
+          <div className="ms-window-nav no-print">
             <span className="ms-window-info">Rows {windowStart + 1}–{Math.min(windowStart + ROW_WINDOW_SIZE, filteredRows.length)} of {filteredRows.length}</span>
             <button type="button" className="btn btn-outline btn-sm" onClick={() => setWindowStart(0)} disabled={windowStart === 0}>First</button>
             <button type="button" className="btn btn-outline btn-sm" onClick={() => setWindowStart(w => Math.max(0, w - ROW_WINDOW_SIZE))} disabled={windowStart === 0}>Prev</button>
@@ -1072,7 +1118,7 @@ function Manual() {
                     </th>
                   );
                 })}
-                <th className="ms-th-act"></th>
+                <th className="ms-th-act no-print"></th>
               </tr>
             </thead>
             <tbody>
@@ -1125,10 +1171,11 @@ function Manual() {
                           }}
                           placeholder={col.key === 'line_place' ? 'e.g. B01R-1' : undefined}
                         />
+                        <span className="only-print-ms">{manualPrintCellText(draftRow, col)}</span>
                       </td>
                     );
                   })}
-                  <td className="ms-act ms-draft-act">
+                  <td className="ms-act ms-draft-act no-print">
                     <button type="button" className="ms-draft-confirm" onClick={handleCommitDraft} disabled={draftSaving} title="Create row and place in sorted list">
                       <FiCheck size={16} /> {draftSaving ? 'Adding…' : 'Add to table'}
                     </button>
@@ -1204,13 +1251,14 @@ function Manual() {
                               if (e.key === 'Tab' || e.key === 'Enter') e.currentTarget.blur();
                             }}
                           />
+                          <span className="only-print-ms">{manualPrintCellText(row, col)}</span>
                           {isActive && (
-                            <div className="ms-drag-handle" onMouseDown={e => startDrag(e, filteredIdx, col.key)} title="Drag to fill down" />
+                            <div className="ms-drag-handle no-print" onMouseDown={e => startDrag(e, filteredIdx, col.key)} title="Drag to fill down" />
                           )}
                         </td>
                       );
                     })}
-                    <td className="ms-act">
+                    <td className="ms-act no-print">
                       <button className="ms-btn-copy" onClick={() => handleDuplicateRow(filteredIdx)} title="Duplicate"><FiCopy size={13} /></button>
                       <button className="ms-btn-del" onClick={() => handleDeleteRow(filteredIdx)} title="Delete"><FiTrash2 size={13} /></button>
                     </td>
@@ -1228,14 +1276,14 @@ function Manual() {
                     if (col.key === 'fish_name') return <td key={col.key} style={{ fontWeight: 700, textAlign: 'right', padding: '6px 8px' }}>TOTALS:</td>;
                     return <td key={col.key}></td>;
                   })}
-                  <td></td>
+                  <td className="no-print"></td>
                 </tr>
               </tfoot>
             )}
           </table>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
