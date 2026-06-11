@@ -46,6 +46,64 @@ async function addColumnIfMissing(connection, tableName, columnName, alterSql, d
   }
 }
 
+/**
+ * Employee login needs users.employee_id + users.approval_status.
+ * Older deploys could add employee_id then crash on duplicate, skipping approval_status.
+ */
+async function ensureUsersAuthColumns(connection, dbName) {
+  if (!(await tableHasColumn(connection, 'users', 'employee_id', dbName))) {
+    const alters = [
+      'ALTER TABLE users ADD COLUMN employee_id VARCHAR(50) DEFAULT NULL AFTER display_name',
+      'ALTER TABLE users ADD COLUMN employee_id VARCHAR(50) DEFAULT NULL',
+    ];
+    for (const sql of alters) {
+      try {
+        await connection.query(sql);
+        console.log('  Migration: added employee_id to users');
+        break;
+      } catch (e) {
+        if (isDuplicateColumnError(e)) break;
+      }
+    }
+  }
+
+  if (!(await tableHasColumn(connection, 'users', 'approval_status', dbName))) {
+    const alters = [
+      "ALTER TABLE users ADD COLUMN approval_status ENUM('pending','approved') DEFAULT NULL AFTER employee_id",
+      "ALTER TABLE users ADD COLUMN approval_status ENUM('pending','approved') DEFAULT NULL",
+    ];
+    for (const sql of alters) {
+      try {
+        await connection.query(sql);
+        console.log('  Migration: added approval_status to users');
+        break;
+      } catch (e) {
+        if (isDuplicateColumnError(e)) break;
+      }
+    }
+  }
+
+  const hasEmp = await tableHasColumn(connection, 'users', 'employee_id', dbName);
+  const hasAppr = await tableHasColumn(connection, 'users', 'approval_status', dbName);
+  if (!hasEmp || !hasAppr) {
+    throw new Error(
+      `users table missing employee auth columns (employee_id=${hasEmp}, approval_status=${hasAppr})`
+    );
+  }
+
+  // Backfill status for employee-linked accounts created before approval_status existed
+  await connection.query(`
+    UPDATE users SET approval_status = 'approved'
+    WHERE employee_id IS NOT NULL AND employee_id != '' AND is_active = 1
+      AND (approval_status IS NULL OR approval_status = '')
+  `);
+  await connection.query(`
+    UPDATE users SET approval_status = 'pending'
+    WHERE employee_id IS NOT NULL AND employee_id != '' AND is_active = 0
+      AND (approval_status IS NULL OR approval_status = '')
+  `);
+}
+
 function getDbInitConfig() {
   const connectionUrl = process.env.DB_URL || process.env.DATABASE_URL || process.env.MYSQL_URL;
   if (connectionUrl) {
@@ -138,18 +196,18 @@ async function initDatabase() {
       }
     } catch (e) { /* ignore */ }
 
-    // Location uniqueness is by line_place ONLY
-    // The same location code (e.g. A03r-2) can hold many products but is ONE location
+    // Unique (line_place, stack_no) — same line + same stack share one location; different stacks stay separate
     await connection.query(`
       CREATE TABLE IF NOT EXISTS locations (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        line_place VARCHAR(20) NOT NULL UNIQUE,
+        line_place VARCHAR(20) NOT NULL,
         stack_no INT NOT NULL DEFAULT 1,
         stack_total INT NOT NULL DEFAULT 1,
         description VARCHAR(255) DEFAULT NULL,
         is_active TINYINT(1) NOT NULL DEFAULT 1,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_line_place_stack (line_place, stack_no)
       ) ENGINE=InnoDB
     `);
     console.log('  Table created: locations');
@@ -175,22 +233,22 @@ async function initDatabase() {
       // ignore migration errors
     }
 
-    // Location Master: one row per line_place — merge duplicate lines, drop (line+stack) unique
+    // Manual: unique (line_place, stack_no) — merge only exact duplicate rows, keep different stacks separate
     try {
       const [dupGroups] = await connection.query(`
-        SELECT UPPER(TRIM(line_place)) AS lp,
+        SELECT UPPER(TRIM(line_place)) AS lp, stack_no,
           GROUP_CONCAT(id ORDER BY is_active DESC, updated_at DESC, id ASC) AS ids
         FROM locations
-        GROUP BY UPPER(TRIM(line_place))
+        GROUP BY UPPER(TRIM(line_place)), stack_no
         HAVING COUNT(*) > 1
       `);
+      const [wiTable] = await connection.query(`
+        SELECT TABLE_NAME FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'withdraw_items'
+      `, [dbName]);
       for (const g of dupGroups) {
         const ids = String(g.ids).split(',').map((x) => parseInt(x, 10)).filter(Boolean);
         const keeperId = ids[0];
-        const [wiTable] = await connection.query(`
-          SELECT TABLE_NAME FROM information_schema.TABLES
-          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'withdraw_items'
-        `, [dbName]);
         for (let i = 1; i < ids.length; i++) {
           await connection.query(
             'UPDATE movements SET location_id = ? WHERE location_id = ?',
@@ -204,28 +262,28 @@ async function initDatabase() {
           }
           await connection.query('DELETE FROM locations WHERE id = ?', [ids[i]]);
         }
-        console.log(`  Merged duplicate location rows for ${g.lp} → id ${keeperId} (old rows deleted)`);
-      }
-
-      const [hasStackUq] = await connection.query(`
-        SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
-        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'locations' AND CONSTRAINT_NAME = 'uq_line_place_stack'
-      `, [dbName]);
-      if (hasStackUq.length > 0) {
-        await connection.query('ALTER TABLE locations DROP INDEX uq_line_place_stack');
-        console.log('  Dropped uq_line_place_stack (line + stack unique)');
+        console.log(`  Merged duplicate location rows for ${g.lp} stack ${g.stack_no} → id ${keeperId}`);
       }
 
       const [hasLineUq] = await connection.query(`
         SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'locations' AND CONSTRAINT_NAME = 'uq_line_place'
       `, [dbName]);
-      if (hasLineUq.length === 0) {
-        await connection.query('ALTER TABLE locations ADD UNIQUE KEY uq_line_place (line_place)');
-        console.log('  Added uq_line_place (one row per line_place)');
+      if (hasLineUq.length > 0) {
+        await connection.query('ALTER TABLE locations DROP INDEX uq_line_place');
+        console.log('  Dropped uq_line_place (line-only unique)');
+      }
+
+      const [hasStackUq] = await connection.query(`
+        SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'locations' AND CONSTRAINT_NAME = 'uq_line_place_stack'
+      `, [dbName]);
+      if (hasStackUq.length === 0) {
+        await connection.query('ALTER TABLE locations ADD UNIQUE KEY uq_line_place_stack (line_place, stack_no)');
+        console.log('  Added uq_line_place_stack (line + stack unique)');
       }
     } catch (e) {
-      console.error('  Migration locations line_place unique:', e.message);
+      console.error('  Migration locations line+stack unique:', e.message);
     }
 
     await connection.query(`
@@ -983,21 +1041,7 @@ async function initDatabase() {
     `);
     console.log('  Table created: user_permissions');
 
-    // Migrations: add columns to users if they don't exist yet
-    if (await addColumnIfMissing(
-      connection, 'users', 'employee_id',
-      'ALTER TABLE users ADD COLUMN employee_id VARCHAR(50) DEFAULT NULL AFTER display_name',
-      dbName
-    )) {
-      console.log('  Migration: added employee_id to users');
-    }
-    if (await addColumnIfMissing(
-      connection, 'users', 'approval_status',
-      "ALTER TABLE users ADD COLUMN approval_status ENUM('pending','approved') DEFAULT NULL AFTER employee_id",
-      dbName
-    )) {
-      console.log('  Migration: added approval_status to users');
-    }
+    await ensureUsersAuthColumns(connection, dbName);
 
     // Seed superadmin (skip if already exists)
     const bcrypt = require('bcryptjs');
@@ -1011,14 +1055,14 @@ async function initDatabase() {
       console.log('  Seeded superadmin user');
     }
 
-    // Remove leftover duplicate / unused location rows (old stack 555 etc.) from Location Master
+    // Remove exact duplicate (line + stack) / unused location rows
     try {
-      const { purgeDuplicateLocationsForLine, purgeUnusedLocationRows } = require('../utils/locationMaster');
+      const { purgeDuplicateLocationsForLineStack, purgeUnusedLocationRows } = require('../utils/locationMaster');
       const [dupGroups] = await connection.query(`
-        SELECT UPPER(TRIM(line_place)) AS lp,
+        SELECT UPPER(TRIM(line_place)) AS lp, stack_no,
           GROUP_CONCAT(id ORDER BY is_active DESC, updated_at DESC, id ASC) AS ids
         FROM locations
-        GROUP BY UPPER(TRIM(line_place))
+        GROUP BY UPPER(TRIM(line_place)), stack_no
         HAVING COUNT(*) > 1
       `);
       for (const g of dupGroups) {
@@ -1026,7 +1070,7 @@ async function initDatabase() {
         const keeperId = ids[0];
         const [keeper] = await connection.query('SELECT line_place FROM locations WHERE id = ?', [keeperId]);
         if (keeper.length) {
-          await purgeDuplicateLocationsForLine(connection, keeperId, keeper[0].line_place);
+          await purgeDuplicateLocationsForLineStack(connection, keeperId, keeper[0].line_place, g.stack_no);
         }
       }
       const purged = await purgeUnusedLocationRows(connection);

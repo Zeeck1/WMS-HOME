@@ -32,7 +32,7 @@ export function inventoryRowKey(r) {
   return null;
 }
 
-/** Drop duplicate rows so derived views (Stock Summary) match the Manual page exactly. */
+/** Drop true duplicate rows (same lot+location), never by stack_no alone. */
 export function dedupeInventoryRows(rows) {
   const seen = new Set();
   const out = [];

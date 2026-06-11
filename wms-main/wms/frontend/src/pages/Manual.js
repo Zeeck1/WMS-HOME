@@ -9,6 +9,7 @@ import {
   MANUAL_FETCH_LIMIT,
   filterInventoryRowsByTab,
   normalizeManualInventoryRow,
+  inventoryRowKey,
 } from '../utils/manualInventoryShared';
 
 const normLotNoNumeric = (v) => String(v ?? '').replace(/\D/g, '');
@@ -18,6 +19,13 @@ const normNumberField = (v) => {
   if (v == null || v === '') return '';
   const n = parseInt(String(v).trim(), 10);
   return Number.isFinite(n) ? String(n) : '';
+};
+
+/** Always show stack on every row (never blank when a value exists). */
+const formatStackField = (v) => {
+  if (v == null || v === '') return '';
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  return normNumberField(v);
 };
 
 /** Parse stack fields for API — preserve user value (e.g. 222), not default to 1 when valid. */
@@ -169,6 +177,7 @@ const getCellDisplay = (row, col) => {
   if (col.type === 'date') return toDateOnly(v);
   if (col.type === 'month_year') return toMonthYearDisplay(v);
   if (col.field === 'lot_no_numeric') return normLotNoNumeric(v);
+  if (col.key === 'stack_no' || col.key === 'stack_total') return formatStackField(v);
   if (col.type === 'number') return normNumberField(v);
   return v ?? '';
 };
@@ -585,13 +594,14 @@ function Manual() {
             const savedTotal = res.data.stack_total;
             if (savedStack != null || savedTotal != null) {
               setRows((prev) => prev.map((r) => {
-                const match = importItemId != null
+                const isEditedRow = importItemId != null
                   ? r._imp_item_id === importItemId
                   : r.lot_id === lotId;
-                if (!match) return r;
+                const sharesLocation = locationId != null && r.location_id === locationId;
+                if (!isEditedRow && !sharesLocation) return r;
                 return normalizeManualInventoryRow({
                   ...r,
-                  location_id: locationId,
+                  ...(isEditedRow ? { location_id: locationId } : {}),
                   ...(savedStack != null ? { stack_no: savedStack } : {}),
                   ...(savedTotal != null ? { stack_total: savedTotal } : {}),
                 });
@@ -1132,16 +1142,20 @@ function Manual() {
                         ? parseMonthYearInput(draftRow[col.key])
                         : col.field === 'lot_no_numeric'
                           ? normLotNoNumeric(draftRow[col.key])
-                          : col.type === 'number'
-                            ? normNumberField(draftRow[col.key])
-                            : (draftRow[col.key] ?? '');
+                          : (col.key === 'stack_no' || col.key === 'stack_total')
+                            ? formatStackField(draftRow[col.key])
+                            : col.type === 'number'
+                              ? normNumberField(draftRow[col.key])
+                              : (draftRow[col.key] ?? '');
                     const inputDisplayVal = col.type === 'month_year'
                       ? toMonthYearDisplay(draftRow[col.key])
                       : col.field === 'lot_no_numeric'
                         ? normLotNoNumeric(draftRow[col.key])
-                        : col.type === 'number'
-                          ? normNumberField(draftRow[col.key])
-                          : valNormalized;
+                        : (col.key === 'stack_no' || col.key === 'stack_total')
+                          ? formatStackField(draftRow[col.key])
+                          : col.type === 'number'
+                            ? normNumberField(draftRow[col.key])
+                            : valNormalized;
                     return (
                       <td key={col.key} className="ms-cell ms-cell-ed ms-draft-cell">
                         <input
@@ -1181,8 +1195,9 @@ function Manual() {
                 const orig = originalRows.find(o => rk(o) === rk(row));
                 const fullIdx = rows.findIndex(r => rk(r) === rk(row));
                 const rowNum = useWindow ? windowStart + rowIdx + 1 : rowIdx + 1;
+                const stableKey = inventoryRowKey(row) ?? `row-${filteredIdx}`;
                 return (
-                  <tr key={rk(row)}
+                  <tr key={`${stableKey}-${filteredIdx}`}
                     className={`${selectedCell === rk(row) ? 'ms-row-sel' : ''} ${isDragHL ? 'ms-drag-hl' : ''}`}>
                     <td className="ms-num" onClick={() => setSelectedCell(rk(row))} title="Select row">{rowNum}</td>
                     {columns.map(col => {
@@ -1201,9 +1216,11 @@ function Manual() {
                           ? parseMonthYearInput(row[col.key])
                           : col.field === 'lot_no_numeric'
                             ? normLotNoNumeric(row[col.key])
-                            : col.type === 'number'
-                              ? normNumberField(row[col.key])
-                              : (row[col.key] ?? '');
+                            : (col.key === 'stack_no' || col.key === 'stack_total')
+                              ? formatStackField(row[col.key])
+                              : col.type === 'number'
+                                ? normNumberField(row[col.key])
+                                : (row[col.key] ?? '');
                       const origValNormalized = orig
                         ? (col.type === 'date'
                             ? toDateOnly(orig[col.key])
@@ -1211,18 +1228,22 @@ function Manual() {
                               ? parseMonthYearInput(orig[col.key])
                               : col.field === 'lot_no_numeric'
                                 ? normLotNoNumeric(orig[col.key])
-                                : col.type === 'number'
-                                  ? normNumberField(orig[col.key])
-                                  : String(orig[col.key] ?? ''))
+                                : (col.key === 'stack_no' || col.key === 'stack_total')
+                                  ? formatStackField(orig[col.key])
+                                  : col.type === 'number'
+                                    ? normNumberField(orig[col.key])
+                                    : String(orig[col.key] ?? ''))
                         : valNormalized;
                       const isChanged = String(valNormalized) !== String(origValNormalized);
                       const inputDisplayVal = col.type === 'month_year'
                         ? toMonthYearDisplay(row[col.key])
                         : col.field === 'lot_no_numeric'
                           ? normLotNoNumeric(row[col.key])
-                          : col.type === 'number'
-                            ? normNumberField(row[col.key])
-                            : valNormalized;
+                          : (col.key === 'stack_no' || col.key === 'stack_total')
+                            ? formatStackField(row[col.key])
+                            : col.type === 'number'
+                              ? normNumberField(row[col.key])
+                              : valNormalized;
                       return (
                         <td key={col.key} className={`ms-cell ms-cell-ed ${isActive ? 'ms-cell-active' : ''} ${isChanged ? 'ms-cell-dirty' : ''}`}>
                           <input

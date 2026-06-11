@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const XLSX = require('xlsx');
 const path = require('path');
 const pool = require('../config/db');
-const { purgeDuplicateLocationsForLine } = require('../utils/locationMaster');
+const { purgeDuplicateLocationsForLineStack } = require('../utils/locationMaster');
 const {
   bangkokYYYYMMDD,
   dateToYYYYMMDDInBangkok,
@@ -108,7 +108,7 @@ async function findOrCreateProduct(conn, fishName, size, bulkWeight, type, glazi
   return { id: result.insertId, isNew: true };
 }
 
-// Helper: one Location Master row per line_place; overwrite stack on existing line.
+// Helper: one location row per (line_place, stack_no).
 async function findOrCreateLocation(conn, linePlace, stackNo, stackTotal) {
   const code = normalizeLocationCode(linePlace);
   const stack = parseExcelInt(stackNo) || 1;
@@ -117,16 +117,18 @@ async function findOrCreateLocation(conn, linePlace, stackNo, stackTotal) {
     throw new Error('Missing location / Lines-Place');
   }
   const [existing] = await conn.query(
-    'SELECT id FROM locations WHERE UPPER(TRIM(line_place)) = ? ORDER BY is_active DESC, updated_at DESC, id ASC',
-    [code]
+    `SELECT id FROM locations
+     WHERE UPPER(TRIM(line_place)) = ? AND stack_no = ?
+     ORDER BY is_active DESC, updated_at DESC, id ASC`,
+    [code, stack]
   );
   if (existing.length > 0) {
     const keeperId = existing[0].id;
     await conn.query(
-      'UPDATE locations SET stack_no = ?, stack_total = ?, is_active = 1, updated_at = NOW() WHERE id = ?',
-      [stack, total, keeperId]
+      'UPDATE locations SET stack_total = ?, is_active = 1, updated_at = NOW() WHERE id = ?',
+      [total, keeperId]
     );
-    await purgeDuplicateLocationsForLine(conn, keeperId, code);
+    await purgeDuplicateLocationsForLineStack(conn, keeperId, code, stack);
     return { id: keeperId, isNew: false };
   }
   const [result] = await conn.query(

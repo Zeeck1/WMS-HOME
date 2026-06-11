@@ -63,7 +63,7 @@ router.post('/', async (req, res) => {
       );
       const conn = await pool.getConnection();
       try {
-        await purgeDuplicateLocationsForLine(conn, keeperId, code);
+        await purgeDuplicateLocationsForLine(conn, keeperId, code, stack);
       } finally {
         conn.release();
       }
@@ -110,7 +110,7 @@ router.put('/:id', async (req, res) => {
     );
     const conn = await pool.getConnection();
     try {
-      await purgeDuplicateLocationsForLine(conn, parseInt(req.params.id, 10), code);
+      await purgeDuplicateLocationsForLine(conn, parseInt(req.params.id, 10), code, stack);
     } finally {
       conn.release();
     }

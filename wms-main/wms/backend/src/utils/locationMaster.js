@@ -19,14 +19,18 @@ async function hardDeleteLocationIfUnused(conn, locationId) {
   return del.affectedRows > 0;
 }
 
-/** Re-point stock/withdrawals to keeper, then delete extra rows for the same line_place. */
-async function purgeDuplicateLocationsForLine(conn, keeperId, linePlace) {
+/**
+ * Re-point stock/withdrawals to keeper, then delete extra rows for the same line + stack.
+ * Different stack numbers at the same line stay separate (Manual shows every row).
+ */
+async function purgeDuplicateLocationsForLineStack(conn, keeperId, linePlace, stackNo) {
   const code = (linePlace || '').toString().toUpperCase().trim();
-  if (!code || !keeperId) return 0;
+  const stack = parseInt(String(stackNo ?? '').trim(), 10);
+  if (!code || !keeperId || !Number.isFinite(stack)) return 0;
 
   const [dupes] = await conn.query(
-    'SELECT id FROM locations WHERE UPPER(TRIM(line_place)) = ? AND id != ?',
-    [code, keeperId]
+    'SELECT id FROM locations WHERE UPPER(TRIM(line_place)) = ? AND stack_no = ? AND id != ?',
+    [code, stack, keeperId]
   );
 
   let removed = 0;
@@ -42,6 +46,18 @@ async function purgeDuplicateLocationsForLine(conn, keeperId, linePlace) {
     if (await hardDeleteLocationIfUnused(conn, row.id)) removed += 1;
   }
   return removed;
+}
+
+/** @deprecated Use purgeDuplicateLocationsForLineStack — kept for Location Master overwrite. */
+async function purgeDuplicateLocationsForLine(conn, keeperId, linePlace, stackNo = null) {
+  if (stackNo != null) {
+    return purgeDuplicateLocationsForLineStack(conn, keeperId, linePlace, stackNo);
+  }
+  const code = (linePlace || '').toString().toUpperCase().trim();
+  if (!code || !keeperId) return 0;
+  const [keeper] = await conn.query('SELECT stack_no FROM locations WHERE id = ?', [keeperId]);
+  if (!keeper.length) return 0;
+  return purgeDuplicateLocationsForLineStack(conn, keeperId, code, keeper[0].stack_no);
 }
 
 /** Any lot still has positive MC at this line (Manual / Stock OUT inventory). */
@@ -124,6 +140,7 @@ async function purgeUnusedLocationRows(conn) {
 module.exports = {
   hardDeleteLocationIfUnused,
   purgeDuplicateLocationsForLine,
+  purgeDuplicateLocationsForLineStack,
   purgeUnusedLocationRows,
   linePlaceHasActiveStock,
   pruneLocationMasterAfterStockRemoved,

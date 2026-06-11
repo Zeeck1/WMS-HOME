@@ -109,7 +109,12 @@ router.post('/employee-login', async (req, res) => {
       user = userRows[0];
     }
 
-    if (user.approval_status === 'pending' || user.is_active === 0) {
+    const awaitingApproval =
+      user.approval_status === 'pending'
+      || Number(user.is_active) === 0
+      || (user.employee_id && user.approval_status == null && Number(user.is_active) !== 1);
+
+    if (awaitingApproval) {
       return res.status(403).json({
         error: 'PENDING_APPROVAL',
         display_name: user.display_name,
@@ -142,6 +147,11 @@ router.post('/employee-login', async (req, res) => {
     });
   } catch (error) {
     console.error('Employee login error:', error);
+    if (error.code === 'ER_BAD_FIELD_ERROR') {
+      return res.status(503).json({
+        error: 'Employee login is not ready yet. Please restart the server after database migration completes.',
+      });
+    }
     res.status(500).json({ error: 'Login failed' });
   }
 });

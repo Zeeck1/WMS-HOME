@@ -4,7 +4,7 @@ const pool = require('../config/db');
 const { bangkokYYYYMMDD } = require('../utils/bangkokTime');
 const {
   hardDeleteLocationIfUnused,
-  purgeDuplicateLocationsForLine,
+  purgeDuplicateLocationsForLineStack,
   pruneLocationMasterAfterStockRemoved,
 } = require('../utils/locationMaster');
 
@@ -28,8 +28,9 @@ function parsePositiveInt(raw, label) {
 }
 
 /**
- * Location Master: one row per line_place.
- * e.g. A04R-1 was stack 555 — Manual add/edit with A04R-1 stack 666 overwrites to 666 only.
+ * One location row per (line_place, stack_no).
+ * Same line with different stacks = separate locations; same stack = shared location (many lots OK).
+ * Location Master page still shows one row per line (latest stack) — see locations route.
  */
 async function syncLocationForLine(conn, linePlace, stackNo, stackTotal, preferLocationId = null) {
   const code = (linePlace || '').toString().toUpperCase().trim();
@@ -40,42 +41,48 @@ async function syncLocationForLine(conn, linePlace, stackNo, stackTotal, preferL
   const totalParsed = parsePositiveInt(stackTotal ?? stackParsed.value, 'Stack Total');
   if (totalParsed.error) return { error: totalParsed.error };
 
-  const [allRows] = await conn.query(
-    'SELECT id FROM locations WHERE UPPER(TRIM(line_place)) = ? ORDER BY is_active DESC, updated_at DESC, id ASC',
-    [code]
-  );
-
-  if (allRows.length > 0) {
-    const ids = allRows.map((r) => r.id);
-    let keeperId = ids[0];
-    if (preferLocationId && ids.includes(preferLocationId)) {
-      keeperId = preferLocationId;
-    }
-
-    await conn.query(
-      `UPDATE locations SET line_place = ?, stack_no = ?, stack_total = ?, is_active = 1, updated_at = NOW()
-       WHERE id = ?`,
-      [code, stackParsed.value, totalParsed.value, keeperId]
+  if (preferLocationId) {
+    const [pref] = await conn.query(
+      'SELECT id, line_place, stack_no FROM locations WHERE id = ?',
+      [preferLocationId]
     );
-
-    await purgeDuplicateLocationsForLine(conn, keeperId, code);
-
-    return {
-      locationId: keeperId,
-      stack_no: stackParsed.value,
-      stack_total: totalParsed.value,
-      line_place: code,
-    };
+    if (
+      pref[0]
+      && String(pref[0].line_place || '').toUpperCase().trim() === code
+      && Number(pref[0].stack_no) === stackParsed.value
+    ) {
+      await conn.query(
+        `UPDATE locations SET line_place = ?, stack_total = ?, is_active = 1, updated_at = NOW()
+         WHERE id = ?`,
+        [code, totalParsed.value, preferLocationId]
+      );
+      await purgeDuplicateLocationsForLineStack(conn, preferLocationId, code, stackParsed.value);
+      return {
+        locationId: preferLocationId,
+        stack_no: stackParsed.value,
+        stack_total: totalParsed.value,
+        line_place: code,
+      };
+    }
   }
 
-  if (preferLocationId) {
+  const [exact] = await conn.query(
+    `SELECT id FROM locations
+     WHERE UPPER(TRIM(line_place)) = ? AND stack_no = ?
+     ORDER BY is_active DESC, updated_at DESC, id ASC`,
+    [code, stackParsed.value]
+  );
+
+  if (exact.length > 0) {
+    const keeperId = exact[0].id;
     await conn.query(
-      `UPDATE locations SET line_place = ?, stack_no = ?, stack_total = ?, is_active = 1, updated_at = NOW()
+      `UPDATE locations SET line_place = ?, stack_total = ?, is_active = 1, updated_at = NOW()
        WHERE id = ?`,
-      [code, stackParsed.value, totalParsed.value, preferLocationId]
+      [code, totalParsed.value, keeperId]
     );
+    await purgeDuplicateLocationsForLineStack(conn, keeperId, code, stackParsed.value);
     return {
-      locationId: preferLocationId,
+      locationId: keeperId,
       stack_no: stackParsed.value,
       stack_total: totalParsed.value,
       line_place: code,

@@ -74,9 +74,12 @@ function Login() {
     setError('');
     setLoading(true);
     try {
-      await employeeLogin(empId.trim());
+      const result = await employeeLogin(empId.trim());
+      if (result?.status === 'pending') return;
     } catch (err) {
-      setError(err.response?.data?.error || 'Login failed. Please try again.');
+      const msg = err.response?.data?.error;
+      if (msg === 'PENDING_APPROVAL') return;
+      setError(msg || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
