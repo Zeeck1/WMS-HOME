@@ -8,6 +8,44 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
+function isDuplicateColumnError(err) {
+  return err && (err.code === 'ER_DUP_FIELDNAME' || err.errno === 1060);
+}
+
+/** True if column exists — uses TABLE_SCHEMA, DATABASE(), then SHOW COLUMNS (hosted MySQL safe). */
+async function tableHasColumn(connection, tableName, columnName, dbName) {
+  const [bySchema] = await connection.query(
+    `SELECT 1 FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1`,
+    [dbName, tableName, columnName]
+  );
+  if (bySchema.length > 0) return true;
+
+  const [byDb] = await connection.query(
+    `SELECT 1 FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1`,
+    [tableName, columnName]
+  );
+  if (byDb.length > 0) return true;
+
+  const safeTable = String(tableName).replace(/[^a-zA-Z0-9_]/g, '');
+  const safeCol = String(columnName).replace(/[^a-zA-Z0-9_]/g, '');
+  if (!safeTable || !safeCol) return false;
+  const [show] = await connection.query(`SHOW COLUMNS FROM \`${safeTable}\` LIKE ?`, [safeCol]);
+  return show.length > 0;
+}
+
+async function addColumnIfMissing(connection, tableName, columnName, alterSql, dbName) {
+  if (await tableHasColumn(connection, tableName, columnName, dbName)) return false;
+  try {
+    await connection.query(alterSql);
+    return true;
+  } catch (e) {
+    if (isDuplicateColumnError(e)) return false;
+    throw e;
+  }
+}
+
 function getDbInitConfig() {
   const connectionUrl = process.env.DB_URL || process.env.DATABASE_URL || process.env.MYSQL_URL;
   if (connectionUrl) {
@@ -946,17 +984,18 @@ async function initDatabase() {
     console.log('  Table created: user_permissions');
 
     // Migrations: add columns to users if they don't exist yet
-    const [userCols] = await connection.query(
-      `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users'`,
-      [process.env.DB_NAME || 'wms_db']
-    );
-    const userColNames = userCols.map((c) => c.COLUMN_NAME);
-    if (!userColNames.includes('employee_id')) {
-      await connection.query('ALTER TABLE users ADD COLUMN employee_id VARCHAR(50) DEFAULT NULL AFTER display_name');
+    if (await addColumnIfMissing(
+      connection, 'users', 'employee_id',
+      'ALTER TABLE users ADD COLUMN employee_id VARCHAR(50) DEFAULT NULL AFTER display_name',
+      dbName
+    )) {
       console.log('  Migration: added employee_id to users');
     }
-    if (!userColNames.includes('approval_status')) {
-      await connection.query("ALTER TABLE users ADD COLUMN approval_status ENUM('pending','approved') DEFAULT NULL AFTER employee_id");
+    if (await addColumnIfMissing(
+      connection, 'users', 'approval_status',
+      "ALTER TABLE users ADD COLUMN approval_status ENUM('pending','approved') DEFAULT NULL AFTER employee_id",
+      dbName
+    )) {
       console.log('  Migration: added approval_status to users');
     }
 
