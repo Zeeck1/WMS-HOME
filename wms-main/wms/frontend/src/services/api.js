@@ -70,7 +70,11 @@ export const getWithdrawals = (params) => api.get('/withdrawals', { params });
 export const getWithdrawal = (id) => api.get(`/withdrawals/${id}`);
 export const createWithdrawal = (data) => api.post('/withdrawals', data);
 export const updateWithdrawalItems = (id, data) => api.put(`/withdrawals/${id}/items`, data);
-export const manualAdjustWithdrawal = (id, data) => api.put(`/withdrawals/${id}/manual-adjust`, data);
+/** Per-item stock-out mode: manual_stock_out 1 = Actual Out (deduct stock), 0 = Not Actual Out (print form only).
+ *  Token included so the superadmin can also change it on FINISHED requests (syncs stock OUT records). */
+export const setWithdrawalStockOutMode = (id, data) => api.put(`/withdrawals/${id}/stock-out-mode`, data, withAuth());
+/** Per-item print form visibility: show_actual 1 = print Actual/Net Weight/Time out/Process/Remark, 0 = blank */
+export const setWithdrawalFormActualMode = (id, data) => api.put(`/withdrawals/${id}/form-actual-mode`, data);
 /** Superadmin: adjust actual MC without stock balance checks; syncs FINISHED stock OUT records */
 export const superadminStockAdjustWithdrawal = (id, data) =>
   api.put(`/withdrawals/${id}/superadmin-stock-adjust`, data, withAuth());

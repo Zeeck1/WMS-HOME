@@ -4,7 +4,6 @@ import {
   FiSettings, FiSearch, FiCheck, FiXCircle, FiChevronDown, FiChevronUp, FiRefreshCw, FiPrinter, FiFileText, FiTrash2,
   FiMapPin, FiCalendar, FiRotateCcw, FiSave, FiPlus, FiEdit3
 } from 'react-icons/fi';
-import ManageManualAdjust from '../components/ManageManualAdjust';
 import {
   STATUS_FLOW, STATUS_CONFIG, withdrawDeptBadgeClass,
   loadWithdrawApproverName, saveWithdrawApproverName,
@@ -12,7 +11,7 @@ import {
 import { toast } from 'react-toastify';
 import {
   getWithdrawals, getWithdrawal, getInventory, updateWithdrawalStatus, updateWithdrawalItems,
-  superadminStockAdjustWithdrawal,
+  superadminStockAdjustWithdrawal, setWithdrawalStockOutMode, setWithdrawalFormActualMode,
   saveWithdrawalPickRoute, undoWithdrawalPickRoute, cancelWithdrawal, permanentlyDeleteWithdrawal, sendLineNotification,
   addWithdrawalItem
 } from '../services/api';
@@ -85,7 +84,38 @@ function currentItemQty(item, editedQty) {
     : Number(item.quantity_mc);
 }
 
-function ManageWithdrawItemRow({ item, rowNum, isEditable, editedQty, setEditedQty, unlimitedQty = false }) {
+/** manual_stock_out: 0 = Not Actual Out (print form only), 1/null = Actual Out (deduct stock). */
+function OutModeBadge({ outMode }) {
+  const isNoOut = outMode === 0;
+  return (
+    <span
+      className={`mg-mode-badge ${isNoOut ? 'no-stock' : 'stock'}`}
+      title={isNoOut ? 'Shown on print form — stock will NOT be deducted' : 'Stock will be deducted when finished'}
+    >
+      {isNoOut ? 'Not Actual Out' : 'Actual Out'}
+    </span>
+  );
+}
+
+/** show_actual_on_form: 0 = blank Actual CTN / Net Weight / Time out on print form, 1/null = printed. */
+function FormActualBadge({ formActual }) {
+  const isHidden = formActual === 0;
+  return (
+    <span
+      className={`mg-mode-badge ${isHidden ? 'form-hidden' : 'form-shown'}`}
+      title={isHidden
+        ? 'Print form: Actual CTN / Net Weight / Time out stay blank (Process and Remark always print)'
+        : 'Print form: Actual CTN / Net Weight / Time out are printed'}
+    >
+      {isHidden ? 'Hidden' : 'Shown'}
+    </span>
+  );
+}
+
+function ManageWithdrawItemRow({
+  item, rowNum, isEditable, editedQty, setEditedQty, unlimitedQty = false,
+  selectable = false, selected = false, onToggleSelect = null, outMode = null, formActual = null,
+}) {
   const balance = Number(item.hand_on_balance || 0);
   const requestedMc = Number(item.requested_mc || item.quantity_mc);
   const currentQty = currentItemQty(item, editedQty);
@@ -96,7 +126,17 @@ function ManageWithdrawItemRow({ item, rowNum, isEditable, editedQty, setEditedQ
   const actualDiffers = currentQty !== requestedMc;
 
   return (
-    <tr className={`mg-group-detail-row ${isInsufficient && isEditable ? 'mg-row-warn' : ''}`}>
+    <tr className={`mg-group-detail-row ${isInsufficient && isEditable ? 'mg-row-warn' : ''} ${selected ? 'mg-row-selected' : ''}`}>
+      {selectable && (
+        <td className="mg-select-cell">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelect && onToggleSelect(item)}
+            aria-label="Select item"
+          />
+        </td>
+      )}
       <td>{rowNum}</td>
       <td><strong>{item.fish_name}</strong></td>
       <td>{item.size}</td>
@@ -155,6 +195,8 @@ function ManageWithdrawItemRow({ item, rowNum, isEditable, editedQty, setEditedQ
           </span>
         )}
       </td>
+      <td><OutModeBadge outMode={outMode} /></td>
+      <td><FormActualBadge formActual={formActual} /></td>
     </tr>
   );
 }
@@ -164,7 +206,6 @@ function Manage() {
   const location = useLocation();
   const { user } = useAuth();
   const isSuperadmin = user?.role === 'superadmin';
-  const [manageTab, setManageTab] = useState('manage'); // manage | manual
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState(null);
@@ -182,6 +223,9 @@ function Manage() {
   const [managerName, setManagerName] = useState('');
   const [managerNameSaved, setManagerNameSaved] = useState(false);
   const [dispatcherName, setDispatcherName] = useState('');
+
+  const [selectedItemIds, setSelectedItemIds] = useState(() => new Set());
+  const [settingOutMode, setSettingOutMode] = useState(false);
 
   const [showAddItem, setShowAddItem] = useState(false);
   const [addItemSearch, setAddItemSearch] = useState({ fish_name: '', location: '', stack_no: '' });
@@ -289,6 +333,7 @@ function Manage() {
       setShowAddItem(false);
       setAddItemResults([]);
       setDispatcherName('');
+      setSelectedItemIds(new Set());
       return;
     }
     try {
@@ -301,6 +346,7 @@ function Manage() {
       applyManagerNameFromRequest(wRes.data);
       applyDispatcherFromRequest(wRes.data);
       setEditedQty({});
+      setSelectedItemIds(new Set());
       setInventory(invRes.data || []);
       const savedMode = wRes.data.pick_route_saved
         ? (wRes.data.pick_route_mode || 'nearest')
@@ -413,7 +459,74 @@ function Manage() {
       : 'nearest';
     setPickRouteTab(savedMode);
     setEditedQty({});
+    setSelectedItemIds(new Set());
     fetchRequests();
+  };
+
+  /** manual_stock_out per withdraw_item id (authoritative from the request detail, not display lines). */
+  const outModeById = useMemo(() => {
+    const map = {};
+    (expandedData?.items || []).forEach((it) => {
+      if (it.id != null) map[Number(it.id)] = it.manual_stock_out;
+    });
+    return map;
+  }, [expandedData]);
+
+  /** show_actual_on_form per withdraw_item id (0 = blank Actual/Net Weight/Time out/Process/Remark on print form). */
+  const formActualById = useMemo(() => {
+    const map = {};
+    (expandedData?.items || []).forEach((it) => {
+      if (it.id != null) map[Number(it.id)] = it.show_actual_on_form;
+    });
+    return map;
+  }, [expandedData]);
+
+  const toggleItemSelected = useCallback((item) => {
+    const id = Number(item.id);
+    if (!Number.isFinite(id)) return;
+    setSelectedItemIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleSetOutMode = async (requestId, mode) => {
+    if (selectedItemIds.size === 0) return;
+    setSettingOutMode(true);
+    try {
+      const res = await setWithdrawalStockOutMode(requestId, {
+        item_ids: [...selectedItemIds],
+        manual_stock_out: mode,
+      });
+      toast.success(res.data?.message || 'Stock-out mode updated');
+      // Stock balances may change (FINISHED sync) — reload request, inventory, and list
+      await reloadExpanded(requestId);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to update stock-out mode');
+    } finally {
+      setSettingOutMode(false);
+    }
+  };
+
+  const handleSetFormActual = async (requestId, show) => {
+    if (selectedItemIds.size === 0) return;
+    setSettingOutMode(true);
+    try {
+      const res = await setWithdrawalFormActualMode(requestId, {
+        item_ids: [...selectedItemIds],
+        show_actual: show,
+      });
+      toast.success(res.data?.message || 'Print form visibility updated');
+      const wRes = await getWithdrawal(requestId);
+      setExpandedData(wRes.data);
+      setSelectedItemIds(new Set());
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to update print form visibility');
+    } finally {
+      setSettingOutMode(false);
+    }
   };
 
   const handleSearchAddItem = async () => {
@@ -554,10 +667,15 @@ function Manage() {
     }
 
     const isManualNoStock = Boolean(req.manual_adjust || expandedData?.manual_adjust);
+    const reqItems = expandedData?.items || [];
+    const noOutCount = reqItems.filter((it) => it.manual_stock_out === 0).length;
+    const outCount = reqItems.length - noOutCount;
     const confirmMsg = config.next === 'FINISHED'
       ? (isManualNoStock
         ? 'This request is manual adjust — finish without deducting stock?'
-        : 'This will perform Stock OUT for all items. Continue?')
+        : noOutCount > 0
+          ? `Finish this request?\n\n• ${outCount} item(s) — Actual Out: stock WILL be deducted\n• ${noOutCount} item(s) — Not Actual Out: shown on print form, stock NOT deducted`
+          : 'This will perform Stock OUT for all items. Continue?')
       : `Advance to "${STATUS_CONFIG[config.next].label}"?`;
 
     if (!window.confirm(confirmMsg)) return;
@@ -676,26 +794,7 @@ function Manage() {
       </div>
       <div className="page-body">
 
-        {isSuperadmin && (
-          <div className="mg-main-tabs">
-            <button
-              type="button"
-              className={`mg-main-tab ${manageTab === 'manage' ? 'mg-main-tab--active' : ''}`}
-              onClick={() => setManageTab('manage')}
-            >
-              <FiSettings style={{ marginRight: 6 }} /> Manage
-            </button>
-            <button
-              type="button"
-              className={`mg-main-tab ${manageTab === 'manual' ? 'mg-main-tab--active' : ''}`}
-              onClick={() => setManageTab('manual')}
-            >
-              <FiEdit3 style={{ marginRight: 6 }} /> Manual Adjust
-            </button>
-          </div>
-        )}
-
-        {/* Filters — shared by Manage + Manual Adjust */}
+        {/* Filters */}
         <div className="filter-bar" style={{ marginBottom: 16 }}>
           <div style={{ position: 'relative', flex: 1, maxWidth: 300 }}>
             <FiSearch style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--gray-400)' }} />
@@ -737,10 +836,6 @@ function Manage() {
           </div>
         </div>
 
-        {isSuperadmin && manageTab === 'manual' ? (
-          <ManageManualAdjust requests={filtered} loading={loading} onRefresh={fetchRequests} />
-        ) : (
-        <>
         {/* Status summary cards */}
         <div className="mg-status-cards">
           {STATUS_FLOW.map(s => (
@@ -778,6 +873,18 @@ function Manage() {
               const isProcessing = processing === req.id;
               const canAdvance = config?.next && req.status !== 'CANCELLED';
               const canCancel = req.status !== 'FINISHED' && req.status !== 'CANCELLED';
+              // Superadmin may still flip Actual Out / Not Actual Out after FINISHED (syncs stock records)
+              const canSelectOutMode = req.status !== 'CANCELLED'
+                && (req.status !== 'FINISHED' || isSuperadmin);
+              // Print-form actual columns can be chosen from Ready onward, even when Finished
+              const canSelectFormActual = req.status === 'READY' || req.status === 'FINISHED';
+              const canSelectItems = canSelectOutMode || canSelectFormActual;
+              const selectableIds = isExpanded
+                ? [...new Set(displayItems
+                    .filter((it) => it.id != null && Number.isFinite(Number(it.id)))
+                    .map((it) => Number(it.id)))]
+                : [];
+              const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedItemIds.has(id));
 
               return (
                 <div key={req.id} className={`mg-request-card ${isExpanded ? 'expanded' : ''}`}>
@@ -896,9 +1003,77 @@ function Manage() {
                             {' '}— stock will be deducted from these locations when finished.
                           </p>
                         )}
+                        {canSelectItems && selectedItemIds.size > 0 && (
+                          <div className="mg-outmode-bar">
+                            <span className="mg-outmode-count">{selectedItemIds.size} item(s) selected</span>
+                            {canSelectOutMode && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="mg-mode-btn active-stock"
+                                  disabled={settingOutMode}
+                                  onClick={() => handleSetOutMode(req.id, 1)}
+                                  title="Stock will be deducted for these items when finished"
+                                >
+                                  <FiCheck /> Actual Out
+                                </button>
+                                <button
+                                  type="button"
+                                  className="mg-mode-btn active-no-stock"
+                                  disabled={settingOutMode}
+                                  onClick={() => handleSetOutMode(req.id, 0)}
+                                  title="Items stay on the print form but stock will NOT be deducted"
+                                >
+                                  <FiXCircle /> Not Actual Out
+                                </button>
+                              </>
+                            )}
+                            {canSelectFormActual && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="mg-mode-btn active-form"
+                                  disabled={settingOutMode}
+                                  onClick={() => handleSetFormActual(req.id, 1)}
+                                  title="Print Actual CTN / Net Weight / Time out for these items"
+                                >
+                                  <FiPrinter /> Show Actual on Form
+                                </button>
+                                <button
+                                  type="button"
+                                  className="mg-mode-btn active-form-off"
+                                  disabled={settingOutMode}
+                                  onClick={() => handleSetFormActual(req.id, 0)}
+                                  title="Leave Actual CTN / Net Weight / Time out blank on the print form (Process and Remark still print)"
+                                >
+                                  <FiXCircle /> Hide Actual on Form
+                                </button>
+                              </>
+                            )}
+                            <button
+                              type="button"
+                              className="mg-mode-btn"
+                              disabled={settingOutMode}
+                              onClick={() => setSelectedItemIds(new Set())}
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        )}
                         <table className="table mg-items-table">
                           <thead>
                             <tr>
+                              {canSelectItems && (
+                                <th className="mg-select-cell">
+                                  <input
+                                    type="checkbox"
+                                    checked={allSelected}
+                                    onChange={() => setSelectedItemIds(allSelected ? new Set() : new Set(selectableIds))}
+                                    title="Select all items"
+                                    aria-label="Select all items"
+                                  />
+                                </th>
+                              )}
                               <th>#</th>
                               <th>Fish Name</th>
                               <th>Size</th>
@@ -909,6 +1084,8 @@ function Manage() {
                               <th className="mg-col-qty">Actual (MC)</th>
                               <th>Weight (KG)</th>
                               <th>Status</th>
+                              <th>Stock Out</th>
+                              <th>Form Actual</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -938,6 +1115,7 @@ function Manage() {
                                 if (multiLine) {
                                   rows.push(
                                     <tr key={`${group.key}-header`} className="mg-group-row">
+                                      {canSelectItems && <td className="mg-select-cell" />}
                                       <td className="mg-group-num">—</td>
                                       <td>
                                         <strong>{withdrawFishNameLabel(group)}</strong>
@@ -966,6 +1144,8 @@ function Manage() {
                                           </span>
                                         )}
                                       </td>
+                                      <td />
+                                      <td />
                                     </tr>
                                   );
                                 }
@@ -976,8 +1156,18 @@ function Manage() {
                                     rows.push(
                                       <tr
                                         key={item.id}
-                                        className={`mg-group-detail-row ${isQtyEditable && !unlimitedQty && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) ? 'mg-row-warn' : ''}`}
+                                        className={`mg-group-detail-row ${isQtyEditable && !unlimitedQty && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) ? 'mg-row-warn' : ''} ${selectedItemIds.has(Number(item.id)) ? 'mg-row-selected' : ''}`}
                                       >
+                                        {canSelectItems && (
+                                          <td className="mg-select-cell">
+                                            <input
+                                              type="checkbox"
+                                              checked={selectedItemIds.has(Number(item.id))}
+                                              onChange={() => toggleItemSelected(item)}
+                                              aria-label="Select item"
+                                            />
+                                          </td>
+                                        )}
                                         <td>{rowNum}</td>
                                         <td colSpan={2} className="mg-group-detail-spacer" aria-hidden="true" />
                                   <td>{item.line_place}</td>
@@ -1048,6 +1238,8 @@ function Manage() {
                                             <span className="mg-stock-ok"><FiCheck size={12} /> OK</span>
                                     )}
                                   </td>
+                                        <td><OutModeBadge outMode={outModeById[Number(item.id)]} /></td>
+                                        <td><FormActualBadge formActual={formActualById[Number(item.id)]} /></td>
                                 </tr>
                               );
                                   } else {
@@ -1060,6 +1252,11 @@ function Manage() {
                                         editedQty={editedQty}
                                         setEditedQty={setEditedQty}
                                         unlimitedQty={unlimitedQty}
+                                        selectable={canSelectItems}
+                                        selected={selectedItemIds.has(Number(item.id))}
+                                        onToggleSelect={toggleItemSelected}
+                                        outMode={outModeById[Number(item.id)]}
+                                        formActual={formActualById[Number(item.id)]}
                                       />
                                     );
                                   }
@@ -1316,8 +1513,6 @@ function Manage() {
               </div>
             ))}
           </div>
-        )}
-        </>
         )}
       </div>
     </>

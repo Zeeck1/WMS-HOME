@@ -121,15 +121,6 @@ export default function Approval() {
     }
   };
 
-  const formPreviewData = useMemo(() => {
-    if (!selectedData) return null;
-    const name = approverName.trim();
-    if (selectedData.status === 'PENDING' && name) {
-      return { ...selectedData, managed_by: name };
-    }
-    return selectedData;
-  }, [selectedData, approverName]);
-
   const openApproveModal = (req) => {
     const name = approverName.trim();
     if (!name) {
@@ -355,12 +346,12 @@ export default function Approval() {
             </div>
           ) : loadingForm ? (
             <div className="loading"><div className="spinner" />Loading form...</div>
-          ) : formPreviewData ? (
+          ) : selectedData ? (
             <div className="ap-form-panel">
               <div className="ap-form-panel-header">
                 <div>
-                  <strong>{formPreviewData.request_no}</strong>
-                  <span className="ap-form-panel-dept">{formPreviewData.department}</span>
+                  <strong>{selectedData.request_no}</strong>
+                  <span className="ap-form-panel-dept">{selectedData.department}</span>
                 </div>
                 <div className="ap-form-panel-actions">
                   <button
@@ -398,7 +389,7 @@ export default function Approval() {
                 </div>
               </div>
               <div className="ap-form-scroll ap-form-print-target">
-                <WithdrawFormPrint ref={formRef} data={formPreviewData} />
+                <WithdrawFormPrint ref={formRef} data={selectedData} />
               </div>
             </div>
           ) : null}

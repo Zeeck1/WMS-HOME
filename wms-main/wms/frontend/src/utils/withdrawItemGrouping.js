@@ -13,13 +13,82 @@ export const actualMc = (it) => Number(it.quantity_mc ?? 0);
 
 /** Stack No column for reports — location stack; CE falls back to ST NO when stack is blank. */
 export function withdrawLineStackNo(item) {
-  const stack = item?.stack_no;
-  if (stack != null && stack !== '') return String(stack);
+  const stack = item?.stack_no != null ? String(item.stack_no).trim() : '';
+  if (stack !== '') return stack;
   if (String(item?.stock_type || '').toUpperCase() === 'CONTAINER_EXTRA') {
-    const stNo = item?.st_no != null && String(item.st_no).trim() !== '' ? String(item.st_no).trim() : null;
-    if (stNo) return stNo;
+    const stNo = item?.st_no != null ? String(item.st_no).trim() : '';
+    if (stNo !== '') return stNo;
   }
   return '';
+}
+
+/**
+ * Find the Manual / Stock Summary inventory row for a withdrawal line.
+ * Matches lot+location first, then lot+line_place (handles location_id drift after Manual edits).
+ */
+export function findInventoryRowForWithdrawLine(line, inventory) {
+  const rows = inventory || [];
+  if (!rows.length || !line) return null;
+
+  const impId = line.import_item_id ?? line._imp_item_id;
+  if (impId != null) {
+    const byImp = rows.find((inv) => inv._imp_item_id === impId);
+    if (byImp) return byImp;
+  }
+
+  if (line.lot_id != null && line.location_id != null) {
+    const byLoc = rows.find(
+      (inv) => inv.lot_id === line.lot_id && inv.location_id === line.location_id
+    );
+    if (byLoc) return byLoc;
+  }
+
+  if (line.lot_id != null && line.line_place) {
+    const lp = String(line.line_place).trim().toUpperCase();
+    const byPlace = rows.filter(
+      (inv) =>
+        inv.lot_id === line.lot_id &&
+        String(inv.line_place || '').trim().toUpperCase() === lp
+    );
+    if (byPlace.length === 1) return byPlace[0];
+    if (byPlace.length > 1) {
+      const withBal = byPlace.find((inv) => Number(inv.hand_on_balance_mc) > 0);
+      return withBal || byPlace[0];
+    }
+  }
+
+  if (line.line_place && line.fish_name) {
+    const pk = withdrawProductKey(line);
+    const lp = String(line.line_place).trim().toUpperCase();
+    const candidates = rows.filter(
+      (inv) =>
+        withdrawProductKey(inv) === pk &&
+        String(inv.line_place || '').trim().toUpperCase() === lp
+    );
+    if (line.lot_id != null) {
+      const byLot = candidates.find((inv) => inv.lot_id === line.lot_id);
+      if (byLot) return byLot;
+    }
+    if (candidates.length === 1) return candidates[0];
+  }
+
+  return null;
+}
+
+/** Overlay stack_no / st_no from live Manual inventory so reports match the Manual page. */
+export function enrichWithdrawLineFromInventory(line, inventory) {
+  const inv = findInventoryRowForWithdrawLine(line, inventory);
+  if (!inv) return line;
+  return {
+    ...line,
+    stack_no: inv.stack_no != null && inv.stack_no !== '' ? inv.stack_no : line.stack_no,
+    st_no: inv.st_no != null && inv.st_no !== '' ? inv.st_no : line.st_no,
+    line_place: inv.line_place ?? line.line_place,
+  };
+}
+
+export function enrichWithdrawLinesFromInventory(lines, inventory) {
+  return (lines || []).map((line) => enrichWithdrawLineFromInventory(line, inventory));
 }
 
 /** Product identity key (matches Withdraw / Stock Summary grouping). */

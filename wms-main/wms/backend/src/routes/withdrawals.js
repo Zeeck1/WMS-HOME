@@ -3,7 +3,19 @@ const router = express.Router();
 const pool = require('../config/db');
 const { pruneLocationMasterAfterStockRemoved } = require('../utils/locationMaster');
 const { bangkokYYYYMMDDCompact } = require('../utils/bangkokTime');
-const { authMiddleware, superadminOnly } = require('../middleware/auth');
+const jwt = require('jsonwebtoken');
+const { authMiddleware, superadminOnly, JWT_SECRET } = require('../middleware/auth');
+
+/** Parse the Bearer token when present without rejecting the request (route stays public for normal flow). */
+function getOptionalUser(req) {
+  try {
+    const header = req.headers.authorization;
+    if (!header || !header.startsWith('Bearer ')) return null;
+    return jwt.verify(header.split(' ')[1], JWT_SECRET);
+  } catch {
+    return null;
+  }
+}
 const {
   queryWithdrawItemsDetailed,
   freezeWithdrawItemsSnapshot,
@@ -561,117 +573,160 @@ router.post('/:id/add-item', authMiddleware, superadminOnly, async (req, res) =>
   }
 });
 
-// ─── PUT manual adjust (superadmin) — edit cartons without stock checks / deduction ──
-router.put('/:id/manual-adjust', authMiddleware, superadminOnly, async (req, res) => {
+// ─── PUT per-item stock-out mode (Manage page) ──
+// manual_stock_out: 1 = Actual Out (deduct stock when finished), 0 = Not Actual Out
+// (item stays on the request and print form but stock is never deducted).
+// On FINISHED requests only the superadmin may change it — linked stock OUT records
+// are created (Actual Out) or removed (Not Actual Out) so stock stays in sync.
+router.put('/:id/stock-out-mode', async (req, res) => {
   const conn = await pool.getConnection();
   try {
-    await conn.beginTransaction();
-    const { items, finish, managed_by, dispatcher } = req.body;
-
-    if (!Array.isArray(items) || items.length === 0) {
-      await conn.rollback();
-      return res.status(400).json({ error: 'items array is required' });
+    const { item_ids, manual_stock_out } = req.body;
+    if (!Array.isArray(item_ids) || item_ids.length === 0) {
+      return res.status(400).json({ error: 'item_ids array is required' });
     }
+    const mode = manual_stock_out ? 1 : 0;
 
     const [requests] = await conn.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
     if (requests.length === 0) {
-      await conn.rollback();
       return res.status(404).json({ error: 'Request not found' });
     }
     const request = requests[0];
     if (request.status === 'CANCELLED') {
-      await conn.rollback();
-      return res.status(400).json({ error: 'Cannot adjust a cancelled request' });
+      return res.status(400).json({ error: 'Cannot modify a cancelled request' });
     }
-    if (request.status === 'FINISHED') {
-      await conn.rollback();
-      return res.status(400).json({ error: 'Finished withdrawals are permanent and cannot be modified' });
-    }
-
-    for (const item of items) {
-      if (!item.id) continue;
-      const qty = Number(item.quantity_mc);
-      if (!Number.isFinite(qty) || qty < 0) {
-        await conn.rollback();
-        return res.status(400).json({ error: 'Each item must have quantity_mc >= 0' });
+    const isFinished = request.status === 'FINISHED';
+    if (isFinished) {
+      const user = getOptionalUser(req);
+      if (user?.role !== 'superadmin') {
+        return res.status(403).json({ error: 'Only the superadmin can change Actual Out / Not Actual Out after the withdrawal is finished' });
       }
-      const reqMc = item.requested_mc !== undefined ? Number(item.requested_mc) : null;
-      if (reqMc !== null && (!Number.isFinite(reqMc) || reqMc < 0)) {
-        await conn.rollback();
-        return res.status(400).json({ error: 'requested_mc must be >= 0 when provided' });
-      }
-
-      const [wiRows] = await conn.query(`
-        SELECT wi.*, p.bulk_weight_kg, ii.wet_mc
-        FROM withdraw_items wi
-        LEFT JOIN lots l ON wi.lot_id = l.id
-        LEFT JOIN products p ON l.product_id = p.id
-        LEFT JOIN import_items ii ON wi.import_item_id = ii.id
-        WHERE wi.id = ? AND wi.request_id = ?
-      `, [item.id, req.params.id]);
-      if (wiRows.length === 0) continue;
-
-      const wi = wiRows[0];
-      const newReq = reqMc !== null ? reqMc : Number(wi.requested_mc);
-      const unitKg = wi.import_item_id
-        ? Number(wi.wet_mc) || 0
-        : Number(wi.bulk_weight_kg) || 0;
-
-      await conn.query(
-        'UPDATE withdraw_items SET quantity_mc = ?, requested_mc = ?, weight_kg = ? WHERE id = ?',
-        [qty, newReq, qty * unitKg, item.id]
-      );
     }
 
-    const dispInput = dispatcher !== undefined ? String(dispatcher || '').trim() : null;
+    const ids = item_ids.map((v) => parseInt(v, 10)).filter((v) => Number.isFinite(v));
+    if (ids.length === 0) {
+      return res.status(400).json({ error: 'No valid item ids provided' });
+    }
 
-    if (finish) {
-      const disp = dispInput || String(request.dispatcher || '').trim();
-      if (!disp) {
-        await conn.rollback();
-        return res.status(400).json({ error: 'Dispatcher name is required before finishing' });
+    await conn.beginTransaction();
+
+    const ph = ids.map(() => '?').join(',');
+    const [wiRows] = await conn.query(`
+      SELECT wi.*, p.bulk_weight_kg, ii.wet_mc AS import_wet_mc, ii.shipment_id
+      FROM withdraw_items wi
+      LEFT JOIN lots l ON wi.lot_id = l.id
+      LEFT JOIN products p ON l.product_id = p.id
+      LEFT JOIN import_items ii ON wi.import_item_id = ii.id
+      WHERE wi.request_id = ? AND wi.id IN (${ph})
+    `, [req.params.id, ...ids]);
+
+    for (const wi of wiRows) {
+      await conn.query('UPDATE withdraw_items SET manual_stock_out = ? WHERE id = ?', [mode, wi.id]);
+      if (!isFinished) continue;
+
+      // FINISHED: keep linked stock OUT records in sync with the new mode
+      if (mode === 0) {
+        if (wi.movement_id) {
+          await conn.query('DELETE FROM movements WHERE id = ?', [wi.movement_id]);
+          await conn.query('UPDATE withdraw_items SET movement_id = NULL WHERE id = ?', [wi.id]);
+        }
+        if (wi.import_stock_out_id) {
+          await conn.query('DELETE FROM import_stock_outs WHERE id = ?', [wi.import_stock_out_id]);
+          await conn.query('UPDATE withdraw_items SET import_stock_out_id = NULL WHERE id = ?', [wi.id]);
+          if (wi.shipment_id) {
+            await conn.query('UPDATE import_shipments SET last_update_stock = NOW() WHERE id = ?', [wi.shipment_id]);
+          }
+        }
+      } else if (mode === 1 && !wi.movement_id && !wi.import_stock_out_id) {
+        if (wi.import_item_id) {
+          const wd = request.withdraw_date;
+          const dateOut = wd ? String(wd).slice(0, 10) : new Date().toISOString().slice(0, 10);
+          const nwKgs = Number(wi.weight_kg) || wi.quantity_mc * (Number(wi.import_wet_mc) || 0);
+          const orderRef = (wi.production_process || '').trim() || request.department || '';
+          const [insOut] = await conn.query(
+            `INSERT INTO import_stock_outs (item_id, date_out, order_ref, mc, nw_kgs) VALUES (?,?,?,?,?)`,
+            [wi.import_item_id, dateOut, orderRef, wi.quantity_mc, nwKgs]
+          );
+          await conn.query('UPDATE withdraw_items SET import_stock_out_id = ? WHERE id = ?', [insOut.insertId, wi.id]);
+          if (wi.shipment_id) {
+            await conn.query('UPDATE import_shipments SET last_update_stock = NOW() WHERE id = ?', [wi.shipment_id]);
+          }
+        } else if (wi.lot_id && wi.location_id) {
+          const bulkKg = Number(wi.bulk_weight_kg) || 0;
+          const [movResult] = await conn.query(
+            `INSERT INTO movements (lot_id, location_id, quantity_mc, weight_kg, movement_type, reference_no, notes, created_by)
+             VALUES (?, ?, ?, ?, 'OUT', ?, ?, ?)`,
+            [wi.lot_id, wi.location_id, wi.quantity_mc, wi.quantity_mc * bulkKg,
+              request.request_no, `Withdrawal for ${request.department} dept`, request.managed_by || 'superadmin']
+          );
+          await conn.query('UPDATE withdraw_items SET movement_id = ? WHERE id = ?', [movResult.insertId, wi.id]);
+          await pruneLocationMasterAfterStockRemoved(conn, wi.location_id);
+        }
       }
-      const mgr = String(managed_by || request.managed_by || 'Manual Adjust').trim();
-      await conn.query(
-        `UPDATE withdraw_requests
-         SET manual_adjust = 1,
-             status = 'FINISHED',
-             finished_at = COALESCE(finished_at, NOW()),
-             managed_by = COALESCE(NULLIF(?, ''), managed_by),
-             dispatcher = ?,
-             updated_at = NOW()
-         WHERE id = ?`,
-        [mgr, disp, req.params.id]
-      );
-      await freezeWithdrawItemsSnapshot(conn, req.params.id);
-    } else if (dispInput !== null) {
-      await conn.query(
-        'UPDATE withdraw_requests SET manual_adjust = 1, dispatcher = ?, updated_at = NOW() WHERE id = ?',
-        [dispInput || null, req.params.id]
-      );
-    } else {
-      await conn.query(
-        'UPDATE withdraw_requests SET manual_adjust = 1, updated_at = NOW() WHERE id = ?',
-        [req.params.id]
-      );
     }
 
     await conn.commit();
 
-    const [updated] = await pool.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
-    const newItems = await queryWithdrawItemsDetailed(pool, req.params.id);
-
+    const items = await queryWithdrawItemsDetailed(pool, req.params.id);
     res.json({
-      message: finish ? 'Manual adjust saved and marked finished (no stock deducted)' : 'Manual adjust saved',
-      request: updated[0],
-      items: newItems,
+      message: mode === 1
+        ? (isFinished
+          ? 'Items set to Actual Out — stock OUT records created'
+          : 'Items set to Actual Out — stock will be deducted when finished')
+        : (isFinished
+          ? 'Items set to Not Actual Out — stock OUT records removed (stock restored)'
+          : 'Items set to Not Actual Out — shown on print form, no stock deduction'),
+      items,
     });
   } catch (error) {
     await conn.rollback();
-    console.error('Error manual adjust:', error);
-    res.status(500).json({ error: 'Failed to save manual adjust' });
+    console.error('Error setting stock-out mode:', error);
+    res.status(500).json({ error: 'Failed to set stock-out mode' });
   } finally {
     conn.release();
+  }
+});
+
+// ─── PUT per-item print form actual visibility (Manage page) ──
+// show_actual_on_form: 1 = show Actual CTN / Net Weight / Time out on the print form for this
+// item, 0 = leave those columns blank (Production Process and Remark always print).
+// Display-only flag: allowed even on FINISHED requests (quantities and stock are never touched).
+router.put('/:id/form-actual-mode', async (req, res) => {
+  try {
+    const { item_ids, show_actual } = req.body;
+    if (!Array.isArray(item_ids) || item_ids.length === 0) {
+      return res.status(400).json({ error: 'item_ids array is required' });
+    }
+    const mode = show_actual ? 1 : 0;
+
+    const [requests] = await pool.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
+    if (requests.length === 0) {
+      return res.status(404).json({ error: 'Request not found' });
+    }
+    if (requests[0].status === 'CANCELLED') {
+      return res.status(400).json({ error: 'Cannot modify a cancelled request' });
+    }
+
+    const ids = item_ids.map((v) => parseInt(v, 10)).filter((v) => Number.isFinite(v));
+    if (ids.length === 0) {
+      return res.status(400).json({ error: 'No valid item ids provided' });
+    }
+    const ph = ids.map(() => '?').join(',');
+    await pool.query(
+      `UPDATE withdraw_items SET show_actual_on_form = ? WHERE request_id = ? AND id IN (${ph})`,
+      [mode, req.params.id, ...ids]
+    );
+
+    const items = await queryWithdrawItemsDetailed(pool, req.params.id);
+    res.json({
+      message: mode === 1
+        ? 'Items will show Actual / Net Weight / Time out on the print form'
+        : 'Items will print with blank Actual / Net Weight / Time out columns',
+      items,
+    });
+  } catch (error) {
+    console.error('Error setting form actual mode:', error);
+    res.status(500).json({ error: 'Failed to set print form visibility' });
   }
 });
 
@@ -819,6 +874,9 @@ router.put('/:id/status', async (req, res) => {
       `, [req.params.id]);
 
       for (const item of items) {
+        // Not Actual Out — keep the line on the request/print form but never touch stock
+        if (item.manual_stock_out !== null && Number(item.manual_stock_out) === 0) continue;
+
         if (item.import_item_id) {
           const imp = await getImportItemBalanceMc(conn, item.import_item_id);
           if (!imp) {

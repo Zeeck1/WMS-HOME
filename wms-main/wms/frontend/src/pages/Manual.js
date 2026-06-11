@@ -5,6 +5,11 @@ import { getInventory, manualUpdateCell, manualDeleteRow, manualAddRow } from '.
 import { parseLocationCode } from '../config/warehouseConfig';
 import ColumnFilterDropdown from '../components/ColumnFilterDropdown';
 import { bangkokYYYYMMDD, bangkokLocaleString, dateToYYYYMMDDInBangkok } from '../utils/bangkokTime';
+import {
+  MANUAL_FETCH_LIMIT,
+  filterInventoryRowsByTab,
+  normalizeManualInventoryRow,
+} from '../utils/manualInventoryShared';
 
 const normLotNoNumeric = (v) => String(v ?? '').replace(/\D/g, '');
 
@@ -85,33 +90,12 @@ const rowKeyHasPendingEdits = (rowKey, pendingMap) => {
   const prefix = `${rowKey}-`;
   return Object.keys(pendingMap || {}).some((k) => k.startsWith(prefix));
 };
-const MANUAL_FETCH_LIMIT = 2000;
-
 /** Save line/place before stack so stack updates the final location after merges. */
 const MANUAL_SAVE_FIELD_ORDER = { line_place: 0, stack_no: 1, stack_total: 2 };
 
 function rowKeyFromEdit(edit) {
   if (edit.import_item_id != null) return `imp-${edit.import_item_id}`;
   return `${edit.lot_id}-${edit.location_id}`;
-}
-
-/** Ensures each tab only shows rows for that stock type (API must match; this guards stale UI or bad responses). */
-function filterInventoryRowsByTab(rows, tab) {
-  const t = String(tab || '').toUpperCase();
-  return (rows || []).filter((r) => String(r.stock_type || '').toUpperCase() === t);
-}
-
-/** Ensure stack columns from API display as the saved integers (not stale / wrong types). */
-function normalizeManualInventoryRow(r) {
-  const stack = r.stack_no;
-  const stackTotal = r.stack_total;
-  const stNo = r.st_no;
-  return {
-    ...r,
-    st_no: stNo != null && stNo !== '' ? String(stNo).trim() : '',
-    stack_no: stack != null && stack !== '' ? Number(stack) : '',
-    stack_total: stackTotal != null && stackTotal !== '' ? Number(stackTotal) : '',
-  };
 }
 
 function manualPrintCellText(row, col) {

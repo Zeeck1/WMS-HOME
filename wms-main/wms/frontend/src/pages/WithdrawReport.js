@@ -14,6 +14,8 @@ import { getWithdrawal, getInventory } from '../services/api';
 
 import { bangkokLocaleDateString } from '../utils/bangkokTime';
 
+import { fetchManualInventoryAllTabs } from '../utils/manualInventoryShared';
+
 import {
 
   requestedMc,
@@ -35,6 +37,8 @@ import {
   oldestCsInDateInGroup,
 
   withdrawLineStackNo,
+
+  enrichWithdrawLinesFromInventory,
 
 } from '../utils/withdrawItemGrouping';
 
@@ -72,17 +76,17 @@ function WithdrawReport() {
 
     try {
 
-      const [wRes, invRes] = await Promise.all([
+      const [wRes, invRows] = await Promise.all([
 
         getWithdrawal(id),
 
-        getInventory({ merge_import_shipments: 1 }),
+        fetchManualInventoryAllTabs(getInventory),
 
       ]);
 
       const withdrawal = wRes.data;
       setData(withdrawal);
-      setInventory(invRes.data || []);
+      setInventory(invRows || []);
       if (withdrawal.pick_route_saved && withdrawal.pick_route_mode === 'fifo') {
         setSortMode('cs_in_date');
       } else if (withdrawal.pick_route_saved) {
@@ -109,25 +113,28 @@ function WithdrawReport() {
 
     const raw = data?.items || [];
 
+    let lines;
+
     if (data?.status === 'FINISHED' || data?.pick_route_saved) {
 
-      return sortWithdrawItems([...raw], sortByCsIn ? 'cs_in_date' : 'nearest');
+      lines = sortWithdrawItems([...raw], sortByCsIn ? 'cs_in_date' : 'nearest');
+
+    } else if (sortByCsIn && inventory.length) {
+
+      lines = buildOldestLotReportFromStockSummary(raw, inventory);
+
+    } else if (inventory.length) {
+
+      lines = buildNearestLineReportFromStockSummary(raw, inventory);
+
+    } else {
+
+      lines = raw;
 
     }
 
-    if (sortByCsIn && inventory.length) {
-
-      return buildOldestLotReportFromStockSummary(raw, inventory);
-
-    }
-
-    if (inventory.length) {
-
-      return buildNearestLineReportFromStockSummary(raw, inventory);
-
-    }
-
-    return raw;
+    // Stack No must match the Manual page — resolve from live inventory (lot + line place)
+    return enrichWithdrawLinesFromInventory(lines, inventory);
 
   }, [data, inventory, sortByCsIn]);
 

@@ -2,6 +2,11 @@ import React, { forwardRef } from 'react';
 import { sortLocationsNearestFirst } from '../config/warehouseConfig';
 import { bangkokLocaleDateString, bangkokLocaleString } from '../utils/bangkokTime';
 
+/** Per-item flag: 0 = leave Actual CTN / Net Weight / Time out blank on the form (Process and Remark always print). */
+function rowShowsActual(item) {
+  return item.show_actual_on_form !== 0;
+}
+
 /** One row per product line — merges multiple lots/locations with the same product. */
 export function summarizeWithdrawItems(items) {
   const sorted = sortLocationsNearestFirst(items || [], 'line_place');
@@ -29,6 +34,8 @@ export function summarizeWithdrawItems(items) {
     } else {
       prev.requested_mc += req;
       prev.quantity_mc += act;
+      // Merged line shows actual columns if any of its source lines does
+      if (rowShowsActual(it)) prev.show_actual_on_form = 1;
       const a = (it.production_process || '').trim();
       const b = (prev.production_process || '').trim();
       if (a && a !== b) {
@@ -62,19 +69,28 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
   const finishedAtStr = data.finished_at
     ? bangkokLocaleString(new Date(data.finished_at), { hour: '2-digit', minute: '2-digit' })
     : '';
+  const finishedDateStr = data.finished_at
+    ? bangkokLocaleDateString(new Date(data.finished_at), { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : '';
 
   const totalRequestMC = items.reduce((s, it) => s + Number(it.requested_mc || it.quantity_mc), 0);
   const totalRequestKG = items.reduce(
     (s, it) => s + (Number(it.requested_mc || it.quantity_mc) * Number(it.bulk_weight_kg)),
     0
   );
-  const totalActualMC = items.reduce((s, it) => s + Number(it.quantity_mc), 0);
-  const totalNetKG = items.reduce((s, it) => s + (Number(it.quantity_mc) * Number(it.bulk_weight_kg)), 0);
+  // Items with hidden actual columns are excluded from the printed actual totals
+  const totalActualMC = items.reduce((s, it) => s + (rowShowsActual(it) ? Number(it.quantity_mc) : 0), 0);
+  const totalNetKG = items.reduce(
+    (s, it) => s + (rowShowsActual(it) ? Number(it.quantity_mc) * Number(it.bulk_weight_kg) : 0),
+    0
+  );
 
   const minRows = 10;
   const emptyRows = Math.max(0, minRows - items.length);
-  const showActualMc = data.status === 'READY' || data.status === 'FINISHED';
+  const showActualMc = data.status === 'FINISHED';
   const showFinalFields = data.status === 'FINISHED';
+  /** Approver is saved only after Approve / Start Taking Out — not while still PENDING */
+  const showApprover = data.status && data.status !== 'PENDING' && data.status !== 'CANCELLED';
 
   return (
     <div className="wf-page">
@@ -144,6 +160,7 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
               const originDisplay = st === 'CONTAINER_EXTRA' ? (item.order_code || 'EXTRA')
                 : st === 'IMPORT' ? (item.order_code || 'IMPORT')
                 : 'SCK';
+              const showRow = rowShowsActual(item);
               return (
                 <tr key={item.id}>
                   <td className="wf-center">{i + 1}</td>
@@ -152,9 +169,16 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
                   <td className="wf-center">{item.size}</td>
                   <td className="wf-center wf-bold">{requestedMc}</td>
                   <td className="wf-center">{requestTimeStr}</td>
-                  <td className="wf-center wf-bold">{showActualMc ? actualMc : ''}</td>
-                  <td className="wf-center">{showFinalFields ? netKg.toFixed(1) : ''}</td>
-                  <td className="wf-center">{showFinalFields ? finishedAtStr : ''}</td>
+                  <td className="wf-center wf-bold">{showActualMc && showRow ? actualMc : ''}</td>
+                  <td className="wf-center">{showFinalFields && showRow ? netKg.toFixed(1) : ''}</td>
+                  <td className="wf-center">
+                    {showFinalFields && showRow ? (
+                      <>
+                        <div>{finishedAtStr}</div>
+                        {finishedDateStr && <div className="wf-timeout-date">{finishedDateStr}</div>}
+                      </>
+                    ) : ''}
+                  </td>
                   <td className="wf-center">{item.production_process || ''}</td>
                   <td className="wf-center wf-remark">{i === 0 ? (data.notes || '') : ''}</td>
                 </tr>
@@ -200,7 +224,7 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
           </div>
           <div className="wf-sig-block">
             <div className="wf-sig-line">
-              {data.managed_by && data.managed_by !== 'system' && data.managed_by !== 'admin' && (
+              {showApprover && data.managed_by && data.managed_by !== 'system' && data.managed_by !== 'admin' && (
                 <span className="wf-sig-name">{data.managed_by}</span>
               )}
             </div>

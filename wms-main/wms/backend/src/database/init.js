@@ -695,6 +695,39 @@ async function initDatabase() {
       console.error('  Migration withdraw_items snap_st_no:', e.message);
     }
 
+    // Migration: per-item stock-out mode for Manual Adjust (1=stock out, 0=no stock out, NULL=normal flow)
+    try {
+      const [msoCol] = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'withdraw_items' AND COLUMN_NAME = 'manual_stock_out'
+      `, [dbName]);
+      if (msoCol.length === 0) {
+        await connection.query(
+          'ALTER TABLE withdraw_items ADD COLUMN manual_stock_out TINYINT(1) NULL DEFAULT NULL AFTER production_process'
+        );
+        console.log('  Migration: added manual_stock_out to withdraw_items');
+      }
+    } catch (e) {
+      console.error('  Migration withdraw_items manual_stock_out:', e.message);
+    }
+
+    // Migration: per-item print form actual columns visibility (1/NULL=show, 0=hide
+    // Actual CTN / Net Weight / Time out on the print form; Process and Remark always print)
+    try {
+      const [safCol] = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'withdraw_items' AND COLUMN_NAME = 'show_actual_on_form'
+      `, [dbName]);
+      if (safCol.length === 0) {
+        await connection.query(
+          'ALTER TABLE withdraw_items ADD COLUMN show_actual_on_form TINYINT(1) NULL DEFAULT NULL AFTER manual_stock_out'
+        );
+        console.log('  Migration: added show_actual_on_form to withdraw_items');
+      }
+    } catch (e) {
+      console.error('  Migration withdraw_items show_actual_on_form:', e.message);
+    }
+
     // Migration: do not cascade-delete finished withdrawal lines when import items are removed
     try {
       const [fkRows] = await connection.query(`

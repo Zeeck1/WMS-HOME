@@ -9,6 +9,12 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { bangkokYYYYMMDD, bangkokLocaleString } from '../utils/bangkokTime';
 import { downloadStockSummaryExcel } from '../utils/stockSummaryExcelExport';
+import {
+  MANUAL_FETCH_LIMIT,
+  filterInventoryRowsByTab,
+  normalizeManualInventoryRow,
+  dedupeInventoryRows,
+} from '../utils/manualInventoryShared';
 
 const TABS = [
   { id: 'BULK', label: 'Bulk', icon: <FiPackage /> },
@@ -64,6 +70,37 @@ const CE_IMPORT_COLUMNS = [
 ];
 
 const BULK_AGGREGATE_KEYS = ['old_balance_mc', 'new_income_mc', 'hand_on_balance_mc', 'hand_on_balance_kg'];
+const NONBULK_AGGREGATE_KEYS = ['hand_on_balance_mc', 'hand_on_balance_kg'];
+
+/**
+ * Merge rows that look identical for the currently visible columns and sum their balances.
+ * Source data is one row per lot+location (the Manual page); when location columns are
+ * hidden in the summary the same product would otherwise repeat as "duplicate" rows.
+ */
+function aggregateRowsByVisibleColumns(rows, groupColumns, aggregateKeys) {
+  const aggSet = new Set(aggregateKeys);
+  const keyCols = groupColumns.map((c) => c.key).filter((k) => !aggSet.has(k));
+  const map = new Map();
+  const out = [];
+  for (const r of rows || []) {
+    const key = keyCols
+      .map((k) => {
+        const v = r[k];
+        return v != null && v !== '' ? String(v) : '';
+      })
+      .join('\u0001');
+    const existing = map.get(key);
+    if (!existing) {
+      const copy = { ...r };
+      for (const k of aggregateKeys) copy[k] = Number(r[k]) || 0;
+      map.set(key, copy);
+      out.push(copy);
+    } else {
+      for (const k of aggregateKeys) existing[k] += Number(r[k]) || 0;
+    }
+  }
+  return out;
+}
 
 // Month/year dates from Excel like "12/2024" are stored in DB as "YYYY-MM-01".
 // Display rules:
@@ -106,11 +143,6 @@ const formatISODateToDMY = (v) => {
   const dd = iso[3];
   return `${dd}/${mm}/${yyyy}`;
 };
-
-function filterInventoryRowsByTab(rows, tab) {
-  const t = String(tab || '').toUpperCase();
-  return (rows || []).filter((r) => String(r.stock_type || '').toUpperCase() === t);
-}
 
 /** Import Stock Summary: Line must not duplicate Country (legacy API/DB or location codes). */
 function normalizeImportRowLinePlace(row) {
@@ -228,9 +260,16 @@ function StockTable() {
 
   const fetchInventory = useCallback(async () => {
     try {
-      const res = await getInventory({ stock_type: activeTab });
-      const filtered = filterInventoryRowsByTab(res.data, activeTab);
-      const normalized = filtered.map((r) => {
+      // Exactly the same load as the Manual page (BULK / CONTAINER_EXTRA / IMPORT):
+      // same limit, same stock_type filter, same cache buster, same row normalization.
+      const res = await getInventory({
+        stock_type: activeTab,
+        limit: MANUAL_FETCH_LIMIT,
+        _t: Date.now(),
+      });
+      const manualRows = dedupeInventoryRows(filterInventoryRowsByTab(res.data, activeTab))
+        .map(normalizeManualInventoryRow);
+      const normalized = manualRows.map((r) => {
         const base = isImport ? normalizeImportRowLinePlace(r) : r;
         return {
           ...base,
@@ -335,10 +374,18 @@ function StockTable() {
 
   const handleClearAllFilters = () => { setColumnFilters({}); };
 
+  // Stock Summary rows: Manual page rows (lot+location) merged by the visible columns,
+  // so hiding Lot No / Line / Stack columns does not show the same product repeated.
+  const summaryRows = useMemo(() => {
+    const groupCols = activeTab === 'BULK' ? bulkTableColumns : visibleColumns;
+    const aggKeys = activeTab === 'BULK' ? BULK_AGGREGATE_KEYS : NONBULK_AGGREGATE_KEYS;
+    return aggregateRowsByVisibleColumns(filteredInventory, groupCols, aggKeys);
+  }, [filteredInventory, activeTab, bulkTableColumns, visibleColumns]);
+
   const displayRows = useMemo(() => {
-    if (!rowLimit || rowLimit <= 0) return filteredInventory;
-    return filteredInventory.slice(0, rowLimit);
-  }, [filteredInventory, rowLimit]);
+    if (!rowLimit || rowLimit <= 0) return summaryRows;
+    return summaryRows.slice(0, rowLimit);
+  }, [summaryRows, rowLimit]);
 
   // Upper stat cards: full filtered set (search + column filters), all rows
   const totalMC = filteredInventory.reduce((sum, r) => sum + Number(r.hand_on_balance_mc), 0);
@@ -364,14 +411,14 @@ function StockTable() {
   );
 
   const exportExcel = async () => {
-    if (filteredInventory.length === 0) {
+    if (summaryRows.length === 0) {
       toast.warn('No data to export');
       return;
     }
     try {
       await downloadStockSummaryExcel({
         activeTab,
-        rows: filteredInventory,
+        rows: summaryRows,
         totals: { totalMC, totalKG, totalStacks },
         bulkTableColumns: activeTab === 'BULK' ? bulkTableColumns : [],
         visibleColumns: activeTab === 'CONTAINER_EXTRA' ? visibleColumns : [],
@@ -535,15 +582,15 @@ function StockTable() {
   };
 
   const exportAsText = async () => {
-    if (filteredInventory.length === 0) {
+    if (summaryRows.length === 0) {
       toast.warn('No data to copy');
       return;
     }
     let text;
     if (!isNonBulk) {
-      const totalMC = filteredInventory.reduce((s, r) => s + Number(r.hand_on_balance_mc), 0);
-      const totalKG = filteredInventory.reduce((s, r) => s + Number(r.hand_on_balance_kg), 0);
-      const rows = filteredInventory.map(r => {
+      const totalMC = summaryRows.reduce((s, r) => s + Number(r.hand_on_balance_mc), 0);
+      const totalKG = summaryRows.reduce((s, r) => s + Number(r.hand_on_balance_kg), 0);
+      const rows = summaryRows.map(r => {
         const mc = Number(r.hand_on_balance_mc) || 0;
         const kg = Number(r.hand_on_balance_kg) || 0;
         const type = (r.type || '').trim();
@@ -567,7 +614,7 @@ function StockTable() {
     } else {
       const getHeaderLabel = (col) => col.label != null ? col.label : (col.key === 'order_code' ? (isImport ? 'Invoice No' : 'Order') : col.key);
       const headerLabels = ['#', ...visibleColumns.map(getHeaderLabel)];
-      const rows = filteredInventory.map((r, i) => {
+      const rows = summaryRows.map((r, i) => {
         const cells = [i + 1];
         visibleColumns.forEach(col => {
           const val = r[col.key];
@@ -581,7 +628,7 @@ function StockTable() {
     }
     try {
       await navigator.clipboard.writeText(text);
-      toast.success(`Copied ${filteredInventory.length} rows as text`);
+      toast.success(`Copied ${summaryRows.length} rows as text`);
     } catch {
       toast.error('Failed to copy to clipboard');
     }
@@ -637,7 +684,7 @@ function StockTable() {
           <h1>WMS — Stock Summary</h1>
           <p><strong>Stock type:</strong> {tabLabel}</p>
           <p><strong>Rows printed:</strong> {displayRows.length}
-            {filteredInventory.length !== displayRows.length ? ` (of ${filteredInventory.length} after filters)` : ' (all matching filters)'}
+            {summaryRows.length !== displayRows.length ? ` (of ${summaryRows.length} after filters)` : ' (all matching filters)'}
             {inventory.length > 0 ? ` · Source: ${inventory.length} rows in tab` : ''}
           </p>
           <p><strong>Printed:</strong> {printedAt}</p>
@@ -679,8 +726,8 @@ function StockTable() {
             <button className={`st-row-limit-btn ${rowLimit === 50 ? 'active' : ''}`} onClick={() => setRowLimit(50)}>50</button>
             <button className={`st-row-limit-btn ${rowLimit === 100 ? 'active' : ''}`} onClick={() => setRowLimit(100)}>100</button>
             <button className={`st-row-limit-btn ${rowLimit === 0 ? 'active' : ''}`} onClick={() => setRowLimit(0)}>All</button>
-            {rowLimit > 0 && filteredInventory.length > rowLimit && (
-              <span className="st-row-limit-hint">({displayRows.length} of {filteredInventory.length})</span>
+            {rowLimit > 0 && summaryRows.length > rowLimit && (
+              <span className="st-row-limit-hint">({displayRows.length} of {summaryRows.length})</span>
             )}
           </div>
         </div>
