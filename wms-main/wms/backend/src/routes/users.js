@@ -11,15 +11,11 @@ router.use(authMiddleware, superadminOnly);
 router.get('/pending', async (req, res) => {
   try {
     const [users] = await pool.query(
-      `SELECT u.id, u.username, u.display_name, u.employee_id, u.approval_status, u.is_active, u.created_at,
+      `SELECT u.id, u.username, u.display_name, u.employee_id, u.approval_status, u.created_at,
               e.position, e.division, e.department, e.work_location
        FROM users u
-       LEFT JOIN employees e ON UPPER(TRIM(e.employee_id)) = UPPER(TRIM(u.employee_id))
-       WHERE u.role = 'user'
-         AND u.employee_id IS NOT NULL
-         AND TRIM(u.employee_id) != ''
-         AND u.is_active = 0
-         AND (u.approval_status = 'pending' OR u.approval_status IS NULL OR u.approval_status = '')
+       LEFT JOIN employees e ON u.employee_id = e.employee_id
+       WHERE u.approval_status = 'pending'
        ORDER BY u.created_at DESC`
     );
     res.json(users);
@@ -27,7 +23,7 @@ router.get('/pending', async (req, res) => {
     console.error('Error fetching pending users:', err);
     if (err.code === 'ER_BAD_FIELD_ERROR') {
       return res.status(503).json({
-        error: 'Employee approval is not ready yet. Restart the server so database migrations can finish.',
+        error: 'Employee login columns not ready. Restart the server to run migrations (npm start).',
       });
     }
     res.status(500).json({ error: 'Failed to fetch pending users' });

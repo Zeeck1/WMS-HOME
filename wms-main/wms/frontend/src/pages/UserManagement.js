@@ -453,8 +453,8 @@ function PendingTab({ pending, loading, onRefresh }) {
       await updateUser(u.id, { is_active: 0 });
       toast.success('User rejected');
       onRefresh();
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to reject user');
+    } catch {
+      toast.error('Failed to reject user');
     }
   };
 
@@ -470,6 +470,9 @@ function PendingTab({ pending, loading, onRefresh }) {
         <div className="um-empty-pending">
           <FiCheck style={{ fontSize: 40, color: 'var(--success)', marginBottom: 12 }} />
           <p>No pending approvals. All employee logins have been processed.</p>
+          <p style={{ fontSize: '0.8rem', color: 'var(--gray-400)', marginTop: 6 }}>
+            When an employee logs in for the first time their request appears here automatically.
+          </p>
         </div>
       ) : (
         <div className="table-container">
@@ -604,14 +607,12 @@ function UserManagement() {
       const res = await getPendingUsers();
       setPending(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
-      const msg = err.response?.data?.error;
-      if (err.response?.status === 401 || err.response?.status === 403) {
-        toast.error(msg || 'Superadmin login required to view pending approvals');
-      } else {
-        toast.error(msg || 'Failed to load pending approvals');
-      }
+      const msg = err.response?.data?.error || err.message || 'Failed to load pending approvals';
+      toast.error(msg);
       setPending([]);
-    } finally { setLoadingPending(false); }
+    } finally {
+      setLoadingPending(false);
+    }
   };
 
   const TABS = [
