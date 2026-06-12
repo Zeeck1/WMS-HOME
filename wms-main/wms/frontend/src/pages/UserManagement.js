@@ -453,8 +453,8 @@ function PendingTab({ pending, loading, onRefresh }) {
       await updateUser(u.id, { is_active: 0 });
       toast.success('User rejected');
       onRefresh();
-    } catch {
-      toast.error('Failed to reject user');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to reject user');
     }
   };
 
@@ -603,8 +603,15 @@ function UserManagement() {
     try {
       const res = await getPendingUsers();
       setPending(Array.isArray(res.data) ? res.data : []);
-    } catch { /* silent */ }
-    finally { setLoadingPending(false); }
+    } catch (err) {
+      const msg = err.response?.data?.error;
+      if (err.response?.status === 401 || err.response?.status === 403) {
+        toast.error(msg || 'Superadmin login required to view pending approvals');
+      } else {
+        toast.error(msg || 'Failed to load pending approvals');
+      }
+      setPending([]);
+    } finally { setLoadingPending(false); }
   };
 
   const TABS = [

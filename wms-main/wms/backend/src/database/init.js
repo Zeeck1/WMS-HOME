@@ -102,6 +102,15 @@ async function ensureUsersAuthColumns(connection, dbName) {
     WHERE employee_id IS NOT NULL AND employee_id != '' AND is_active = 0
       AND (approval_status IS NULL OR approval_status = '')
   `);
+  const [pendingRepair] = await connection.query(`
+    SELECT COUNT(*) AS c FROM users
+    WHERE role = 'user' AND employee_id IS NOT NULL AND TRIM(employee_id) != ''
+      AND is_active = 0
+      AND (approval_status IS NULL OR approval_status = '' OR approval_status = 'pending')
+  `);
+  if (Number(pendingRepair[0]?.c) > 0) {
+    console.log(`  Employee auth: ${pendingRepair[0].c} pending approval user(s) in database`);
+  }
 }
 
 function getDbInitConfig() {
