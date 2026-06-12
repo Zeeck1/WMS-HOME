@@ -8,6 +8,12 @@ const router = express.Router();
 
 router.use(authMiddleware, superadminOnly);
 
+async function hardDeleteUser(conn, userId) {
+  await conn.query('DELETE FROM user_permissions WHERE user_id = ?', [userId]);
+  const [result] = await conn.query('DELETE FROM users WHERE id = ?', [userId]);
+  return result.affectedRows > 0;
+}
+
 // GET /api/users/pending — list users awaiting approval
 router.get('/pending', async (req, res) => {
   try {
@@ -57,6 +63,50 @@ router.put('/:id/approve', async (req, res) => {
     await conn.rollback();
     console.error('Error approving user:', err);
     res.status(500).json({ error: 'Failed to approve user' });
+  } finally {
+    conn.release();
+  }
+});
+
+// PUT /api/users/:id/reject — remove pending employee login request from database
+router.put('/:id/reject', async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [rows] = await conn.query('SELECT * FROM users WHERE id = ?', [req.params.id]);
+    if (rows.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = rows[0];
+    if (user.role === 'superadmin') {
+      await conn.rollback();
+      return res.status(403).json({ error: 'Cannot reject superadmin' });
+    }
+
+    const isPendingEmployee =
+      user.approval_status === 'pending'
+      || (user.employee_id && Number(user.is_active) === 0);
+
+    if (!isPendingEmployee) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Only pending employee login requests can be rejected here' });
+    }
+
+    const deleted = await hardDeleteUser(conn, user.id);
+    if (!deleted) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    await conn.commit();
+    res.json({ message: 'Login request rejected and removed from database' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('Error rejecting user:', err);
+    res.status(500).json({ error: 'Failed to reject user' });
   } finally {
     conn.release();
   }
@@ -162,18 +212,36 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/users/:id — deactivate user (never delete superadmin)
+// DELETE /api/users/:id — permanently delete user from database (never delete superadmin)
 router.delete('/:id', async (req, res) => {
+  const conn = await pool.getConnection();
   try {
-    const [user] = await pool.query('SELECT role FROM users WHERE id = ?', [req.params.id]);
-    if (user.length > 0 && user[0].role === 'superadmin') {
+    await conn.beginTransaction();
+
+    const [rows] = await conn.query('SELECT id, role FROM users WHERE id = ?', [req.params.id]);
+    if (rows.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (rows[0].role === 'superadmin') {
+      await conn.rollback();
       return res.status(403).json({ error: 'Cannot delete the superadmin account' });
     }
-    await pool.query('UPDATE users SET is_active = 0 WHERE id = ?', [req.params.id]);
-    res.json({ message: 'User deactivated' });
+
+    const deleted = await hardDeleteUser(conn, rows[0].id);
+    if (!deleted) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    await conn.commit();
+    res.json({ message: 'User deleted from database' });
   } catch (error) {
+    await conn.rollback();
     console.error('Error deleting user:', error);
     res.status(500).json({ error: 'Failed to delete user' });
+  } finally {
+    conn.release();
   }
 });
 

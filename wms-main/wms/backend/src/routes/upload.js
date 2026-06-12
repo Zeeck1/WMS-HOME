@@ -131,11 +131,30 @@ async function findOrCreateLocation(conn, linePlace, stackNo, stackTotal) {
     await purgeDuplicateLocationsForLineStack(conn, keeperId, code, stack);
     return { id: keeperId, isNew: false };
   }
-  const [result] = await conn.query(
-    'INSERT INTO locations (line_place, stack_no, stack_total, is_active) VALUES (?, ?, ?, 1)',
-    [code, stack, total]
-  );
-  return { id: result.insertId, isNew: true };
+  try {
+    const [result] = await conn.query(
+      'INSERT INTO locations (line_place, stack_no, stack_total, is_active) VALUES (?, ?, ?, 1)',
+      [code, stack, total]
+    );
+    return { id: result.insertId, isNew: true };
+  } catch (e) {
+    // DB still has the old line-only unique key (migration pending) — overwrite that line's row
+    if (e.code === 'ER_DUP_ENTRY') {
+      const [row] = await conn.query(
+        `SELECT id FROM locations WHERE UPPER(TRIM(line_place)) = ?
+         ORDER BY is_active DESC, updated_at DESC, id ASC LIMIT 1`,
+        [code]
+      );
+      if (row.length > 0) {
+        await conn.query(
+          'UPDATE locations SET stack_no = ?, stack_total = ?, is_active = 1, updated_at = NOW() WHERE id = ?',
+          [stack, total, row[0].id]
+        );
+        return { id: row[0].id, isNew: false };
+      }
+    }
+    throw e;
+  }
 }
 
 // POST upload Excel file

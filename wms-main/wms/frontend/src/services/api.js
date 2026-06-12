@@ -209,6 +209,7 @@ export const updateUser = (id, data) => api.put(`/users/${id}`, data);
 export const deleteUser = (id) => api.delete(`/users/${id}`);
 export const getPendingUsers = () => api.get('/users/pending');
 export const approveUser = (id, data) => api.put(`/users/${id}/approve`, data);
+export const rejectUser = (id) => api.put(`/users/${id}/reject`);
 
 // ─── Employees (superadmin) ──────────────────────────
 export const getEmployees = () => api.get('/employees');

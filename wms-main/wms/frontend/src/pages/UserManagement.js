@@ -8,7 +8,7 @@ import {
 import { toast } from 'react-toastify';
 import {
   getUsers, createUser, updateUser, deleteUser,
-  getPendingUsers, approveUser,
+  getPendingUsers, approveUser, rejectUser,
   getEmployees, uploadEmployees, deleteAllEmployees,
 } from '../services/api';
 import { ALL_PAGES } from '../context/AuthContext';
@@ -122,13 +122,13 @@ function UsersTab({ users, loading, onRefresh }) {
 
   const handleDelete = async (u) => {
     if (u.role === 'superadmin') { toast.error('Cannot delete superadmin'); return; }
-    if (!window.confirm(`Deactivate user "${u.username}"?`)) return;
+    if (!window.confirm(`Permanently delete user "${u.username}" from the database?`)) return;
     try {
       await deleteUser(u.id);
-      toast.success('User deactivated');
+      toast.success('User deleted from database');
       onRefresh();
-    } catch {
-      toast.error('Failed to delete user');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to delete user');
     }
   };
 
@@ -448,13 +448,13 @@ function PendingTab({ pending, loading, onRefresh }) {
   };
 
   const handleReject = async (u) => {
-    if (!window.confirm(`Reject and deactivate "${u.display_name}"?`)) return;
+    if (!window.confirm(`Reject and permanently remove "${u.display_name}" from pending approvals? They can request login again later.`)) return;
     try {
-      await updateUser(u.id, { is_active: 0 });
-      toast.success('User rejected');
+      await rejectUser(u.id);
+      toast.success('Login request rejected and removed from database');
       onRefresh();
-    } catch {
-      toast.error('Failed to reject user');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to reject user');
     }
   };
 

@@ -11,15 +11,13 @@ export const requestedMc = (it) => Number(it.requested_mc ?? it.quantity_mc ?? 0
 /** Actual picked qty for this line — same as Withdraw form (not live stock balance) */
 export const actualMc = (it) => Number(it.quantity_mc ?? 0);
 
-/** Stack No column for reports — location stack; CE falls back to ST NO when stack is blank. */
+/** Stack No column for reports — Container Extra shows its ST NO; others show location stack. */
 export function withdrawLineStackNo(item) {
-  const stack = item?.stack_no != null ? String(item.stack_no).trim() : '';
-  if (stack !== '') return stack;
   if (String(item?.stock_type || '').toUpperCase() === 'CONTAINER_EXTRA') {
     const stNo = item?.st_no != null ? String(item.st_no).trim() : '';
     if (stNo !== '') return stNo;
   }
-  return '';
+  return item?.stack_no != null ? String(item.stack_no).trim() : '';
 }
 
 /**

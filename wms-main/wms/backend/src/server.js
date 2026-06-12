@@ -72,6 +72,7 @@ app.use((err, req, res, next) => {
 async function runStartupMigrations() {
   const pool = require('./config/db');
   const { ensureUsersAuthColumns } = require('./utils/userAuthColumns');
+  const { ensureLocationsLineStackUnique } = require('./utils/locationSchema');
   const conn = await pool.getConnection();
   try {
     await ensureUsersAuthColumns(conn);
@@ -80,6 +81,16 @@ async function runStartupMigrations() {
     console.error('  [startup] Employee auth column migration failed:', e.message);
   } finally {
     conn.release();
+  }
+
+  const conn2 = await pool.getConnection();
+  try {
+    await ensureLocationsLineStackUnique(conn2);
+    console.log('  [startup] Locations line+stack index OK');
+  } catch (e) {
+    console.error('  [startup] Locations index migration failed:', e.message);
+  } finally {
+    conn2.release();
   }
 }
 

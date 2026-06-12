@@ -89,16 +89,41 @@ async function syncLocationForLine(conn, linePlace, stackNo, stackTotal, preferL
     };
   }
 
-  const [ins] = await conn.query(
-    'INSERT INTO locations (line_place, stack_no, stack_total, is_active) VALUES (?, ?, ?, 1)',
-    [code, stackParsed.value, totalParsed.value]
-  );
-  return {
-    locationId: ins.insertId,
-    stack_no: stackParsed.value,
-    stack_total: totalParsed.value,
-    line_place: code,
-  };
+  try {
+    const [ins] = await conn.query(
+      'INSERT INTO locations (line_place, stack_no, stack_total, is_active) VALUES (?, ?, ?, 1)',
+      [code, stackParsed.value, totalParsed.value]
+    );
+    return {
+      locationId: ins.insertId,
+      stack_no: stackParsed.value,
+      stack_total: totalParsed.value,
+      line_place: code,
+    };
+  } catch (e) {
+    // DB still has the old line-only unique key (migration pending) — overwrite that line's row
+    if (e.code === 'ER_DUP_ENTRY') {
+      const [row] = await conn.query(
+        `SELECT id FROM locations WHERE UPPER(TRIM(line_place)) = ?
+         ORDER BY is_active DESC, updated_at DESC, id ASC LIMIT 1`,
+        [code]
+      );
+      if (row.length > 0) {
+        await conn.query(
+          `UPDATE locations SET stack_no = ?, stack_total = ?, is_active = 1, updated_at = NOW()
+           WHERE id = ?`,
+          [stackParsed.value, totalParsed.value, row[0].id]
+        );
+        return {
+          locationId: row[0].id,
+          stack_no: stackParsed.value,
+          stack_total: totalParsed.value,
+          line_place: code,
+        };
+      }
+    }
+    throw e;
+  }
 }
 
 /** Sync Location Master row for this line; move lot only if location id changes. */

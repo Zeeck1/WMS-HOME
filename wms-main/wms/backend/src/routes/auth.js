@@ -72,30 +72,29 @@ router.post('/employee-login', async (req, res) => {
 
     // Must exist in employee directory
     const [empRows] = await pool.query(
-      'SELECT * FROM employees WHERE UPPER(TRIM(employee_id)) = UPPER(?)',
+      'SELECT * FROM employees WHERE employee_id = ?',
       [empId]
     );
     if (empRows.length === 0) {
       return res.status(404).json({ error: 'Employee ID not found. Please contact your administrator.' });
     }
     const emp = empRows[0];
-    const canonicalEmpId = String(emp.employee_id || empId).trim();
 
     // Check if a user account already exists for this employee_id
     const [userRows] = await pool.query(
-      'SELECT * FROM users WHERE UPPER(TRIM(employee_id)) = UPPER(?)',
-      [canonicalEmpId]
+      'SELECT * FROM users WHERE employee_id = ?',
+      [empId]
     );
 
     let user;
     if (userRows.length === 0) {
       // First login — create a pending user account
       const randomHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10);
-      const username = `emp_${canonicalEmpId}`;
+      const username = `emp_${empId}`;
       const [result] = await pool.query(
         `INSERT INTO users (username, password_hash, display_name, role, is_active, employee_id, approval_status)
          VALUES (?, ?, ?, 'user', 0, ?, 'pending')`,
-        [username, randomHash, emp.full_name, canonicalEmpId]
+        [username, randomHash, emp.full_name, empId]
       );
       user = {
         id: result.insertId,
@@ -103,7 +102,7 @@ router.post('/employee-login', async (req, res) => {
         display_name: emp.full_name,
         role: 'user',
         is_active: 0,
-        employee_id: canonicalEmpId,
+        employee_id: empId,
         approval_status: 'pending',
       };
     } else {
@@ -116,21 +115,10 @@ router.post('/employee-login', async (req, res) => {
       || (user.employee_id && user.approval_status == null && Number(user.is_active) !== 1);
 
     if (awaitingApproval) {
-      // Keep pending list in sync — hosted DBs may have is_active=0 but NULL approval_status
-      if (user.id && user.approval_status !== 'pending') {
-        try {
-          await pool.query(
-            `UPDATE users SET approval_status = 'pending', updated_at = NOW() WHERE id = ?`,
-            [user.id]
-          );
-        } catch (e) {
-          console.error('Failed to set approval_status=pending for user', user.id, e.message);
-        }
-      }
       return res.status(403).json({
         error: 'PENDING_APPROVAL',
         display_name: user.display_name,
-        employee_id: canonicalEmpId,
+        employee_id: empId,
       });
     }
 

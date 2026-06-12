@@ -280,8 +280,14 @@ function AppShell() {
               <span className="sidebar-user-role">{user.role === 'superadmin' ? 'Admin' : 'User'}</span>
             </div>
           </div>
-          <button className="sidebar-logout-btn" onClick={logout} title="Sign out">
-            <FiLogOut />
+          <button
+            type="button"
+            className={`sidebar-logout-btn${!isMobile && collapsed ? ' sidebar-logout-btn--narrow' : ''}`}
+            onClick={logout}
+            title="Sign out"
+            aria-label="Sign out"
+          >
+            <FiLogOut aria-hidden />
             <span className="nav-label">Sign Out</span>
           </button>
         </div>
@@ -299,7 +305,15 @@ function AppShell() {
           </div>
           <div className="topbar-user">
             <span className="topbar-username">{user.display_name || user.username}</span>
-            <button className="topbar-logout" onClick={logout} title="Sign out"><FiLogOut /></button>
+            <button
+              type="button"
+              className="topbar-logout"
+              onClick={logout}
+              title="Sign out"
+              aria-label="Sign out"
+            >
+              <FiLogOut aria-hidden />
+            </button>
           </div>
         </div>
 
