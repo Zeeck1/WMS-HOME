@@ -69,54 +69,77 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, async () => {
-  console.log(`
+async function runStartupMigrations() {
+  const pool = require('./config/db');
+  const conn = await pool.getConnection();
+  try {
+    // Ensure employee auth columns exist — runs every boot so deploys without db:init still work
+    const [cols] = await conn.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
+         AND COLUMN_NAME IN ('employee_id','approval_status')`
+    );
+    const have = new Set(cols.map(c => c.COLUMN_NAME));
+
+    if (!have.has('employee_id')) {
+      try {
+        await conn.query('ALTER TABLE users ADD COLUMN employee_id VARCHAR(50) DEFAULT NULL');
+        console.log('  [startup] Added employee_id to users');
+      } catch (e) {
+        if (e.code !== 'ER_DUP_FIELDNAME') throw e;
+      }
+    }
+    if (!have.has('approval_status')) {
+      try {
+        await conn.query("ALTER TABLE users ADD COLUMN approval_status ENUM('pending','approved') DEFAULT NULL");
+        console.log('  [startup] Added approval_status to users');
+      } catch (e) {
+        if (e.code !== 'ER_DUP_FIELDNAME') throw e;
+      }
+    }
+
+    // Backfill: employee rows created before approval_status existed
+    await conn.query(`
+      UPDATE users SET approval_status = 'approved'
+      WHERE employee_id IS NOT NULL AND employee_id != '' AND is_active = 1
+        AND (approval_status IS NULL OR approval_status = '')
+    `);
+    await conn.query(`
+      UPDATE users SET approval_status = 'pending'
+      WHERE employee_id IS NOT NULL AND employee_id != '' AND is_active = 0
+        AND (approval_status IS NULL OR approval_status = '')
+    `);
+
+    console.log('  [startup] Employee auth columns OK');
+  } catch (e) {
+    console.error('  [startup] Employee auth column migration failed:', e.message);
+  } finally {
+    conn.release();
+  }
+}
+
+async function startServer() {
+  // Run migrations before accepting any requests
+  try {
+    await runStartupMigrations();
+  } catch (e) {
+    console.error('[startup] Migration error (server will still start):', e.message);
+  }
+
+  app.listen(PORT, () => {
+    console.log(`
   ╔═══════════════════════════════════════════╗
   ║   WMS Backend Server                      ║
   ║   Running on http://localhost:${PORT}        ║
   ║   Environment: ${process.env.NODE_ENV || 'development'}            ║
   ╚═══════════════════════════════════════════╝
-  `);
-
-  // Self-healing migration: ensure employee auth columns exist even if db:init was skipped
-  try {
-    const pool = require('./config/db');
-    const conn = await pool.getConnection();
-    try {
-      const [cols] = await conn.query(
-        `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
-           AND COLUMN_NAME IN ('employee_id','approval_status')`
-      );
-      const have = new Set(cols.map(c => c.COLUMN_NAME));
-      if (!have.has('employee_id')) {
-        await conn.query('ALTER TABLE users ADD COLUMN employee_id VARCHAR(50) DEFAULT NULL');
-        console.log('  [startup] Added employee_id to users');
-      }
-      if (!have.has('approval_status')) {
-        await conn.query("ALTER TABLE users ADD COLUMN approval_status ENUM('pending','approved') DEFAULT NULL");
-        console.log('  [startup] Added approval_status to users');
-      }
-      // Backfill any rows that have employee_id but no approval_status set
-      await conn.query(`
-        UPDATE users SET approval_status = 'approved'
-        WHERE employee_id IS NOT NULL AND employee_id != '' AND is_active = 1
-          AND (approval_status IS NULL OR approval_status = '')
-      `);
-      await conn.query(`
-        UPDATE users SET approval_status = 'pending'
-        WHERE employee_id IS NOT NULL AND employee_id != '' AND is_active = 0
-          AND (approval_status IS NULL OR approval_status = '')
-      `);
-    } finally {
-      conn.release();
+    `);
+  }).on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.log(`Port ${PORT} is busy, retrying in 2 seconds...`);
+      setTimeout(() => app.listen(PORT), 2000);
     }
-  } catch (e) {
-    console.error('  [startup] Employee auth column check failed:', e.message);
-  }
-}).on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.log(`Port ${PORT} is busy, retrying in 2 seconds...`);
-    setTimeout(() => app.listen(PORT), 2000);
-  }
-});
+  });
+}
+
+startServer();

@@ -10,6 +10,18 @@ router.use(authMiddleware, superadminOnly);
 // GET /api/users/pending — list users awaiting approval
 router.get('/pending', async (req, res) => {
   try {
+    // Check columns exist first — missing columns mean migration hasn't run yet
+    const [colCheck] = await pool.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
+         AND COLUMN_NAME IN ('employee_id','approval_status')`
+    );
+    const haveCols = new Set(colCheck.map(c => c.COLUMN_NAME));
+    if (!haveCols.has('employee_id') || !haveCols.has('approval_status')) {
+      // Migration hasn't run yet — return empty list with a header flag so frontend can show hint
+      return res.json([]);
+    }
+
     const [users] = await pool.query(
       `SELECT u.id, u.username, u.display_name, u.employee_id, u.approval_status, u.created_at,
               e.position, e.division, e.department, e.work_location
@@ -21,11 +33,6 @@ router.get('/pending', async (req, res) => {
     res.json(users);
   } catch (err) {
     console.error('Error fetching pending users:', err);
-    if (err.code === 'ER_BAD_FIELD_ERROR') {
-      return res.status(503).json({
-        error: 'Employee login columns not ready. Restart the server to run migrations (npm start).',
-      });
-    }
     res.status(500).json({ error: 'Failed to fetch pending users' });
   }
 });
