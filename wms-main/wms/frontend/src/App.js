@@ -7,7 +7,7 @@ import {
   FiGrid, FiPackage, FiMapPin, FiArrowDownCircle,
   FiArrowUpCircle, FiTable, FiUpload, FiClock,
   FiMenu, FiX, FiChevronLeft, FiLayers, FiList,
-  FiShoppingCart, FiSettings, FiBarChart2, FiBook, FiAlertTriangle, FiTrendingDown, FiCalendar, FiUsers, FiUserCheck, FiClipboard, FiCpu, FiAnchor, FiShield, FiLogOut
+  FiShoppingCart, FiSettings, FiBarChart2, FiBook, FiAlertTriangle, FiTrendingDown, FiCalendar, FiUsers, FiUser, FiUserCheck, FiClipboard, FiCpu, FiAnchor, FiShield, FiLogOut
 } from 'react-icons/fi';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -44,7 +44,7 @@ import OACResult from './pages/OACResult';
 import ImportShipments from './pages/ImportShipments';
 import ImportShipmentDetail from './pages/ImportShipmentDetail';
 import UserManagement from './pages/UserManagement';
-import logoThaiBg from './images/logo-thai-bg.jpg';
+import logoThai from './images/logo-thai.png';
 import { getWithdrawals } from './services/api';
 
 /** Sidebar groups for superadmin; permission users see one "Overview" with all allowed links in this order. */
@@ -249,7 +249,12 @@ function AppShell() {
       <aside className={sidebarClass}>
         <div className="sidebar-header">
           <div className="sidebar-brand">
-            <div className="brand-icon">W</div>
+            <img
+              src={logoThai}
+              alt="WMS"
+              className="brand-logo"
+              decoding="async"
+            />
             <div className="brand-text">
               <h1>WMS</h1>
               <p>Warehouse Management</p>
@@ -269,12 +274,9 @@ function AppShell() {
         <SidebarNav collapsed={collapsed} mobileOpen={mobileOpen} onNavClick={() => setMobileOpen(false)} />
         <div className="sidebar-footer">
           <div className="sidebar-user-info">
-            <img
-              src={logoThaiBg}
-              alt=""
-              className="sidebar-user-avatar"
-              decoding="async"
-            />
+            <div className="sidebar-user-icon" aria-hidden>
+              <FiUser />
+            </div>
             <div className="sidebar-user-text">
               <span className="sidebar-user-name">{user.display_name || user.username}</span>
               <span className="sidebar-user-role">{user.role === 'superadmin' ? 'Admin' : 'User'}</span>
@@ -304,6 +306,7 @@ function AppShell() {
             {isMobile && <span className="topbar-brand">WMS</span>}
           </div>
           <div className="topbar-user">
+            <span className="topbar-user-icon" aria-hidden><FiUser /></span>
             <span className="topbar-username">{user.display_name || user.username}</span>
             <button
               type="button"
