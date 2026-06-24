@@ -10,6 +10,7 @@ import {
   filterInventoryRowsByTab,
   normalizeManualInventoryRow,
   inventoryRowKey,
+  dedupeInventoryRows,
 } from '../utils/manualInventoryShared';
 
 const normLotNoNumeric = (v) => String(v ?? '').replace(/\D/g, '');
@@ -376,7 +377,9 @@ function Manual() {
         stock_type: activeTab,
         _t: Date.now(),
       });
-      const list = filterInventoryRowsByTab(res.data, activeTab).map(normalizeManualInventoryRow);
+      const list = dedupeInventoryRows(
+        filterInventoryRowsByTab(res.data, activeTab).map(normalizeManualInventoryRow)
+      );
       setRows(list);
       setOriginalRows(list.map(r => ({ ...r })));
     } catch { toast.error('Failed to load data'); }
@@ -1197,7 +1200,7 @@ function Manual() {
                 const rowNum = useWindow ? windowStart + rowIdx + 1 : rowIdx + 1;
                 const stableKey = inventoryRowKey(row) ?? `row-${filteredIdx}`;
                 return (
-                  <tr key={`${stableKey}-${filteredIdx}`}
+                  <tr key={stableKey}
                     className={`${selectedCell === rk(row) ? 'ms-row-sel' : ''} ${isDragHL ? 'ms-drag-hl' : ''}`}>
                     <td className="ms-num" onClick={() => setSelectedCell(rk(row))} title="Select row">{rowNum}</td>
                     {columns.map(col => {

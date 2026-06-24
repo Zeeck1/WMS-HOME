@@ -1,4 +1,4 @@
-import { sortLocationsNearestFirst } from '../config/warehouseConfig';
+import { sortLocationsNearestFirst, parseLocationCode } from '../config/warehouseConfig';
 
 /** @typedef {'nearest' | 'cs_in_date'} WithdrawItemSortMode */
 
@@ -432,4 +432,41 @@ export function withdrawFishNameLabel(group) {
     return `${group.fish_name} (${group.order_code})`;
   }
   return group.fish_name;
+}
+
+/** Warehouse line letter for a row (e.g. "O05L-4" -> "O"); blanks group under "—". */
+export function withdrawLineLetter(item) {
+  const parsed = parseLocationCode(item?.line_place);
+  if (parsed?.line) return parsed.line;
+  const raw = String(item?.line_place || '').trim().toUpperCase();
+  return raw || '—';
+}
+
+/**
+ * Line View (Nearest line): group report rows by warehouse line letter, nearest-first
+ * within each line. e.g. "O" => [O05L-4, O02L-4 ...], then "P" => [...].
+ */
+export function groupWithdrawItemsByLine(items) {
+  const sorted = sortWithdrawItems(items || [], 'nearest');
+  const groups = {};
+  const order = [];
+  for (const item of sorted) {
+    const line = withdrawLineLetter(item);
+    if (!groups[line]) {
+      groups[line] = { key: line, line, lines: [], totalReqMc: 0, totalActMc: 0, totalKg: 0 };
+      order.push(line);
+    }
+    const g = groups[line];
+    const reqMc = requestedMc(item);
+    const actMc = actualMc(item);
+    g.lines.push({ ...item, reqMc, actMc });
+    g.totalReqMc += reqMc;
+    g.totalActMc += actMc;
+    g.totalKg += actMc * Number(item.bulk_weight_kg || 0);
+  }
+  order.sort((a, b) => a.localeCompare(b));
+  for (const k of order) {
+    groups[k].lines = sortWithdrawItems(groups[k].lines, 'nearest');
+  }
+  return order.map((k) => groups[k]);
 }

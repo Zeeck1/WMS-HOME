@@ -40,6 +40,8 @@ import {
 
   enrichWithdrawLinesFromInventory,
 
+  groupWithdrawItemsByLine,
+
 } from '../utils/withdrawItemGrouping';
 
 
@@ -59,6 +61,8 @@ function WithdrawReport() {
   const [loading, setLoading] = useState(true);
 
   const [sortMode, setSortMode] = useState('nearest');
+
+  const [lineView, setLineView] = useState(false);
 
 
 
@@ -145,6 +149,17 @@ function WithdrawReport() {
     () => groupWithdrawItems(reportItems, sortMode),
 
     [reportItems, sortMode]
+
+  );
+
+  // Line View only applies to "Nearest line" sort — group rows by warehouse line letter.
+  const lineViewActive = lineView && !sortByCsIn;
+
+  const lineGroups = useMemo(
+
+    () => (lineViewActive ? groupWithdrawItemsByLine(reportItems) : []),
+
+    [reportItems, lineViewActive]
 
   );
 
@@ -273,6 +288,19 @@ function WithdrawReport() {
             </button>
           </div>
 
+          {!sortByCsIn && (
+            <button
+              type="button"
+              className={`wr-sort-switch-option wr-line-view-toggle ${lineView ? 'active' : ''}`}
+              aria-pressed={lineView}
+              onClick={() => setLineView((v) => !v)}
+              title="Group the report by warehouse line (e.g. O Line, then P Line), nearest location first"
+            >
+              <FiMapPin aria-hidden />
+              <span>Line view</span>
+            </button>
+          )}
+
           <button className="btn btn-outline" onClick={() => navigate(-1)}>
 
             <FiArrowLeft /> Back
@@ -315,7 +343,7 @@ function WithdrawReport() {
 
               <span><strong>Status:</strong> {data.status}</span>
 
-              <span><strong>Sort:</strong> {sortByCsIn ? 'Oldest CS IN date first (FIFO)' : 'Nearest line'}</span>
+              <span><strong>Sort:</strong> {sortByCsIn ? 'Oldest CS IN date first (FIFO)' : (lineViewActive ? 'Nearest line — by Line / Place' : 'Nearest line')}</span>
 
             </div>
 
@@ -359,7 +387,75 @@ function WithdrawReport() {
 
             <tbody>
 
-              {itemGroups.map((group) => {
+              {lineViewActive && lineGroups.map((lg) => {
+
+                const colsBeforeLoc = sortByCsIn ? 7 : 6;
+
+                return (
+
+                  <React.Fragment key={`line-${lg.key}`}>
+
+                    <tr className="wr-group-row wr-line-header-row">
+
+                      <td className="wr-bold wr-line-header" colSpan={colsBeforeLoc + 5}>
+
+                        {lg.line} Line
+
+                        <span className="wr-group-badge">{lg.lines.length} loc</span>
+
+                      </td>
+
+                    </tr>
+
+                    {lg.lines.map((line) => {
+
+                      const lineDiffers = line.actMc !== line.reqMc;
+
+                      return (
+
+                        <tr key={line.id ?? `${lg.key}-${line.line_place}-${line.stack_no}`} className="wr-line-detail-row">
+
+                          <td className="wr-bold">{withdrawFishNameLabel(line)}</td>
+
+                          <td className="wr-center">{line.size}</td>
+
+                          <td className="wr-center">{Number(line.bulk_weight_kg)} KG</td>
+
+                          <td className="wr-center">{line.type}</td>
+
+                          <td className="wr-center">{line.glazing}</td>
+
+                          <td className="wr-center">{line.sticker}</td>
+
+                          {sortByCsIn && (
+
+                            <td className="wr-center">{formatWithdrawCsInDate(line.cs_in_date)}</td>
+
+                          )}
+
+                          <td className="wr-center wr-bold">{line.line_place}</td>
+
+                          <td className="wr-center">{withdrawLineStackNo(line)}</td>
+
+                          <td className="wr-center">{line.reqMc}</td>
+
+                          <td className={`wr-center ${lineDiffers ? 'wr-balance' : ''}`}>{line.actMc}</td>
+
+                          <td className="wr-remark-cell" aria-label="Remark (handwriting)" />
+
+                        </tr>
+
+                      );
+
+                    })}
+
+                  </React.Fragment>
+
+                );
+
+              })}
+
+              {!lineViewActive && itemGroups.map((group) => {
 
                 const groupActualDiffers = group.totalActMc !== group.totalReqMc;
 

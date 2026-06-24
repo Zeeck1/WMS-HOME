@@ -92,6 +92,7 @@ function aggregateRowsByVisibleColumns(rows, groupColumns, aggregateKeys) {
     const existing = map.get(key);
     if (!existing) {
       const copy = { ...r };
+      copy.__rowKey = key;
       for (const k of aggregateKeys) copy[k] = Number(r[k]) || 0;
       map.set(key, copy);
       out.push(copy);
@@ -859,7 +860,7 @@ function StockTable() {
                 ) : filteredInventory.length === 0 ? (
                   <tr><td colSpan={visibleColumns.length + 1} style={{ textAlign: 'center', padding: 40, color: '#999' }}>No rows match the filters</td></tr>
                 ) : displayRows.map((r, i) => (
-                  <tr key={i}>
+                  <tr key={r.__rowKey ?? i}>
                     <td className="text-center" style={{ color: '#999' }}>{i + 1}</td>
                     {visibleColumns.map(col => {
                       const val = r[col.key];
@@ -949,7 +950,7 @@ function StockTable() {
                     </td>
                   </tr>
                 ) : displayRows.map((r, i) => (
-                  <tr key={i}>
+                  <tr key={r.__rowKey ?? i}>
                     <td className="text-center" style={{ color: '#999' }}>{i + 1}</td>
                     {bulkTableColumns.map(col => {
                       const val = r[col.key];
