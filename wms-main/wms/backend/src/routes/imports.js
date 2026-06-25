@@ -56,7 +56,11 @@ router.get('/movement-history', async (req, res) => {
         o.nw_kgs AS weight_kg,
         o.order_ref AS reference_no,
         'import' AS created_by,
-        CONCAT('Import shipment ', s.inv_no) AS notes
+        CONCAT('Import shipment ', s.inv_no) AS notes,
+        NULL AS cs_in_date,
+        s.eta AS import_arrival_date,
+        'IMPORT' AS stock_type,
+        s.inv_no AS order_code
       FROM import_stock_outs o
       JOIN import_items ii ON o.item_id = ii.id
       JOIN import_shipments s ON ii.shipment_id = s.id

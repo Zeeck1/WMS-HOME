@@ -21,6 +21,7 @@ import {
   bangkokLocaleDateString,
   dateToYYYYMMDDInBangkok,
 } from '../utils/bangkokTime';
+import { useAuth } from '../context/AuthContext';
 
 function BilingualLabel({ en, th }) {
   return (
@@ -106,6 +107,7 @@ function withdrawFormNavState(req, { historySearch, statusFilter, dateFilter } =
 function Withdraw() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
   const returnFromForm = location.state?.showHistory && location.state?.department
     ? location.state
     : null;
@@ -129,6 +131,13 @@ function Withdraw() {
   const [expandedRequest, setExpandedRequest] = useState(null);
   const [requestDetails, setRequestDetails] = useState(null);
   const [stockTypeTab, setStockTypeTab] = useState(null);
+  const allowedDepartments = useMemo(() => {
+    if (!user) return DEPARTMENTS;
+    if (user.role === 'superadmin') return DEPARTMENTS;
+    const raw = Array.isArray(user.withdraw_departments) ? user.withdraw_departments : [];
+    const allowed = DEPARTMENTS.filter((d) => raw.includes(d.id));
+    return allowed.length ? allowed : DEPARTMENTS;
+  }, [user]);
 
   useEffect(() => {
     if (department) {
@@ -137,6 +146,17 @@ function Withdraw() {
     }
     // eslint-disable-next-line
   }, [department, statusFilter, dateFilter, historySearch, stockTypeTab]);
+
+  useEffect(() => {
+    if (!department) return;
+    if (!allowedDepartments.some((d) => d.id === department)) {
+      setDepartment(null);
+      setStep('dept');
+      setCart([]);
+      setShowHistory(false);
+      toast.warning('Your department access changed. Please select an allowed department.');
+    }
+  }, [allowedDepartments, department]);
 
   const fetchInventory = async () => {
     setLoading(true);
@@ -354,6 +374,10 @@ function Withdraw() {
     if (!requesterName.trim()) { toast.error('Please enter your name (Requester Name)'); return; }
     if (!withdrawDate) { toast.error('Please select a withdraw date'); return; }
     if (!requestTime) { toast.error('Please select a request time'); return; }
+    if (!allowedDepartments.some((d) => d.id === department)) {
+      toast.error('You are not allowed to create withdrawal for this department');
+      return;
+    }
     setSubmitting(true);
     try {
       const distributedRows = [];
@@ -433,7 +457,7 @@ function Withdraw() {
         <div className="page-body">
           <div className="wd-dept-title">Select Your Department</div>
           <div className="wd-dept-grid">
-            {DEPARTMENTS.map(dept => (
+            {allowedDepartments.map(dept => (
               <div
                 key={dept.id}
                 className="wd-dept-card"
@@ -449,6 +473,11 @@ function Withdraw() {
               </div>
             ))}
           </div>
+          {allowedDepartments.length === 0 && (
+            <div style={{ marginTop: 12, color: '#b91c1c', fontWeight: 600 }}>
+              No department access assigned. Please contact superadmin.
+            </div>
+          )}
         </div>
       </>
     );
@@ -464,8 +493,8 @@ function Withdraw() {
           </button>
           <h2>
             <FiShoppingCart /> Withdraw —{' '}
-            <span style={{ color: DEPARTMENTS.find(d => d.id === department)?.color }}>
-              {DEPARTMENTS.find(d => d.id === department)?.label ?? department}
+            <span style={{ color: allowedDepartments.find(d => d.id === department)?.color }}>
+              {allowedDepartments.find(d => d.id === department)?.label ?? department}
             </span>
           </h2>
         </div>

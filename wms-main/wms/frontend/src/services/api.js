@@ -66,9 +66,9 @@ export const getDashboard = () => api.get('/inventory/dashboard');
 export const deleteAllStockData = (params) => api.delete('/inventory/all', { params });
 
 // ─── Withdrawals ──────────────────────────────────────
-export const getWithdrawals = (params) => api.get('/withdrawals', { params });
-export const getWithdrawal = (id) => api.get(`/withdrawals/${id}`);
-export const createWithdrawal = (data) => api.post('/withdrawals', data);
+export const getWithdrawals = (params) => api.get('/withdrawals', { ...withAuth(), params });
+export const getWithdrawal = (id) => api.get(`/withdrawals/${id}`, withAuth());
+export const createWithdrawal = (data) => api.post('/withdrawals', data, withAuth());
 export const updateWithdrawalItems = (id, data) => api.put(`/withdrawals/${id}/items`, data);
 /** Per-item stock-out mode: manual_stock_out 1 = Actual Out (deduct stock), 0 = Not Actual Out (print form only).
  *  Token included so the superadmin can also change it on FINISHED requests (syncs stock OUT records). */

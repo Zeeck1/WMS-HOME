@@ -73,6 +73,7 @@ async function runStartupMigrations() {
   const pool = require('./config/db');
   const { ensureUsersAuthColumns } = require('./utils/userAuthColumns');
   const { ensureLocationsLineStackUnique } = require('./utils/locationSchema');
+  const { ensureUserWithdrawDepartmentsTable } = require('./utils/withdrawDepartments');
   const conn = await pool.getConnection();
   try {
     await ensureUsersAuthColumns(conn);
@@ -91,6 +92,16 @@ async function runStartupMigrations() {
     console.error('  [startup] Locations index migration failed:', e.message);
   } finally {
     conn2.release();
+  }
+
+  const conn3 = await pool.getConnection();
+  try {
+    await ensureUserWithdrawDepartmentsTable(conn3);
+    console.log('  [startup] User withdraw department limits table OK');
+  } catch (e) {
+    console.error('  [startup] User withdraw department migration failed:', e.message);
+  } finally {
+    conn3.release();
   }
 }
 

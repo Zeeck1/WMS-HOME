@@ -11,6 +11,7 @@ router.get('/', async (req, res) => {
       SELECT m.*, 
         l.lot_no, l.cs_in_date, l.sticker,
         p.fish_name, p.size, p.type AS product_type, p.glazing, p.bulk_weight_kg,
+        p.stock_type, p.order_code,
         loc.line_place, loc.stack_no
       FROM movements m
       JOIN lots l ON m.lot_id = l.id

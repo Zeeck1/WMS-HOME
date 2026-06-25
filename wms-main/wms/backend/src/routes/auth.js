@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const pool = require('../config/db');
 const { authMiddleware, JWT_SECRET } = require('../middleware/auth');
+const { getUserAllowedWithdrawDepartments } = require('../utils/withdrawDepartments');
 
 const router = express.Router();
 
@@ -37,6 +38,7 @@ router.post('/login', async (req, res) => {
     );
 
     const permissions = perms.map(p => p.page_key);
+    const withdraw_departments = await getUserAllowedWithdrawDepartments(pool, user.id, user.role);
 
     const token = jwt.sign(
       { id: user.id, username: user.username, role: user.role, display_name: user.display_name },
@@ -51,7 +53,8 @@ router.post('/login', async (req, res) => {
         username: user.username,
         display_name: user.display_name,
         role: user.role,
-        permissions
+        permissions,
+        withdraw_departments,
       }
     });
   } catch (error) {
@@ -128,6 +131,7 @@ router.post('/employee-login', async (req, res) => {
       [user.id]
     );
     const permissions = perms.map((p) => p.page_key);
+    const withdraw_departments = await getUserAllowedWithdrawDepartments(pool, user.id, user.role);
 
     const token = jwt.sign(
       { id: user.id, username: user.username, role: user.role, display_name: user.display_name },
@@ -143,6 +147,7 @@ router.post('/employee-login', async (req, res) => {
         display_name: user.display_name,
         role: user.role,
         permissions,
+        withdraw_departments,
       },
     });
   } catch (error) {
@@ -170,7 +175,9 @@ router.get('/me', authMiddleware, async (req, res) => {
       [req.user.id]
     );
 
-    res.json({ ...rows[0], permissions: perms.map(p => p.page_key) });
+    const withdraw_departments = await getUserAllowedWithdrawDepartments(pool, req.user.id, rows[0].role);
+
+    res.json({ ...rows[0], permissions: perms.map(p => p.page_key), withdraw_departments });
   } catch (error) {
     console.error('Auth/me error:', error);
     res.status(500).json({ error: 'Failed to fetch user' });

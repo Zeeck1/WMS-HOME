@@ -1041,6 +1041,19 @@ async function initDatabase() {
     `);
     console.log('  Table created: user_permissions');
 
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS user_withdraw_departments (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        department ENUM('PK','RM','Branch.05 (SM)') NOT NULL,
+        UNIQUE KEY uq_user_withdraw_department (user_id, department),
+        INDEX idx_withdraw_dept_user (user_id),
+        CONSTRAINT fk_user_withdraw_departments_user
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB
+    `);
+    console.log('  Table created: user_withdraw_departments');
+
     try {
       await ensureUsersAuthColumns(connection, dbName);
     } catch (migErr) {

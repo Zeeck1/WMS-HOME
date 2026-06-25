@@ -3,6 +3,11 @@ const bcrypt = require('bcryptjs');
 const pool = require('../config/db');
 const { authMiddleware, superadminOnly } = require('../middleware/auth');
 const { fetchPendingUsers } = require('../utils/userAuthColumns');
+const {
+  WITHDRAW_DEPARTMENTS,
+  getUserAllowedWithdrawDepartments,
+  setUserAllowedWithdrawDepartments,
+} = require('../utils/withdrawDepartments');
 
 const router = express.Router();
 
@@ -10,6 +15,7 @@ router.use(authMiddleware, superadminOnly);
 
 async function hardDeleteUser(conn, userId) {
   await conn.query('DELETE FROM user_permissions WHERE user_id = ?', [userId]);
+  await conn.query('DELETE FROM user_withdraw_departments WHERE user_id = ?', [userId]);
   const [result] = await conn.query('DELETE FROM users WHERE id = ?', [userId]);
   return result.affectedRows > 0;
 }
@@ -30,7 +36,7 @@ router.put('/:id/approve', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const { permissions } = req.body; // array of page_key strings
+    const { permissions, withdraw_departments } = req.body; // arrays
 
     const [rows] = await conn.query('SELECT * FROM users WHERE id = ?', [req.params.id]);
     if (rows.length === 0) {
@@ -56,6 +62,11 @@ router.put('/:id/approve', async (req, res) => {
         [values]
       );
     }
+    await setUserAllowedWithdrawDepartments(
+      conn,
+      req.params.id,
+      Array.isArray(withdraw_departments) ? withdraw_departments : WITHDRAW_DEPARTMENTS
+    );
 
     await conn.commit();
     res.json({ message: 'User approved' });
@@ -125,6 +136,7 @@ router.get('/', async (req, res) => {
         [u.id]
       );
       u.permissions = perms.map(p => p.page_key);
+      u.withdraw_departments = await getUserAllowedWithdrawDepartments(pool, u.id, u.role);
     }
 
     res.json(users);
@@ -137,7 +149,7 @@ router.get('/', async (req, res) => {
 // POST /api/users — create user
 router.post('/', async (req, res) => {
   try {
-    const { username, password, display_name, permissions } = req.body;
+    const { username, password, display_name, permissions, withdraw_departments } = req.body;
     if (!username || !password) {
       return res.status(400).json({ error: 'Username and password are required' });
     }
@@ -158,7 +170,25 @@ router.post('/', async (req, res) => {
       );
     }
 
-    res.status(201).json({ id: userId, username, display_name: display_name || username, permissions: permissions || [] });
+    let savedWithdrawDepartments = WITHDRAW_DEPARTMENTS;
+    const conn = await pool.getConnection();
+    try {
+      savedWithdrawDepartments = await setUserAllowedWithdrawDepartments(
+        conn,
+        userId,
+        Array.isArray(withdraw_departments) ? withdraw_departments : WITHDRAW_DEPARTMENTS
+      );
+    } finally {
+      conn.release();
+    }
+
+    res.status(201).json({
+      id: userId,
+      username,
+      display_name: display_name || username,
+      permissions: permissions || [],
+      withdraw_departments: savedWithdrawDepartments,
+    });
   } catch (error) {
     if (error.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'Username already exists' });
@@ -171,7 +201,7 @@ router.post('/', async (req, res) => {
 // PUT /api/users/:id — update user (password optional)
 router.put('/:id', async (req, res) => {
   try {
-    const { username, password, display_name, permissions, is_active } = req.body;
+    const { username, password, display_name, permissions, withdraw_departments, is_active } = req.body;
 
     const updates = [];
     const params = [];
@@ -199,6 +229,14 @@ router.put('/:id', async (req, res) => {
           'INSERT INTO user_permissions (user_id, page_key, can_access) VALUES ?',
           [values]
         );
+      }
+    }
+    if (Array.isArray(withdraw_departments)) {
+      const conn = await pool.getConnection();
+      try {
+        await setUserAllowedWithdrawDepartments(conn, req.params.id, withdraw_departments);
+      } finally {
+        conn.release();
       }
     }
 

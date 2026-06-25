@@ -20,8 +20,10 @@ const {
   queryWithdrawItemsDetailed,
   freezeWithdrawItemsSnapshot,
 } = require('../utils/withdrawItemSnapshot');
-
-const WITHDRAW_DEPARTMENTS = ['PK', 'RM', 'Branch.05 (SM)'];
+const {
+  WITHDRAW_DEPARTMENTS,
+  getUserAllowedWithdrawDepartments,
+} = require('../utils/withdrawDepartments');
 
 /** Compact segment for request_no (avoids spaces/special chars in WD-... codes). */
 function departmentRequestCode(department) {
@@ -101,6 +103,15 @@ async function getImportItemBalanceMc(conn, importItemId) {
 router.get('/', async (req, res) => {
   try {
     const { department, status, date, search } = req.query;
+    const user = getOptionalUser(req);
+    const isLimitedUser = user && user.role !== 'superadmin';
+    const allowedDepartments = isLimitedUser
+      ? await getUserAllowedWithdrawDepartments(pool, user.id, user.role)
+      : WITHDRAW_DEPARTMENTS;
+
+    if (department && isLimitedUser && !allowedDepartments.includes(department)) {
+      return res.json([]);
+    }
     let sql = `
       SELECT wr.*,
         (SELECT COUNT(*) FROM withdraw_items wi WHERE wi.request_id = wr.id) AS item_count,
@@ -120,7 +131,13 @@ router.get('/', async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
-    if (department) { sql += ' AND wr.department = ?'; params.push(department); }
+    if (department) {
+      sql += ' AND wr.department = ?';
+      params.push(department);
+    } else if (isLimitedUser) {
+      sql += ` AND wr.department IN (${allowedDepartments.map(() => '?').join(',')})`;
+      params.push(...allowedDepartments);
+    }
     if (status) { sql += ' AND wr.status = ?'; params.push(status); }
     if (date) { sql += ' AND DATE(COALESCE(wr.withdraw_date, wr.created_at)) = ?'; params.push(date); }
     if (search && String(search).trim()) {
@@ -295,7 +312,7 @@ router.post('/:id/undo-pick-route', async (req, res) => {
 });
 
 // ─── POST create a new withdrawal request ────────────
-router.post('/', async (req, res) => {
+router.post('/', authMiddleware, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -304,6 +321,13 @@ router.post('/', async (req, res) => {
     if (!department || !WITHDRAW_DEPARTMENTS.includes(department)) {
       await conn.rollback();
       return res.status(400).json({ error: 'Invalid department' });
+    }
+    if (req.user?.role !== 'superadmin') {
+      const allowedDepartments = await getUserAllowedWithdrawDepartments(conn, req.user.id, req.user.role);
+      if (!allowedDepartments.includes(department)) {
+        await conn.rollback();
+        return res.status(403).json({ error: `You are not allowed to create withdrawal for department ${department}` });
+      }
     }
     if (!items || items.length === 0) {
       await conn.rollback();

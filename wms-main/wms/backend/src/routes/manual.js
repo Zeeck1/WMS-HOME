@@ -145,6 +145,30 @@ async function moveLotToStackLocation(conn, lotId, fromLocationId, linePlace, st
   };
 }
 
+/**
+ * Prevent cross-row data flips when editing product fields from Manual page.
+ * If this lot shares a product row with other lots, clone the product and
+ * re-point only this lot before applying the edit.
+ */
+async function ensureLotOwnsEditableProduct(conn, lotId, productId) {
+  if (!lotId || !productId) return productId;
+  const [shared] = await conn.query(
+    'SELECT id FROM lots WHERE product_id = ? AND id != ? LIMIT 1',
+    [productId, lotId]
+  );
+  if (shared.length === 0) return productId;
+
+  const [ins] = await conn.query(
+    `INSERT INTO products (fish_name, size, bulk_weight_kg, type, glazing, stock_type, order_code)
+     SELECT fish_name, size, bulk_weight_kg, type, glazing, stock_type, order_code
+     FROM products WHERE id = ?`,
+    [productId]
+  );
+  const newProductId = ins.insertId;
+  await conn.query('UPDATE lots SET product_id = ? WHERE id = ?', [newProductId, lotId]);
+  return newProductId;
+}
+
 // ── PATCH /cell — update a single cell value ─────────────────────────
 router.patch('/cell', async (req, res) => {
   const conn = await pool.getConnection();
@@ -199,9 +223,12 @@ router.patch('/cell', async (req, res) => {
     }
 
     if (PRODUCT_FIELDS.includes(field)) {
-      await conn.query(`UPDATE products SET \`${field}\` = ? WHERE id = ?`,
-        [value === '' ? null : value, row.product_id]);
-      return res.json({ ok: true, product_id: row.product_id });
+      const editableProductId = await ensureLotOwnsEditableProduct(conn, lot_id, row.product_id);
+      await conn.query(
+        `UPDATE products SET \`${field}\` = ? WHERE id = ?`,
+        [value === '' ? null : value, editableProductId]
+      );
+      return res.json({ ok: true, product_id: editableProductId });
     }
 
     if (field === 'lot_no_numeric') {

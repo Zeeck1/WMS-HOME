@@ -4,6 +4,23 @@ import { toast } from 'react-toastify';
 import { getMovements, getImportMovementHistory } from '../services/api';
 import { bangkokLocaleString } from '../utils/bangkokTime';
 
+const formatMovementDate = (v) => {
+  if (v == null || v === '') return '-';
+  const s = String(v).trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  return s;
+};
+
+const movementInvoiceOrOrder = (m) => {
+  const stockType = String(m.stock_type || '').toUpperCase();
+  const code = m.order_code;
+  if (!code) return '-';
+  if (stockType === 'IMPORT') return code;
+  if (stockType === 'CONTAINER_EXTRA') return code;
+  return '-';
+};
+
 function Movements() {
   const [movements, setMovements] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -81,9 +98,11 @@ function Movements() {
       (m.lot_no || '').toLowerCase().includes(q) ||
       (m.line_place || '').toLowerCase().includes(q) ||
       (m.reference_no || '').toLowerCase().includes(q) ||
+      (m.order_code || '').toLowerCase().includes(q) ||
       (m.created_by || '').toLowerCase().includes(q) ||
       (m.notes || '').toLowerCase().includes(q) ||
-      (m.movement_type || '').toLowerCase().includes(q)
+      (m.movement_type || '').toLowerCase().includes(q) ||
+      (m.stock_type || '').toLowerCase().includes(q)
     );
   });
 
@@ -100,7 +119,7 @@ function Movements() {
             <input
               className="form-control"
               style={{ paddingLeft: 36 }}
-              placeholder="Search fish name, lot, location, reference, notes..."
+              placeholder="Search fish name, lot, invoice, order, location, reference, notes..."
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
@@ -143,6 +162,9 @@ function Movements() {
                   <th>Fish Name</th>
                   <th>Size</th>
                   <th>Lot No</th>
+                  <th>CS In Date</th>
+                  <th>Arrival Date (Import)</th>
+                  <th>Invoice / Order</th>
                   <th>Location</th>
                   <th>Qty (MC)</th>
                   <th>Weight (KG)</th>
@@ -153,7 +175,7 @@ function Movements() {
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
-                  <tr><td colSpan="11" style={{ textAlign: 'center', padding: 40, color: '#999' }}>
+                  <tr><td colSpan="14" style={{ textAlign: 'center', padding: 40, color: '#999' }}>
                     {search ? 'No movements match your search.' : 'No movements found'}
                   </td></tr>
                 ) : filtered.map(m => (
@@ -168,6 +190,17 @@ function Movements() {
                     <td><strong>{m.fish_name}</strong></td>
                     <td>{m.size || '-'}</td>
                     <td>{m.lot_no}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {String(m.stock_type || '').toUpperCase() === 'IMPORT'
+                        ? '-'
+                        : formatMovementDate(m.cs_in_date)}
+                    </td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {String(m.stock_type || '').toUpperCase() === 'IMPORT' || m._source === 'import'
+                        ? formatMovementDate(m.import_arrival_date)
+                        : '-'}
+                    </td>
+                    <td>{movementInvoiceOrOrder(m)}</td>
                     <td>{m.stack_no ? `${m.line_place} (Stack ${m.stack_no})` : (m.line_place || '-')}</td>
                     <td className="num-cell">{m.quantity_mc}</td>
                     <td className="num-cell">{Number(m.weight_kg).toFixed(2)}</td>

@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import {
   FiPlus, FiEdit2, FiTrash2, FiShield, FiUser, FiEye, FiEyeOff,
   FiUpload, FiUsers, FiClock, FiCheck, FiX, FiDownload, FiRefreshCw,
-  FiHash, FiBriefcase, FiMapPin
+  FiHash, FiBriefcase, FiMapPin, FiShoppingCart
 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import {
@@ -28,6 +28,12 @@ const EXCEL_COL_MAP = {
   '(ไทย) สถานที่ทำงาน': 'work_location',
   'สถานที่ทำงาน': 'work_location',
 };
+
+const WITHDRAW_DEPARTMENTS = [
+  { value: 'PK', label: 'PK' },
+  { value: 'RM', label: 'RM' },
+  { value: 'Branch.05 (SM)', label: 'Branch.05 (SM)' },
+];
 
 function parseEmployeeFile(file) {
   return new Promise((resolve, reject) => {
@@ -65,19 +71,39 @@ function parseEmployeeFile(file) {
 function UsersTab({ users, loading, onRefresh }) {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ username: '', password: '', display_name: '', permissions: [] });
+  const [form, setForm] = useState({
+    username: '',
+    password: '',
+    display_name: '',
+    permissions: [],
+    withdraw_departments: WITHDRAW_DEPARTMENTS.map((d) => d.value),
+  });
   const [showPw, setShowPw] = useState(false);
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ username: '', password: '', display_name: '', permissions: ALL_PAGES.map(p => p.key) });
+    setForm({
+      username: '',
+      password: '',
+      display_name: '',
+      permissions: ALL_PAGES.map((p) => p.key),
+      withdraw_departments: WITHDRAW_DEPARTMENTS.map((d) => d.value),
+    });
     setShowPw(false);
     setShowModal(true);
   };
 
   const openEdit = (u) => {
     setEditing(u);
-    setForm({ username: u.username, password: '', display_name: u.display_name || '', permissions: u.permissions || [] });
+    setForm({
+      username: u.username,
+      password: '',
+      display_name: u.display_name || '',
+      permissions: u.permissions || [],
+      withdraw_departments: u.withdraw_departments?.length
+        ? u.withdraw_departments
+        : WITHDRAW_DEPARTMENTS.map((d) => d.value),
+    });
     setShowPw(false);
     setShowModal(true);
   };
@@ -93,16 +119,31 @@ function UsersTab({ users, loading, onRefresh }) {
 
   const selectAll = () => setForm(prev => ({ ...prev, permissions: ALL_PAGES.map(p => p.key) }));
   const clearAll = () => setForm(prev => ({ ...prev, permissions: [] }));
+  const toggleWithdrawDepartment = (dept) => {
+    setForm((prev) => ({
+      ...prev,
+      withdraw_departments: prev.withdraw_departments.includes(dept)
+        ? prev.withdraw_departments.filter((d) => d !== dept)
+        : [...prev.withdraw_departments, dept],
+    }));
+  };
+  const selectAllDepartments = () =>
+    setForm((prev) => ({ ...prev, withdraw_departments: WITHDRAW_DEPARTMENTS.map((d) => d.value) }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.username) { toast.warning('Username is required'); return; }
     if (!editing && !form.password) { toast.warning('Password is required for new users'); return; }
+    if (!form.withdraw_departments.length) {
+      toast.warning('Select at least one Withdraw department');
+      return;
+    }
     try {
       const payload = {
         username: form.username,
         display_name: form.display_name || form.username,
-        permissions: form.permissions
+        permissions: form.permissions,
+        withdraw_departments: form.withdraw_departments,
       };
       if (form.password) payload.password = form.password;
       if (editing) {
@@ -149,13 +190,14 @@ function UsersTab({ users, loading, onRefresh }) {
               <th>Display Name</th>
               <th>Role</th>
               <th>Pages Allowed</th>
+              <th>Withdraw Departments</th>
               <th>Status</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {users.length === 0 ? (
-              <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: '#999' }}>No users found.</td></tr>
+              <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: '#999' }}>No users found.</td></tr>
             ) : users.map((u, i) => (
               <tr key={u.id}>
                 <td className="text-center">{i + 1}</td>
@@ -170,6 +212,12 @@ function UsersTab({ users, loading, onRefresh }) {
                   {u.role === 'superadmin'
                     ? <span style={{ color: 'var(--success)', fontWeight: 500 }}>All Pages</span>
                     : <span>{u.permissions?.length || 0} / {ALL_PAGES.length}</span>
+                  }
+                </td>
+                <td>
+                  {u.role === 'superadmin'
+                    ? <span style={{ color: 'var(--success)', fontWeight: 500 }}>All</span>
+                    : <span>{(u.withdraw_departments || WITHDRAW_DEPARTMENTS.map((d) => d.value)).join(', ')}</span>
                   }
                 </td>
                 <td>
@@ -242,6 +290,29 @@ function UsersTab({ users, loading, onRefresh }) {
                           onChange={() => togglePermission(page.key)}
                         />
                         <span>{page.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="um-perm-section" style={{ marginTop: 14 }}>
+                  <div className="um-perm-header">
+                    <label><FiShoppingCart style={{ marginRight: 4 }} /> Withdraw Department Access</label>
+                    <div>
+                      <button type="button" className="btn btn-outline btn-sm" onClick={selectAllDepartments}>Select All</button>
+                    </div>
+                  </div>
+                  <div className="um-perm-grid">
+                    {WITHDRAW_DEPARTMENTS.map((dept) => (
+                      <label
+                        key={dept.value}
+                        className={`um-perm-item ${form.withdraw_departments.includes(dept.value) ? 'um-perm-on' : ''}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={form.withdraw_departments.includes(dept.value)}
+                          onChange={() => toggleWithdrawDepartment(dept.value)}
+                        />
+                        <span>{dept.label}</span>
                       </label>
                     ))}
                   </div>
