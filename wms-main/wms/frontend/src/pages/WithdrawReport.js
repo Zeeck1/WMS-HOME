@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 
 import { useParams, useNavigate } from 'react-router-dom';
 
-import { FiPrinter, FiDownload, FiArrowLeft, FiMapPin, FiCalendar } from 'react-icons/fi';
+import { FiPrinter, FiDownload, FiArrowLeft, FiMapPin, FiCalendar, FiBox } from 'react-icons/fi';
 
 import { toast } from 'react-toastify';
 
@@ -27,6 +27,8 @@ import {
   buildOldestLotReportFromStockSummary,
 
   buildNearestLineReportFromStockSummary,
+
+  buildSinglePlaceReportFromStockSummary,
 
   sortWithdrawItems,
 
@@ -123,6 +125,10 @@ function WithdrawReport() {
 
       lines = sortWithdrawItems([...raw], sortByCsIn ? 'cs_in_date' : 'nearest');
 
+    } else if (sortMode === 'single_place' && inventory.length) {
+
+      lines = buildSinglePlaceReportFromStockSummary(raw, inventory);
+
     } else if (sortByCsIn && inventory.length) {
 
       lines = buildOldestLotReportFromStockSummary(raw, inventory);
@@ -140,7 +146,7 @@ function WithdrawReport() {
     // Stack No must match the Manual page — resolve from live inventory (lot + line place)
     return enrichWithdrawLinesFromInventory(lines, inventory);
 
-  }, [data, inventory, sortByCsIn]);
+  }, [data, inventory, sortMode, sortByCsIn]);
 
 
 
@@ -152,14 +158,13 @@ function WithdrawReport() {
 
   );
 
-  // Line View only applies to "Nearest line" sort — group rows by warehouse line letter.
-  const lineViewActive = lineView && !sortByCsIn;
+  const lineViewActive = lineView;
 
   const lineGroups = useMemo(
 
-    () => (lineViewActive ? groupWithdrawItemsByLine(reportItems) : []),
+    () => (lineViewActive ? groupWithdrawItemsByLine(reportItems, sortMode) : []),
 
-    [reportItems, lineViewActive]
+    [reportItems, lineViewActive, sortMode]
 
   );
 
@@ -251,6 +256,8 @@ function WithdrawReport() {
 
   if (!data) return <div className="page-body"><p>Withdrawal request not found.</p></div>;
 
+  const reportColCount = sortByCsIn ? 12 : 11;
+
 
 
   return (
@@ -286,20 +293,44 @@ function WithdrawReport() {
               <FiCalendar aria-hidden />
               <span>Oldest lot (FIFO)</span>
             </button>
-          </div>
-
-          {!sortByCsIn && (
             <button
               type="button"
-              className={`wr-sort-switch-option wr-line-view-toggle ${lineView ? 'active' : ''}`}
+              role="tab"
+              aria-selected={sortMode === 'single_place'}
+              className={`wr-sort-switch-option ${sortMode === 'single_place' ? 'active' : ''}`}
+              onClick={() => setSortMode('single_place')}
+              title="Fewest picks — prefer one location that can fulfill the whole request alone (nearest among those), even if farther"
+            >
+              <FiBox aria-hidden />
+              <span>Single place</span>
+            </button>
+          </div>
+
+          <div className="wr-layout-switch no-print" role="group" aria-label="Report layout">
+            <span className="wr-layout-switch-label">Layout</span>
+            <button
+              type="button"
+              className={`wr-layout-switch-option ${!lineView ? 'active' : ''}`}
+              aria-pressed={!lineView}
+              onClick={() => setLineView(false)}
+            >
+              By product
+            </button>
+            <button
+              type="button"
+              className={`wr-layout-switch-option ${lineView ? 'active' : ''}`}
               aria-pressed={lineView}
-              onClick={() => setLineView((v) => !v)}
-              title="Group the report by warehouse line (e.g. O Line, then P Line), nearest location first"
+              onClick={() => setLineView(true)}
+              title={sortMode === 'single_place'
+                ? 'Group by warehouse line — fewest picks (single fulfilling location) within each line'
+                : (sortByCsIn
+                  ? 'Group by warehouse line — oldest CS IN date first within each line'
+                  : 'Group by warehouse line — nearest location first within each line')}
             >
               <FiMapPin aria-hidden />
               <span>Line view</span>
             </button>
-          )}
+          </div>
 
           <button className="btn btn-outline" onClick={() => navigate(-1)}>
 
@@ -343,7 +374,16 @@ function WithdrawReport() {
 
               <span><strong>Status:</strong> {data.status}</span>
 
-              <span><strong>Sort:</strong> {sortByCsIn ? 'Oldest CS IN date first (FIFO)' : (lineViewActive ? 'Nearest line — by Line / Place' : 'Nearest line')}</span>
+              <span><strong>Sort:</strong> {(() => {
+                const base = sortMode === 'single_place'
+                  ? 'Single place (fewest picks)'
+                  : (sortByCsIn ? 'Oldest CS IN date first (FIFO)' : 'Nearest line');
+                return lineViewActive ? `${base} — by Line / Place` : base;
+              })()}</span>
+
+              {lineViewActive && (
+                <span className="wr-meta-line-view-tag">Line view layout</span>
+              )}
 
             </div>
 
@@ -351,7 +391,7 @@ function WithdrawReport() {
 
 
 
-          <table className="wr-table">
+          <table className={`wr-table${lineViewActive ? ' wr-table--line-view' : ''}`}>
 
             <thead>
 
@@ -389,57 +429,122 @@ function WithdrawReport() {
 
               {lineViewActive && lineGroups.map((lg) => {
 
-                const colsBeforeLoc = sortByCsIn ? 7 : 6;
+                const lineDiffersTotal = lg.totalActMc !== lg.totalReqMc;
 
                 return (
 
                   <React.Fragment key={`line-${lg.key}`}>
 
-                    <tr className="wr-group-row wr-line-header-row">
+                    <tr className="wr-line-section-header">
 
-                      <td className="wr-bold wr-line-header" colSpan={colsBeforeLoc + 5}>
+                      <td colSpan={reportColCount} className="wr-line-section-header-cell">
 
-                        {lg.line} Line
+                        <div className="wr-line-section-banner">
 
-                        <span className="wr-group-badge">{lg.lines.length} loc</span>
+                          <div className="wr-line-section-left">
+
+                            <span className="wr-line-letter" aria-hidden>{lg.line}</span>
+
+                            <div className="wr-line-section-title">
+
+                              <span className="wr-line-section-name">Line {lg.line}</span>
+
+                              <span className="wr-line-section-meta">
+
+                                {lg.lines.length} location{lg.lines.length !== 1 ? 's' : ''}
+
+                              </span>
+
+                            </div>
+
+                          </div>
+
+                          <div className="wr-line-section-stats">
+
+                            <div className="wr-line-stat">
+
+                              <span className="wr-line-stat-label">Request</span>
+
+                              <span className="wr-line-stat-value">{lg.totalReqMc.toLocaleString()} MC</span>
+
+                            </div>
+
+                            <div className="wr-line-stat">
+
+                              <span className="wr-line-stat-label">Actual</span>
+
+                              <span className={`wr-line-stat-value${lineDiffersTotal ? ' wr-line-stat-value--warn' : ''}`}>
+
+                                {lg.totalActMc.toLocaleString()} MC
+
+                              </span>
+
+                            </div>
+
+                            <div className="wr-line-stat">
+
+                              <span className="wr-line-stat-label">Weight</span>
+
+                              <span className="wr-line-stat-value">{lg.totalKg.toLocaleString(undefined, { maximumFractionDigits: 1 })} KG</span>
+
+                            </div>
+
+                          </div>
+
+                        </div>
 
                       </td>
 
                     </tr>
 
-                    {lg.lines.map((line) => {
+                    {lg.lines.map((line, lineIdx) => {
 
                       const lineDiffers = line.actMc !== line.reqMc;
 
                       return (
 
-                        <tr key={line.id ?? `${lg.key}-${line.line_place}-${line.stack_no}`} className="wr-line-detail-row">
+                        <tr
+                          key={line.id ?? `${lg.key}-${line.line_place}-${line.stack_no}-${lineIdx}`}
+                          className={`wr-line-item-row${lineIdx % 2 === 1 ? ' wr-line-item-row--alt' : ''}`}
+                        >
 
-                          <td className="wr-bold">{withdrawFishNameLabel(line)}</td>
+                          <td className="wr-line-fish-cell">
 
-                          <td className="wr-center">{line.size}</td>
+                            <span className="wr-line-fish-name">{withdrawFishNameLabel(line)}</span>
 
-                          <td className="wr-center">{Number(line.bulk_weight_kg)} KG</td>
+                          </td>
 
-                          <td className="wr-center">{line.type}</td>
+                          <td className="wr-center wr-line-muted">{line.size || '—'}</td>
 
-                          <td className="wr-center">{line.glazing}</td>
+                          <td className="wr-center wr-line-muted">{Number(line.bulk_weight_kg)} KG</td>
 
-                          <td className="wr-center">{line.sticker}</td>
+                          <td className="wr-center wr-line-muted">{line.type || '—'}</td>
+
+                          <td className="wr-center wr-line-muted">{line.glazing || '—'}</td>
+
+                          <td className="wr-center wr-line-muted">{line.sticker || '—'}</td>
 
                           {sortByCsIn && (
 
-                            <td className="wr-center">{formatWithdrawCsInDate(line.cs_in_date)}</td>
+                            <td className="wr-center wr-line-date">{formatWithdrawCsInDate(line.cs_in_date)}</td>
 
                           )}
 
-                          <td className="wr-center wr-bold">{line.line_place}</td>
+                          <td className="wr-center">
 
-                          <td className="wr-center">{withdrawLineStackNo(line)}</td>
+                            <span className="wr-loc-pill">{line.line_place || '—'}</span>
 
-                          <td className="wr-center">{line.reqMc}</td>
+                          </td>
 
-                          <td className={`wr-center ${lineDiffers ? 'wr-balance' : ''}`}>{line.actMc}</td>
+                          <td className="wr-center wr-line-muted">{withdrawLineStackNo(line) || '—'}</td>
+
+                          <td className="wr-center wr-line-mc">{line.reqMc.toLocaleString()}</td>
+
+                          <td className={`wr-center wr-line-mc wr-line-mc--act${lineDiffers ? ' wr-balance' : ''}`}>
+
+                            {line.actMc.toLocaleString()}
+
+                          </td>
 
                           <td className="wr-remark-cell" aria-label="Remark (handwriting)" />
 

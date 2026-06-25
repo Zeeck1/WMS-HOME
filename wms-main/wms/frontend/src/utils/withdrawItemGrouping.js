@@ -232,6 +232,118 @@ export function buildNearestLineReportFromStockSummary(withdrawItems, inventoryR
   return allocateRequestOntoStock(withdrawList, inventory, 'nearest');
 }
 
+/**
+ * Single-place allocation (fewest picks).
+ * For each product, prefer ONE location that can fulfill the whole remaining request alone —
+ * picking the nearest among those that qualify. If no single location can cover the remainder,
+ * take the largest-quantity location next (nearest as tiebreak) to minimise the number of picks.
+ * e.g. need 5 MC, stock J05L-1=2, I06L-3=2, H03L-1=5  =>  H03L-1 first (one pick), even if farther.
+ */
+function allocateRequestPreferSingleLocation(withdrawList, inventory) {
+  const processByProduct = productionProcessByProduct(withdrawList);
+  const productTotals = {};
+  const productOrder = [];
+  withdrawList.forEach((wi) => {
+    const pk = withdrawProductKey(wi);
+    if (!productTotals[pk]) {
+      productTotals[pk] = { totalReqMc: 0, totalActMc: 0, sample: wi };
+      productOrder.push(pk);
+    }
+    productTotals[pk].totalReqMc += requestedMc(wi);
+    productTotals[pk].totalActMc += actualMc(wi);
+  });
+
+  const allLines = [];
+  for (const pk of productOrder) {
+    const { totalReqMc, totalActMc, sample } = productTotals[pk];
+    const stockLines = inventory.filter(
+      (inv) => withdrawProductKey(inv) === pk && Number(inv.hand_on_balance_mc) > 0
+    );
+    // Nearest order is the tiebreak base (first = nearest).
+    const nearest = sortLocationsNearestFirst(stockLines, 'line_place');
+    const used = new Set();
+    let remReq = totalReqMc;
+    let remAct = totalActMc;
+    let lineIdx = 0;
+
+    while (remReq > 0 || remAct > 0) {
+      const target = Math.max(remReq, remAct);
+      const candidates = nearest.filter(
+        (inv) => !used.has(inv) && (Number(inv.hand_on_balance_mc) || 0) > 0
+      );
+      if (!candidates.length) break;
+
+      // Prefer the nearest single location that can cover the whole remainder in one pick.
+      let chosen = candidates.find((inv) => (Number(inv.hand_on_balance_mc) || 0) >= target);
+      if (!chosen) {
+        // None can cover alone — take the largest quantity (nearest wins ties) to reduce pick count.
+        chosen = candidates.reduce(
+          (best, inv) =>
+            (Number(inv.hand_on_balance_mc) || 0) > (Number(best.hand_on_balance_mc) || 0) ? inv : best,
+          candidates[0]
+        );
+      }
+      used.add(chosen);
+
+      const avail = Number(chosen.hand_on_balance_mc) || 0;
+      const takeReq = Math.min(Math.max(remReq, 0), avail);
+      const takeAct = Math.min(Math.max(remAct, 0), avail);
+      if (takeReq <= 0 && takeAct <= 0) break;
+
+      const wi = withdrawList.find(
+        (w) => withdrawProductKey(w) === pk && withdrawLineMatchesInventory(w, chosen)
+      );
+      allLines.push({
+        ...chosen,
+        fish_name: chosen.fish_name ?? sample.fish_name,
+        size: chosen.size ?? sample.size,
+        bulk_weight_kg: chosen.bulk_weight_kg ?? sample.bulk_weight_kg,
+        type: chosen.type ?? sample.type ?? '',
+        glazing: chosen.glazing ?? sample.glazing ?? '',
+        sticker: chosen.sticker ?? sample.sticker ?? '',
+        stock_type: chosen.stock_type ?? sample.stock_type,
+        order_code: chosen.order_code ?? sample.order_code ?? '',
+        cs_in_date: chosen.cs_in_date,
+        lot_no: chosen.lot_no,
+        lot_no_numeric: chosen.lot_no_numeric,
+        line_place: chosen.line_place,
+        stack_no: chosen.stack_no,
+        st_no: chosen.st_no,
+        production_process: processByProduct[pk] || sample.production_process || wi?.production_process || '',
+        id: wi?.id ?? `pick-${pk}-${lineIdx++}`,
+        requested_mc: takeReq,
+        quantity_mc: takeAct,
+      });
+      remReq -= takeReq;
+      remAct -= takeAct;
+    }
+
+    // Leftover not covered by available stock — keep the original request lines (same as other modes).
+    if (remReq > 0 || remAct > 0) {
+      for (const wi of withdrawList.filter((w) => withdrawProductKey(w) === pk)) {
+        if (remReq <= 0 && remAct <= 0) break;
+        if (allLines.some((l) => withdrawLineMatchesInventory(wi, l))) continue;
+        const takeReq = Math.min(remReq, requestedMc(wi));
+        const takeAct = Math.min(remAct, actualMc(wi));
+        if (takeReq <= 0 && takeAct <= 0) continue;
+        allLines.push({ ...wi, requested_mc: takeReq, quantity_mc: takeAct });
+        remReq -= takeReq;
+        remAct -= takeAct;
+      }
+    }
+  }
+  // Preserve allocation order so the single fulfilling location shows first.
+  return allLines;
+}
+
+/** Single-place: same request totals, fewest pick locations (single location first). */
+export function buildSinglePlaceReportFromStockSummary(withdrawItems, inventoryRows) {
+  const withdrawList = withdrawItems || [];
+  const inventory = inventoryRows || [];
+  if (!withdrawList.length) return [];
+  return allocateRequestPreferSingleLocation(withdrawList, inventory);
+}
+
 /** Stable key for edit/save while previewing FIFO lines (before DB ids exist). */
 export function withdrawDisplayLineKey(item) {
   if (item.import_item_id != null) return `imp:${item.import_item_id}`;
@@ -351,6 +463,8 @@ function compareStackNo(a, b) {
  */
 export function sortWithdrawItems(items, sortMode = 'nearest') {
   const list = [...(items || [])];
+  // Single-place keeps the allocation order (single fulfilling location first).
+  if (sortMode === 'single_place') return list;
   if (sortMode === 'cs_in_date') {
     return list.sort((a, b) => {
       const dateCmp = csInDateSortKey(a).localeCompare(csInDateSortKey(b));
@@ -443,11 +557,11 @@ export function withdrawLineLetter(item) {
 }
 
 /**
- * Line View (Nearest line): group report rows by warehouse line letter, nearest-first
- * within each line. e.g. "O" => [O05L-4, O02L-4 ...], then "P" => [...].
+ * Line View: group report rows by warehouse line letter.
+ * Within each line, rows follow the active sort (nearest or oldest lot FIFO).
  */
-export function groupWithdrawItemsByLine(items) {
-  const sorted = sortWithdrawItems(items || [], 'nearest');
+export function groupWithdrawItemsByLine(items, sortMode = 'nearest') {
+  const sorted = sortWithdrawItems(items || [], sortMode);
   const groups = {};
   const order = [];
   for (const item of sorted) {
@@ -466,7 +580,7 @@ export function groupWithdrawItemsByLine(items) {
   }
   order.sort((a, b) => a.localeCompare(b));
   for (const k of order) {
-    groups[k].lines = sortWithdrawItems(groups[k].lines, 'nearest');
+    groups[k].lines = sortWithdrawItems(groups[k].lines, sortMode);
   }
   return order.map((k) => groups[k]);
 }
