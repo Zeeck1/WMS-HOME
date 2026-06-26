@@ -417,12 +417,22 @@ function StockTable() {
       return;
     }
     try {
+      const exportColumns = activeTab === 'BULK'
+        ? BULK_COLUMNS
+        : (activeTab === 'IMPORT' ? CE_IMPORT_COLUMNS : CE_COLUMNS);
+      const aggKeys = activeTab === 'BULK' ? BULK_AGGREGATE_KEYS : NONBULK_AGGREGATE_KEYS;
+      const exportRows = aggregateRowsByVisibleColumns(filteredInventory, exportColumns, aggKeys);
       await downloadStockSummaryExcel({
         activeTab,
-        rows: summaryRows,
-        totals: { totalMC, totalKG, totalStacks },
-        bulkTableColumns: activeTab === 'BULK' ? bulkTableColumns : [],
-        visibleColumns: activeTab === 'CONTAINER_EXTRA' ? visibleColumns : [],
+        rows: exportRows,
+        exportColumns,
+        totals: {
+          totalMC,
+          totalKG,
+          totalStacks,
+          totalOldBalance: filteredInventory.reduce((s, r) => s + Number(r.old_balance_mc || 0), 0),
+          totalNewIncome: filteredInventory.reduce((s, r) => s + Number(r.new_income_mc || 0), 0),
+        },
         searchQuery,
         filterCount: activeFilterCount,
       });

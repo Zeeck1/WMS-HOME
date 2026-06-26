@@ -48,6 +48,11 @@ const BULK_LABELS = {
   new_income_mc: 'New Income',
   hand_on_balance_mc: 'Hand On (MC)',
   hand_on_balance_kg: 'Hand On (KG)',
+  production_date: 'Production Date',
+  expiration_date: 'Expiration Date',
+  st_no: 'ST NO',
+  remark: 'Remark',
+  country: 'Country',
 };
 
 const NUMERIC_KEYS = new Set([
@@ -78,6 +83,7 @@ const COL_WIDTHS = {
   hand_on_balance_mc: 14,
   hand_on_balance_kg: 14,
   order_code: 16,
+  lot_no_numeric: 10,
   production_date: 14,
   expiration_date: 14,
   country: 12,
@@ -86,6 +92,17 @@ const COL_WIDTHS = {
 };
 
 const BULK_AGGREGATE_KEYS = ['old_balance_mc', 'new_income_mc', 'hand_on_balance_mc', 'hand_on_balance_kg'];
+const NONBULK_AGGREGATE_KEYS = ['hand_on_balance_mc', 'hand_on_balance_kg'];
+
+function aggregateKeysForTab(activeTab) {
+  return activeTab === 'BULK' ? BULK_AGGREGATE_KEYS : NONBULK_AGGREGATE_KEYS;
+}
+
+function resolveColumnHeader(col, activeTab) {
+  if (col.label != null && col.label !== '') return col.label;
+  if (col.key === 'order_code') return activeTab === 'IMPORT' ? 'Invoice No' : 'Order';
+  return BULK_LABELS[col.key] || col.key;
+}
 
 function tabAccent(activeTab) {
   if (activeTab === 'IMPORT') return COLORS.blue;
@@ -128,56 +145,21 @@ function applyCellStyle(cell, { font, fill, alignment, border, numFmt }) {
   if (numFmt) cell.numFmt = numFmt;
 }
 
-function buildExportColumns(activeTab, options) {
-  const {
-    bulkTableColumns = [],
-    visibleColumns = [],
-  } = options;
-
+function buildExportColumns(activeTab, exportColumns = []) {
+  const aggregateKeys = aggregateKeysForTab(activeTab);
   const numCol = { key: '_num', header: '#', width: 6, align: 'center' };
+  const leftAlignKeys = new Set(['fish_name', 'remark']);
 
-  if (activeTab === 'BULK') {
-    return [
-      numCol,
-      ...bulkTableColumns.map((c) => ({
-        key: c.key,
-        header: BULK_LABELS[c.key] || c.label,
-        width: COL_WIDTHS[c.key] || 14,
-        align: c.key === 'fish_name' ? 'left' : 'center',
-        isNumeric: NUMERIC_KEYS.has(c.key),
-        isAggregate: BULK_AGGREGATE_KEYS.includes(c.key),
-      })),
-    ];
-  }
-
-  if (activeTab === 'CONTAINER_EXTRA') {
-    return [
-      numCol,
-      ...visibleColumns.map((c) => ({
-        key: c.key,
-        header: c.label || c.key,
-        width: COL_WIDTHS[c.key] || 14,
-        align: c.key === 'fish_name' || c.key === 'remark' ? 'left' : 'center',
-        isNumeric: NUMERIC_KEYS.has(c.key),
-        isAggregate: c.key === 'hand_on_balance_mc' || c.key === 'hand_on_balance_kg',
-      })),
-    ];
-  }
-
-  // IMPORT
-  const orderHeader = 'Invoice No';
   return [
     numCol,
-    { key: 'order_code', header: orderHeader, width: COL_WIDTHS.order_code, align: 'center' },
-    { key: 'fish_name', header: 'Fish Name', width: COL_WIDTHS.fish_name, align: 'left' },
-    { key: 'size', header: 'Size', width: COL_WIDTHS.size, align: 'center' },
-    { key: 'bulk_weight_kg', header: 'KG', width: COL_WIDTHS.bulk_weight_kg, align: 'center', isNumeric: true },
-    { key: 'cs_in_date', header: 'Arrival Date', width: COL_WIDTHS.cs_in_date, align: 'center' },
-    { key: 'country', header: 'Country', width: COL_WIDTHS.country, align: 'center' },
-    { key: 'hand_on_balance_kg', header: 'Total KG', width: COL_WIDTHS.hand_on_balance_kg, align: 'center', isNumeric: true, isAggregate: true },
-    { key: 'hand_on_balance_mc', header: 'Balance MC', width: COL_WIDTHS.hand_on_balance_mc, align: 'center', isNumeric: true, isAggregate: true },
-    { key: 'line_place', header: 'Line', width: COL_WIDTHS.line_place, align: 'center' },
-    { key: 'remark', header: 'Remark', width: COL_WIDTHS.remark, align: 'left' },
+    ...exportColumns.map((c) => ({
+      key: c.key,
+      header: resolveColumnHeader(c, activeTab),
+      width: COL_WIDTHS[c.key] || 14,
+      align: leftAlignKeys.has(c.key) ? 'left' : 'center',
+      isNumeric: NUMERIC_KEYS.has(c.key),
+      isAggregate: aggregateKeys.includes(c.key),
+    })),
   ];
 }
 
@@ -193,6 +175,8 @@ function totalValue(col, totals, activeTab, rowCount) {
   if (col.key === '_num') return rowCount;
   if (col.key === 'fish_name') return 'TOTAL';
   if (activeTab === 'BULK' && col.key === 'stack_total') return totals.totalStacks ?? '';
+  if (col.key === 'old_balance_mc') return totals.totalOldBalance ?? 0;
+  if (col.key === 'new_income_mc') return totals.totalNewIncome ?? 0;
   if (col.key === 'hand_on_balance_mc') return totals.totalMC ?? 0;
   if (col.key === 'hand_on_balance_kg') return totals.totalKG ?? 0;
   return '';
@@ -275,8 +259,7 @@ function styleDataRows(sheet, columns, list, activeTab) {
  * @param {'BULK'|'CONTAINER_EXTRA'|'IMPORT'} options.activeTab
  * @param {Array} options.rows — filtered inventory rows
  * @param {{ totalMC: number, totalKG: number, totalStacks?: number }} options.totals
- * @param {Array} [options.bulkTableColumns]
- * @param {Array} [options.visibleColumns]
+ * @param {Array} [options.exportColumns] — full Stock Summary column definitions for the active tab
  * @param {string} [options.searchQuery]
  * @param {number} [options.filterCount]
  */
@@ -285,14 +268,13 @@ export async function downloadStockSummaryExcel(options = {}) {
     activeTab = 'BULK',
     rows = [],
     totals = {},
-    bulkTableColumns = [],
-    visibleColumns = [],
+    exportColumns = [],
     searchQuery = '',
     filterCount = 0,
   } = options;
 
   const list = rows || [];
-  const columns = buildExportColumns(activeTab, { bulkTableColumns, visibleColumns });
+  const columns = buildExportColumns(activeTab, exportColumns);
   const lastCol = columns.length;
   const accent = tabAccent(activeTab);
   const totalMC = Number(totals.totalMC) || 0;
@@ -427,7 +409,10 @@ export async function downloadStockSummaryExcel(options = {}) {
         numFmt:
           col.key === 'hand_on_balance_kg'
             ? '#,##0.00'
-            : col.key === 'hand_on_balance_mc' || col.key === 'stack_total'
+            : col.key === 'hand_on_balance_mc' ||
+                col.key === 'stack_total' ||
+                col.key === 'old_balance_mc' ||
+                col.key === 'new_income_mc'
               ? '#,##0'
               : undefined,
       });
