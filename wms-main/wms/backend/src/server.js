@@ -74,6 +74,7 @@ async function runStartupMigrations() {
   const { ensureUsersAuthColumns } = require('./utils/userAuthColumns');
   const { ensureLocationsLineStackUnique } = require('./utils/locationSchema');
   const { ensureUserWithdrawDepartmentsTable } = require('./utils/withdrawDepartments');
+  const { ensureProductsAllowLotClones } = require('./utils/productSchema');
   const conn = await pool.getConnection();
   try {
     await ensureUsersAuthColumns(conn);
@@ -102,6 +103,16 @@ async function runStartupMigrations() {
     console.error('  [startup] User withdraw department migration failed:', e.message);
   } finally {
     conn3.release();
+  }
+
+  const conn4 = await pool.getConnection();
+  try {
+    await ensureProductsAllowLotClones(conn4);
+    console.log('  [startup] Products per-lot clone schema OK');
+  } catch (e) {
+    console.error('  [startup] Products unique-key migration failed:', e.message);
+  } finally {
+    conn4.release();
   }
 }
 

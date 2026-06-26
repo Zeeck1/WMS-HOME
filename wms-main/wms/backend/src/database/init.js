@@ -196,6 +196,25 @@ async function initDatabase() {
       }
     } catch (e) { /* ignore */ }
 
+    // Migration: drop uq_product unique key.
+    // Each lot must be able to own its own editable product (see ensureLotOwnsEditableProduct).
+    // A global unique (fish_name,size,type,glazing,stock_type,order_code) made cloning a shared
+    // product fail with ER_DUP_ENTRY, so product-field edits on shared rows were silently rejected
+    // and rows kept another lot's values. Dedup on insert is still done in app code (findOrCreateProduct).
+    try {
+      const [prodKey] = await connection.query(`
+        SELECT INDEX_NAME FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'products' AND INDEX_NAME = 'uq_product'
+        LIMIT 1
+      `, [dbName]);
+      if (prodKey.length > 0) {
+        await connection.query('ALTER TABLE products DROP INDEX uq_product');
+        console.log('  Migration: dropped uq_product unique index (allow per-lot product clones)');
+      }
+    } catch (e) {
+      console.error('  Migration drop uq_product:', e.message);
+    }
+
     // Unique (line_place, stack_no) — same line + same stack share one location; different stacks stay separate
     await connection.query(`
       CREATE TABLE IF NOT EXISTS locations (

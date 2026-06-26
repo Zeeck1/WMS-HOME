@@ -223,12 +223,19 @@ router.patch('/cell', async (req, res) => {
     }
 
     if (PRODUCT_FIELDS.includes(field)) {
-      const editableProductId = await ensureLotOwnsEditableProduct(conn, lot_id, row.product_id);
-      await conn.query(
-        `UPDATE products SET \`${field}\` = ? WHERE id = ?`,
-        [value === '' ? null : value, editableProductId]
-      );
-      return res.json({ ok: true, product_id: editableProductId });
+      await conn.beginTransaction();
+      try {
+        const editableProductId = await ensureLotOwnsEditableProduct(conn, lot_id, row.product_id);
+        await conn.query(
+          `UPDATE products SET \`${field}\` = ? WHERE id = ?`,
+          [value === '' ? null : value, editableProductId]
+        );
+        await conn.commit();
+        return res.json({ ok: true, product_id: editableProductId });
+      } catch (e) {
+        await conn.rollback();
+        throw e;
+      }
     }
 
     if (field === 'lot_no_numeric') {
