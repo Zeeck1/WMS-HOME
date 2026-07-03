@@ -165,6 +165,24 @@ router.delete('/uploads', authMiddleware, superadminOnly, async (req, res) => {
   }
 });
 
+// PUT maintenance notice toggle (superadmin only)
+router.put('/maintenance-notice', authMiddleware, superadminOnly, async (req, res) => {
+  try {
+    await ensureTable();
+    const raw = req.body?.enabled;
+    const enabled = raw === true || raw === '1' || raw === 1;
+    const value = enabled ? '1' : '0';
+    await pool.query(
+      'INSERT INTO app_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?',
+      ['maintenance_notice_enabled', value, value]
+    );
+    res.json({ maintenance_notice_enabled: value, enabled });
+  } catch (error) {
+    console.error('Error saving maintenance notice setting:', error);
+    res.status(500).json({ error: 'Failed to save maintenance notice setting' });
+  }
+});
+
 // GET all settings
 router.get('/', async (req, res) => {
   try {

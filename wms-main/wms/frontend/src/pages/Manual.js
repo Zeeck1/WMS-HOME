@@ -6,7 +6,7 @@ import { parseLocationCode } from '../config/warehouseConfig';
 import ColumnFilterDropdown from '../components/ColumnFilterDropdown';
 import { bangkokYYYYMMDD, bangkokLocaleString, dateToYYYYMMDDInBangkok } from '../utils/bangkokTime';
 import {
-  MANUAL_FETCH_LIMIT,
+  fetchAllInventoryByTab,
   filterInventoryRowsByTab,
   normalizeManualInventoryRow,
   inventoryRowKey,
@@ -371,14 +371,12 @@ function Manual() {
     setPendingEditsMap({});
     setWindowStart(0);
     try {
-      const res = await getInventory({
+      const raw = await fetchAllInventoryByTab(getInventory, {
         ...params,
-        limit: MANUAL_FETCH_LIMIT,
         stock_type: activeTab,
-        _t: Date.now(),
       });
       const list = dedupeInventoryRows(
-        filterInventoryRowsByTab(res.data, activeTab).map(normalizeManualInventoryRow)
+        filterInventoryRowsByTab(raw, activeTab).map(normalizeManualInventoryRow)
       );
       setRows(list);
       setOriginalRows(list.map(r => ({ ...r })));
@@ -405,7 +403,7 @@ function Manual() {
   const handleSearch = (e) => {
     e.preventDefault();
     setAppliedClientFilters({ line: filters.line, stack_no: filters.stack_no });
-    const p = { limit: MANUAL_FETCH_LIMIT };
+    const p = {};
     if (filters.fish_name.trim()) p.fish_name = filters.fish_name.trim();
     if (filters.line_detail.trim()) p.location = filters.line_detail.trim();
     setWindowStart(0);
@@ -1067,9 +1065,6 @@ function Manual() {
 
         <div className="ms-hint no-print">
           <b>Add Row</b> opens a highlighted row at the top — confirm to insert (sorted by Line / Place). · Click any cell to edit · <b>Ctrl+S</b> Save · <b>Ctrl+Z</b> Undo · <b>Ctrl+C</b> Copy row · <b>Ctrl+V</b> Paste · Drag blue handle to fill down
-          {rows.length >= MANUAL_FETCH_LIMIT && (
-            <span className="ms-hint-limit"> · Showing up to {MANUAL_FETCH_LIMIT} rows (use Search to narrow)</span>
-          )}
         </div>
 
         {useWindow && (

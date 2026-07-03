@@ -9,11 +9,14 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { bangkokYYYYMMDD, bangkokLocaleString } from '../utils/bangkokTime';
 import { downloadStockSummaryExcel } from '../utils/stockSummaryExcelExport';
+import MaintenanceNotice from '../components/MaintenanceNotice';
+import { useMaintenanceNotice } from '../hooks/useMaintenanceNotice';
 import {
-  MANUAL_FETCH_LIMIT,
+  fetchAllInventoryByTab,
   filterInventoryRowsByTab,
   normalizeManualInventoryRow,
   dedupeInventoryRows,
+  inventoryRowKey,
 } from '../utils/manualInventoryShared';
 
 const TABS = [
@@ -70,38 +73,6 @@ const CE_IMPORT_COLUMNS = [
 ];
 
 const BULK_AGGREGATE_KEYS = ['old_balance_mc', 'new_income_mc', 'hand_on_balance_mc', 'hand_on_balance_kg'];
-const NONBULK_AGGREGATE_KEYS = ['hand_on_balance_mc', 'hand_on_balance_kg'];
-
-/**
- * Merge rows that look identical for the currently visible columns and sum their balances.
- * Source data is one row per lot+location (the Manual page); when location columns are
- * hidden in the summary the same product would otherwise repeat as "duplicate" rows.
- */
-function aggregateRowsByVisibleColumns(rows, groupColumns, aggregateKeys) {
-  const aggSet = new Set(aggregateKeys);
-  const keyCols = groupColumns.map((c) => c.key).filter((k) => !aggSet.has(k));
-  const map = new Map();
-  const out = [];
-  for (const r of rows || []) {
-    const key = keyCols
-      .map((k) => {
-        const v = r[k];
-        return v != null && v !== '' ? String(v) : '';
-      })
-      .join('\u0001');
-    const existing = map.get(key);
-    if (!existing) {
-      const copy = { ...r };
-      copy.__rowKey = key;
-      for (const k of aggregateKeys) copy[k] = Number(r[k]) || 0;
-      map.set(key, copy);
-      out.push(copy);
-    } else {
-      for (const k of aggregateKeys) existing[k] += Number(r[k]) || 0;
-    }
-  }
-  return out;
-}
 
 // Month/year dates from Excel like "12/2024" are stored in DB as "YYYY-MM-01".
 // Display rules:
@@ -175,8 +146,9 @@ function StockTable() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [columnFilters, setColumnFilters] = useState({});
-  const [rowLimit, setRowLimit] = useState(50);
+  const [rowLimit, setRowLimit] = useState(0);
   const reportContainerRef = useRef(null);
+  const { enabled: maintenanceNotice } = useMaintenanceNotice();
 
   const isCE = activeTab === 'CONTAINER_EXTRA';
   const isImport = activeTab === 'IMPORT';
@@ -252,23 +224,22 @@ function StockTable() {
     if (activeTab !== 'BULK') return;
     setColumnFilters(prev => {
       const next = { ...prev };
+      if (!showBulkLinesPlace) delete next.line_place;
+      if (!showBulkStackNo) delete next.stack_no;
+      if (!showBulkStackTotal) delete next.stack_total;
       if (!showBulkOldBalance) delete next.old_balance_mc;
       if (!showBulkNewIncome) delete next.new_income_mc;
       if (!showBulkLotNo) delete next.lot_no_numeric;
       return next;
     });
-  }, [activeTab, showBulkOldBalance, showBulkNewIncome, showBulkLotNo]);
+  }, [activeTab, showBulkLinesPlace, showBulkStackNo, showBulkStackTotal, showBulkOldBalance, showBulkNewIncome, showBulkLotNo]);
 
   const fetchInventory = useCallback(async () => {
     try {
-      // Exactly the same load as the Manual page (BULK / CONTAINER_EXTRA / IMPORT):
-      // same limit, same stock_type filter, same cache buster, same row normalization.
-      const res = await getInventory({
+      const raw = await fetchAllInventoryByTab(getInventory, {
         stock_type: activeTab,
-        limit: MANUAL_FETCH_LIMIT,
-        _t: Date.now(),
       });
-      const manualRows = dedupeInventoryRows(filterInventoryRowsByTab(res.data, activeTab))
+      const manualRows = dedupeInventoryRows(filterInventoryRowsByTab(raw, activeTab))
         .map(normalizeManualInventoryRow);
       const normalized = manualRows.map((r) => {
         const base = isImport ? normalizeImportRowLinePlace(r) : r;
@@ -300,6 +271,11 @@ function StockTable() {
     return v != null && v !== '' ? String(v) : '(Blank)';
   };
 
+  const filterableDisplayColumns = useMemo(() => {
+    const cols = activeTab === 'BULK' ? bulkTableColumns : visibleColumns;
+    return cols.filter((c) => c.key);
+  }, [activeTab, bulkTableColumns, visibleColumns]);
+
   const rowsAfterSearch = useMemo(() => {
     let list = inventory;
     if (searchQuery.trim()) {
@@ -317,13 +293,13 @@ function StockTable() {
 
   /** Skip `excludeColumnKey` so its filter dropdown shows only values still allowed by search + other column filters. */
   const rowMatchesColumnFiltersExcept = useCallback((row, excludeColumnKey) =>
-    columns.every(({ key }) => {
+    filterableDisplayColumns.every(({ key }) => {
       if (key === excludeColumnKey) return true;
       const selected = columnFilters[key];
       if (!selected) return true;
       return selected.has(rowStrForColumnFilter(row, key));
     }),
-  [columns, columnFilters]);
+  [filterableDisplayColumns, columnFilters]);
 
   const filteredInventory = useMemo(
     () => rowsAfterSearch.filter(row => rowMatchesColumnFiltersExcept(row, null)),
@@ -332,7 +308,7 @@ function StockTable() {
 
   const allColumnValues = useMemo(() => {
     const map = {};
-    columns.forEach(({ key }) => {
+    filterableDisplayColumns.forEach(({ key }) => {
       const subset = rowsAfterSearch.filter(row => rowMatchesColumnFiltersExcept(row, key));
       map[key] = subset.map(r => {
         const v = r[key];
@@ -340,7 +316,7 @@ function StockTable() {
       });
     });
     return map;
-  }, [columns, rowsAfterSearch, rowMatchesColumnFiltersExcept]);
+  }, [filterableDisplayColumns, rowsAfterSearch, rowMatchesColumnFiltersExcept]);
 
   const applyColumnFilter = (key, selected) => {
     const allVals = new Set(allColumnValues[key].map(v => v != null ? v : '(Blank)'));
@@ -375,13 +351,9 @@ function StockTable() {
 
   const handleClearAllFilters = () => { setColumnFilters({}); };
 
-  // Stock Summary rows: Manual page rows (lot+location) merged by the visible columns,
-  // so hiding Lot No / Line / Stack columns does not show the same product repeated.
-  const summaryRows = useMemo(() => {
-    const groupCols = activeTab === 'BULK' ? bulkTableColumns : visibleColumns;
-    const aggKeys = activeTab === 'BULK' ? BULK_AGGREGATE_KEYS : NONBULK_AGGREGATE_KEYS;
-    return aggregateRowsByVisibleColumns(filteredInventory, groupCols, aggKeys);
-  }, [filteredInventory, activeTab, bulkTableColumns, visibleColumns]);
+  // Same row set as Manual: one row per lot+location (or import item). Do not merge by visible
+  // columns — that hid rows (e.g. type W at different lines) when Line/Lot/Stack toggles were off.
+  const summaryRows = useMemo(() => filteredInventory, [filteredInventory]);
 
   const displayRows = useMemo(() => {
     if (!rowLimit || rowLimit <= 0) return summaryRows;
@@ -420,11 +392,9 @@ function StockTable() {
       const exportColumns = activeTab === 'BULK'
         ? BULK_COLUMNS
         : (activeTab === 'IMPORT' ? CE_IMPORT_COLUMNS : CE_COLUMNS);
-      const aggKeys = activeTab === 'BULK' ? BULK_AGGREGATE_KEYS : NONBULK_AGGREGATE_KEYS;
-      const exportRows = aggregateRowsByVisibleColumns(filteredInventory, exportColumns, aggKeys);
       await downloadStockSummaryExcel({
         activeTab,
-        rows: exportRows,
+        rows: summaryRows,
         exportColumns,
         totals: {
           totalMC,
@@ -691,6 +661,8 @@ function StockTable() {
         </div>
       </div>
       <div className="page-body">
+        {maintenanceNotice && <MaintenanceNotice />}
+
         <div className="st-print-banner only-print-st">
           <h1>WMS — Stock Summary</h1>
           <p><strong>Stock type:</strong> {tabLabel}</p>
@@ -870,7 +842,7 @@ function StockTable() {
                 ) : filteredInventory.length === 0 ? (
                   <tr><td colSpan={visibleColumns.length + 1} style={{ textAlign: 'center', padding: 40, color: '#999' }}>No rows match the filters</td></tr>
                 ) : displayRows.map((r, i) => (
-                  <tr key={r.__rowKey ?? i}>
+                  <tr key={inventoryRowKey(r) ?? r.__rowKey ?? i}>
                     <td className="text-center" style={{ color: '#999' }}>{i + 1}</td>
                     {visibleColumns.map(col => {
                       const val = r[col.key];
@@ -960,7 +932,7 @@ function StockTable() {
                     </td>
                   </tr>
                 ) : displayRows.map((r, i) => (
-                  <tr key={r.__rowKey ?? i}>
+                  <tr key={inventoryRowKey(r) ?? r.__rowKey ?? i}>
                     <td className="text-center" style={{ color: '#999' }}>{i + 1}</td>
                     {bulkTableColumns.map(col => {
                       const val = r[col.key];

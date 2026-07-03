@@ -22,6 +22,8 @@ import {
   dateToYYYYMMDDInBangkok,
 } from '../utils/bangkokTime';
 import { useAuth } from '../context/AuthContext';
+import MaintenanceNotice from '../components/MaintenanceNotice';
+import { useMaintenanceNotice } from '../hooks/useMaintenanceNotice';
 
 function BilingualLabel({ en, th }) {
   return (
@@ -108,6 +110,7 @@ function Withdraw() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const { enabled: maintenanceNotice } = useMaintenanceNotice();
   const returnFromForm = location.state?.showHistory && location.state?.department
     ? location.state
     : null;
@@ -455,6 +458,7 @@ function Withdraw() {
           <h2><FiShoppingCart /> Withdraw</h2>
         </div>
         <div className="page-body">
+          {maintenanceNotice && <MaintenanceNotice />}
           <div className="wd-dept-title">Select Your Department</div>
           <div className="wd-dept-grid">
             {allowedDepartments.map(dept => (
@@ -505,6 +509,7 @@ function Withdraw() {
         </div>
       </div>
       <div className="page-body">
+        {maintenanceNotice && <MaintenanceNotice />}
 
         {/* ─── My Withdrawal Requests — Food Ordering Style ─── */}
         {showHistory ? (

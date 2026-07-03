@@ -157,6 +157,8 @@ export const deleteImportStockOut = (outId) => api.delete(`/imports/stock-out/${
 // ─── Settings ────────────────────────────────────────
 export const getSettings = () => api.get('/settings');
 export const saveSettings = (data) => api.put('/settings', data);
+export const saveMaintenanceNotice = (enabled) =>
+  api.put('/settings/maintenance-notice', { enabled }, withAuth());
 export const getSettingsUploads = () => api.get('/settings/uploads', withAuth());
 export const deleteSettingsUploads = (filenames) =>
   api.delete('/settings/uploads', withAuth({ data: { filenames } }));

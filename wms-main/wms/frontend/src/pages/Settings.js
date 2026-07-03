@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-toastify';
 import {
   FiSettings, FiSave, FiMail, FiMessageSquare, FiDownload, FiUploadCloud, FiDatabase, FiShield, FiFile,
-  FiCheckCircle, FiAlertTriangle, FiFolder, FiTrash2, FiRefreshCw,
+  FiCheckCircle, FiAlertTriangle, FiFolder, FiTrash2, FiRefreshCw, FiAlertOctagon,
 } from 'react-icons/fi';
-import { getSettings, saveSettings, exportBackup, importBackup, getSettingsUploads, deleteSettingsUploads } from '../services/api';
+import { getSettings, saveSettings, saveMaintenanceNotice, exportBackup, importBackup, getSettingsUploads, deleteSettingsUploads } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { bangkokYYYYMMDD, bangkokHHMM, bangkokLocaleString } from '../utils/bangkokTime';
+import { isMaintenanceNoticeEnabled } from '../hooks/useMaintenanceNotice';
 
 function formatUploadBytes(n) {
   if (n == null || Number.isNaN(Number(n))) return '—';
@@ -40,6 +41,8 @@ export default function Settings() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [maintenanceEnabled, setMaintenanceEnabled] = useState(false);
+  const [maintenanceSaving, setMaintenanceSaving] = useState(false);
 
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -107,6 +110,7 @@ export default function Settings() {
           smtp_pass: data.smtp_pass || '',
           email_from: data.email_from || ''
         }));
+        setMaintenanceEnabled(isMaintenanceNoticeEnabled(data));
       } catch {
         toast.error('Failed to load settings');
       } finally {
@@ -117,6 +121,23 @@ export default function Settings() {
 
   const handleChange = (key, value) => {
     setForm(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleMaintenanceToggle = async () => {
+    if (!isSuperadmin) return;
+    const next = !maintenanceEnabled;
+    setMaintenanceSaving(true);
+    try {
+      await saveMaintenanceNotice(next);
+      setMaintenanceEnabled(next);
+      toast.success(next ? 'Maintenance notice is now ON' : 'Maintenance notice is now OFF');
+    } catch (err) {
+      const status = err.response?.status;
+      if (status === 403) toast.error('Superadmin access required.');
+      else toast.error(err.response?.data?.error || 'Failed to update maintenance notice');
+    } finally {
+      setMaintenanceSaving(false);
+    }
   };
 
   const handleSave = async (e) => {
@@ -250,6 +271,43 @@ export default function Settings() {
             <p>Configure messaging and notification integrations</p>
           </div>
         </div>
+
+        {isSuperadmin && (
+          <div className="settings-section settings-maintenance-section">
+            <div className="settings-section-header">
+              <FiAlertOctagon className="settings-section-icon settings-icon-maintenance" />
+              <div>
+                <h3>Maintenance Notice</h3>
+                <p>
+                  When enabled, a bilingual alert appears at the top of Dashboard, Stock Summary, and Withdraw
+                  to warn users that stocks may not be updated.
+                </p>
+              </div>
+            </div>
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-copy">
+                <strong>Show maintenance banner</strong>
+                <span>
+                  {maintenanceEnabled
+                    ? 'Banner is visible to all users on Dashboard, Stock Summary, and Withdraw.'
+                    : 'Banner is hidden. Turn on during system maintenance or stock freeze.'}
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={maintenanceEnabled}
+                aria-label="Toggle maintenance notice banner"
+                className={`settings-toggle-switch ${maintenanceEnabled ? 'on' : ''}`}
+                onClick={handleMaintenanceToggle}
+                disabled={maintenanceSaving}
+              >
+                <span className="settings-toggle-knob" />
+                <span className="settings-toggle-label">{maintenanceEnabled ? 'ON' : 'OFF'}</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {isSuperadmin && (
           <div className="settings-backup-wrapper">

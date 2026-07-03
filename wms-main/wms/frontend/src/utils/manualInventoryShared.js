@@ -5,6 +5,32 @@
  */
 
 export const MANUAL_FETCH_LIMIT = 2000;
+export const INVENTORY_PAGE_SIZE = MANUAL_FETCH_LIMIT;
+
+/** Load every inventory row for a tab (paginates past API page size). */
+export async function fetchAllInventoryByTab(getInventory, params = {}) {
+  const { stock_type, fish_name, location, ...rest } = params;
+  const all = [];
+  let offset = 0;
+
+  for (;;) {
+    const res = await getInventory({
+      ...rest,
+      stock_type,
+      fish_name,
+      location,
+      limit: INVENTORY_PAGE_SIZE,
+      offset,
+      _t: Date.now(),
+    });
+    const batch = Array.isArray(res.data) ? res.data : [];
+    all.push(...batch);
+    if (batch.length < INVENTORY_PAGE_SIZE) break;
+    offset += INVENTORY_PAGE_SIZE;
+  }
+
+  return all;
+}
 
 /** Ensures each tab only shows rows for that stock type (API must match; this guards stale UI or bad responses). */
 export function filterInventoryRowsByTab(rows, tab) {
@@ -53,12 +79,12 @@ const MANUAL_STOCK_TABS = ['BULK', 'CONTAINER_EXTRA', 'IMPORT'];
 export async function fetchManualInventoryAllTabs(getInventory) {
   const results = await Promise.all(
     MANUAL_STOCK_TABS.map((stock_type) =>
-      getInventory({ stock_type, limit: MANUAL_FETCH_LIMIT, _t: Date.now() })
+      fetchAllInventoryByTab(getInventory, { stock_type })
     )
   );
   return dedupeInventoryRows(
     MANUAL_STOCK_TABS.flatMap((tab, i) =>
-      filterInventoryRowsByTab(results[i].data, tab).map(normalizeManualInventoryRow)
+      filterInventoryRowsByTab(results[i], tab).map(normalizeManualInventoryRow)
     )
   );
 }

@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
-import { FiBox, FiTruck, FiMapPin, FiCheckCircle, FiAlertTriangle, FiTool, FiArrowDownCircle, FiClock, FiAlertOctagon } from 'react-icons/fi';
+import { FiBox, FiTruck, FiMapPin, FiCheckCircle, FiAlertTriangle, FiTool, FiArrowDownCircle, FiClock } from 'react-icons/fi';
 import { getDashboard } from '../services/api';
 import { bangkokLocaleString } from '../utils/bangkokTime';
+import MaintenanceNotice from '../components/MaintenanceNotice';
+import { useMaintenanceNotice } from '../hooks/useMaintenanceNotice';
 
 function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showStockIssues, setShowStockIssues] = useState(false);
+  const { enabled: maintenanceNotice } = useMaintenanceNotice();
 
   useEffect(() => {
     fetchDashboard();
@@ -46,20 +49,7 @@ function Dashboard() {
         <button className="btn btn-outline" onClick={fetchDashboard}>Refresh</button>
       </div>
       <div className="page-body">
-        <div className="dashboard-maintenance-notice" role="alert" aria-live="polite">
-          <div className="dashboard-maintenance-notice-icon-wrap">
-            <FiAlertOctagon className="dashboard-maintenance-notice-icon" aria-hidden="true" />
-          </div>
-          <div className="dashboard-maintenance-notice-content">
-            <span className="dashboard-maintenance-notice-badge">Maintenance Notice</span>
-            <p className="dashboard-maintenance-notice-en">
-              Currently undergoing maintenance and stocks are not updated.
-            </p>
-            <p className="dashboard-maintenance-notice-th">
-              ขณะนี้ระบบกำลังอยู่ในระหว่างการปรับปรุง และสต็อกสินค้ายังไม่ได้อัปเดต
-            </p>
-          </div>
-        </div>
+        {maintenanceNotice && <MaintenanceNotice />}
 
         <div className="dashboard-grid">
           <div className="stat-card">
