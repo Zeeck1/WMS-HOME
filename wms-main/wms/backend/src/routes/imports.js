@@ -1,6 +1,18 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
+const { authMiddleware, superadminOnly } = require('../middleware/auth');
+
+function normalizeMonthDate(value, label) {
+  if (value == null || String(value).trim() === '') return null;
+  const match = String(value).trim().match(/^(\d{4})-(\d{2})(?:-\d{2})?$/);
+  if (!match || Number(match[2]) < 1 || Number(match[2]) > 12) {
+    const error = new Error(`${label} must be a valid month`);
+    error.status = 400;
+    throw error;
+  }
+  return `${match[1]}-${match[2]}-01`;
+}
 
 // ── Stock Table view: import items with balance for Stock Table page ─────
 router.get('/stock-table', async (req, res) => {
@@ -142,18 +154,20 @@ async function syncProductMaster(conn, items) {
 }
 
 // ── Create new shipment ──────────────────────────────────────────────────
-router.post('/', async (req, res) => {
+router.post('/', authMiddleware, superadminOnly, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
     const { shipment, items, expenses } = req.body;
+    const productionDate = normalizeMonthDate(shipment.production_date, 'Production date');
+    const expiryDate = normalizeMonthDate(shipment.expiry_date, 'Expiry date');
 
     const [sr] = await conn.query(
       `INSERT INTO import_shipments (inv_no, container_no, seal_no, eta, origin_country, production_date, expiry_date, total_net_weight)
        VALUES (?,?,?,?,?,?,?,?)`,
       [shipment.inv_no, shipment.container_no || null, shipment.seal_no || null,
        shipment.eta || null, shipment.origin_country || null,
-       shipment.production_date || null, shipment.expiry_date || null,
+       productionDate, expiryDate,
        shipment.total_net_weight || 0]
     );
     const shipmentId = sr.insertId;
@@ -187,17 +201,19 @@ router.post('/', async (req, res) => {
     res.status(201).json({ id: shipmentId });
   } catch (err) {
     await conn.rollback();
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   } finally { conn.release(); }
 });
 
 // ── Update shipment (header + items + expenses, full replace) ────────────
-router.put('/:id', async (req, res) => {
+router.put('/:id', authMiddleware, superadminOnly, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
     const { shipment, items, expenses } = req.body;
     const id = req.params.id;
+    const productionDate = normalizeMonthDate(shipment.production_date, 'Production date');
+    const expiryDate = normalizeMonthDate(shipment.expiry_date, 'Expiry date');
 
     await conn.query(
       `UPDATE import_shipments SET inv_no=?, container_no=?, seal_no=?, eta=?,
@@ -205,7 +221,7 @@ router.put('/:id', async (req, res) => {
        WHERE id=?`,
       [shipment.inv_no, shipment.container_no || null, shipment.seal_no || null,
        shipment.eta || null, shipment.origin_country || null,
-       shipment.production_date || null, shipment.expiry_date || null,
+       productionDate, expiryDate,
        shipment.total_net_weight || 0, id]
     );
 
@@ -274,12 +290,12 @@ router.put('/:id', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     await conn.rollback();
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   } finally { conn.release(); }
 });
 
 // ── Delete shipment ──────────────────────────────────────────────────────
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authMiddleware, superadminOnly, async (req, res) => {
   try {
     await pool.query('DELETE FROM import_shipments WHERE id = ?', [req.params.id]);
     res.json({ ok: true });
@@ -301,7 +317,7 @@ async function getItemBalance(itemId) {
   };
 }
 
-router.post('/:id/stock-out', async (req, res) => {
+router.post('/:id/stock-out', authMiddleware, superadminOnly, async (req, res) => {
   try {
     const { item_id, date_out, order_ref, mc, nw_kgs } = req.body;
     const reqMc = Number(mc) || 0;
@@ -326,7 +342,7 @@ router.post('/:id/stock-out', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.put('/stock-out/:outId', async (req, res) => {
+router.put('/stock-out/:outId', authMiddleware, superadminOnly, async (req, res) => {
   try {
     const { date_out, order_ref, mc, nw_kgs } = req.body;
     const reqMc = Number(mc) || 0;
@@ -354,7 +370,7 @@ router.put('/stock-out/:outId', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.delete('/stock-out/:outId', async (req, res) => {
+router.delete('/stock-out/:outId', authMiddleware, superadminOnly, async (req, res) => {
   try {
     await pool.query('DELETE FROM import_stock_outs WHERE id = ?', [req.params.outId]);
     res.json({ ok: true });

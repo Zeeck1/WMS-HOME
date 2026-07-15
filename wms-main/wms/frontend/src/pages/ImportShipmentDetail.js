@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   FiArrowLeft, FiSave, FiPlus, FiTrash2, FiPackage, FiDollarSign,
@@ -14,6 +14,8 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { registerThaiFont } from '../services/pdfFonts';
 import { bangkokYYYYMMDD, dateToYYYYMMDDInBangkok, bangkokLocaleDateString } from '../utils/bangkokTime';
+import { useAuth } from '../context/AuthContext';
+import { toMonthInput, monthInputToDate, formatMonthYear } from '../utils/monthYearDate';
 
 const toInputDate = (d) => d ? (typeof d === 'string' ? d.split('T')[0] : dateToYYYYMMDDInBangkok(d)) : '';
 const fmtDate = (d) => d ? bangkokLocaleDateString(new Date(d), { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
@@ -73,6 +75,9 @@ function ImportShipmentDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
+  const isSuperadmin = user?.role === 'superadmin';
+  const pageRef = useRef(null);
 
   const handleImportBack = () => {
     if (location.state?.from === 'stock-summary') {
@@ -82,6 +87,10 @@ function ImportShipmentDetail() {
     }
   };
   const isNew = !id || id === 'new';
+
+  useEffect(() => {
+    if (isNew && !isSuperadmin) navigate('/imports', { replace: true });
+  }, [isNew, isSuperadmin, navigate]);
 
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
@@ -101,6 +110,13 @@ function ImportShipmentDetail() {
   const [outForm, setOutForm] = useState({ item_id: '', date_out: '', order_ref: '', mc: '', nw_kgs: '' });
   const [editingOut, setEditingOut] = useState(null);
 
+  useEffect(() => {
+    if (isSuperadmin || !pageRef.current) return;
+    pageRef.current.querySelectorAll('input, select, textarea').forEach((el) => {
+      el.disabled = true;
+    });
+  }, [isSuperadmin, activeTab, loading]);
+
   const loadData = useCallback(async () => {
     if (isNew) return;
     setLoading(true);
@@ -113,8 +129,8 @@ function ImportShipmentDetail() {
         seal_no: d.shipment.seal_no || '',
         eta: toInputDate(d.shipment.eta),
         origin_country: d.shipment.origin_country || '',
-        production_date: toInputDate(d.shipment.production_date),
-        expiry_date: toInputDate(d.shipment.expiry_date),
+        production_date: toMonthInput(d.shipment.production_date),
+        expiry_date: toMonthInput(d.shipment.expiry_date),
         last_update_stock: d.shipment.last_update_stock || '',
         total_net_weight: d.shipment.total_net_weight || ''
       });
@@ -245,7 +261,15 @@ function ImportShipmentDetail() {
           amount_usd_kgs_expr: ex.amount_usd_kgs_expr || String(ex.amount_usd_kgs || '')
         };
       });
-      const payload = { shipment, items, expenses: processedExpenses };
+      const payload = {
+        shipment: {
+          ...shipment,
+          production_date: monthInputToDate(shipment.production_date),
+          expiry_date: monthInputToDate(shipment.expiry_date),
+        },
+        items,
+        expenses: processedExpenses,
+      };
       if (isNew) {
         const res = await createImportShipment(payload);
         toast.success('Import created successfully');
@@ -415,8 +439,8 @@ function ImportShipmentDetail() {
     drawMetaLabelValue(margin + col4 * 2, r1, col4, 'SEAL NO', shipment.seal_no);
     drawMetaLabelValue(margin + col4 * 3, r1, col4, 'ETA', fmtDate(shipment.eta));
     drawMetaLabelValue(margin, r2, col3, 'FROM', shipment.origin_country);
-    drawMetaLabelValue(margin + col3, r2, col3, 'PRODUCTION DATE', fmtDate(shipment.production_date));
-    drawMetaLabelValue(margin + col3 * 2, r2, col3, 'EXPIRY DATE', fmtDate(shipment.expiry_date));
+    drawMetaLabelValue(margin + col3, r2, col3, 'PRODUCTION DATE', formatMonthYear(shipment.production_date, ''));
+    drawMetaLabelValue(margin + col3 * 2, r2, col3, 'EXPIRY DATE', formatMonthYear(shipment.expiry_date, ''));
 
     pdf.setDrawColor(...slate200);
     pdf.setLineWidth(0.12);
@@ -826,7 +850,7 @@ function ImportShipmentDetail() {
   if (loading) return <div className="imp-page"><div className="imp-loading">Loading...</div></div>;
 
   return (
-    <div className="imp-page">
+    <div className={`imp-page ${!isSuperadmin ? 'imp-page-readonly' : ''}`} ref={pageRef}>
       {/* Header */}
       <div className="imp-detail-header">
         <button className="imp-btn imp-btn-ghost" onClick={handleImportBack}>
@@ -834,14 +858,17 @@ function ImportShipmentDetail() {
         </button>
         <h2>{isNew ? 'Create New Import' : `STOCK — ${shipment.inv_no}`}</h2>
         <div className="imp-detail-header-actions">
+          {!isSuperadmin && <span className="imp-readonly-badge">Read only · Superadmin edit</span>}
           {shipment.last_update_stock && (
             <span className="imp-last-update">
               Last Update: {fmtDate(shipment.last_update_stock)}
             </span>
           )}
-          <button className="imp-btn imp-btn-primary" onClick={handleSave} disabled={saving}>
-            <FiSave /> {saving ? 'Saving...' : 'Save'}
-          </button>
+          {isSuperadmin && (
+            <button className="imp-btn imp-btn-primary" onClick={handleSave} disabled={saving}>
+              <FiSave /> {saving ? 'Saving...' : 'Save'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -869,12 +896,12 @@ function ImportShipmentDetail() {
             <input value={shipment.origin_country} onChange={e => setShipment(s => ({ ...s, origin_country: e.target.value }))} placeholder="e.g. INDIA" />
           </div>
           <div className="imp-field">
-            <label>PRODUCTION DATE</label>
-            <input type="date" value={shipment.production_date} onChange={e => setShipment(s => ({ ...s, production_date: e.target.value }))} />
+            <label>PRODUCTION MONTH</label>
+            <input type="month" value={shipment.production_date} onChange={e => setShipment(s => ({ ...s, production_date: e.target.value }))} />
           </div>
           <div className="imp-field">
-            <label>EXPIRY DATE</label>
-            <input type="date" value={shipment.expiry_date} onChange={e => setShipment(s => ({ ...s, expiry_date: e.target.value }))} />
+            <label>EXPIRY MONTH</label>
+            <input type="month" value={shipment.expiry_date} onChange={e => setShipment(s => ({ ...s, expiry_date: e.target.value }))} />
           </div>
         </div>
       </div>
@@ -924,9 +951,11 @@ function ImportShipmentDetail() {
                   </button>
                 </>
               )}
-              <button className="imp-btn imp-btn-sm imp-btn-primary" onClick={addItem}>
-                <FiPlus /> Add Row
-              </button>
+              {isSuperadmin && (
+                <button className="imp-btn imp-btn-sm imp-btn-primary" onClick={addItem}>
+                  <FiPlus /> Add Row
+                </button>
+              )}
             </div>
           </div>
           <div className="imp-table-wrap">
@@ -1029,9 +1058,11 @@ function ImportShipmentDetail() {
                         );
                       })}
                       <td className="imp-cell-center">
-                        <button className="imp-row-delete" onClick={() => removeItem(idx)} title="Remove row">
-                          <FiTrash2 />
-                        </button>
+                        {isSuperadmin && (
+                          <button className="imp-row-delete" onClick={() => removeItem(idx)} title="Remove row">
+                            <FiTrash2 />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -1096,7 +1127,7 @@ function ImportShipmentDetail() {
           </div>
 
           {/* Add stock out form */}
-          <div className="imp-out-form">
+          {isSuperadmin && <div className="imp-out-form">
             <h4>{editingOut ? 'Edit Stock Out' : 'Add Stock Out'}</h4>
             <div className="imp-out-form-grid">
               {!editingOut && (
@@ -1189,7 +1220,7 @@ function ImportShipmentDetail() {
                 <button className="imp-btn imp-btn-primary" onClick={handleAddStockOut}><FiPlus /> Add Stock Out</button>
               )}
             </div>
-          </div>
+          </div>}
 
           {/* Stock out history table */}
           {stockOuts.length > 0 && (
@@ -1218,14 +1249,16 @@ function ImportShipmentDetail() {
                         <td className="imp-cell-right">{o.mc}</td>
                         <td className="imp-cell-right">{num(o.nw_kgs).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                         <td>
-                          <div className="imp-actions">
-                            <button className="imp-action-btn imp-action-edit" onClick={() => setEditingOut({ ...o, date_out: toInputDate(o.date_out) })}>
-                              <FiEdit2 />
-                            </button>
-                            <button className="imp-action-btn imp-action-delete" onClick={() => handleDeleteStockOut(o.id)}>
-                              <FiTrash2 />
-                            </button>
-                          </div>
+                          {isSuperadmin && (
+                            <div className="imp-actions">
+                              <button className="imp-action-btn imp-action-edit" onClick={() => setEditingOut({ ...o, date_out: toInputDate(o.date_out) })}>
+                                <FiEdit2 />
+                              </button>
+                              <button className="imp-action-btn imp-action-delete" onClick={() => handleDeleteStockOut(o.id)}>
+                                <FiTrash2 />
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
@@ -1257,9 +1290,11 @@ function ImportShipmentDetail() {
                   </button>
                 </>
               )}
-              <button className="imp-btn imp-btn-sm imp-btn-primary" onClick={addExpense}>
-                <FiPlus /> Add Row
-              </button>
+              {isSuperadmin && (
+                <button className="imp-btn imp-btn-sm imp-btn-primary" onClick={addExpense}>
+                  <FiPlus /> Add Row
+                </button>
+              )}
             </div>
           </div>
 
@@ -1326,9 +1361,11 @@ function ImportShipmentDetail() {
                         </div>
                       </td>
                       <td className="imp-cell-center">
-                        <button className="imp-row-delete" onClick={() => removeExpense(idx)} title="Remove row">
-                          <FiTrash2 />
-                        </button>
+                        {isSuperadmin && (
+                          <button className="imp-row-delete" onClick={() => removeExpense(idx)} title="Remove row">
+                            <FiTrash2 />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

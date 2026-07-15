@@ -12,6 +12,7 @@ import { toast } from 'react-toastify';
 import {
   getWithdrawals, getWithdrawal, getInventory, updateWithdrawalStatus, updateWithdrawalItems,
   superadminStockAdjustWithdrawal, setWithdrawalStockOutMode, setWithdrawalFormActualMode,
+  setWithdrawalFormDisplay,
   saveWithdrawalPickRoute, undoWithdrawalPickRoute, cancelWithdrawal, permanentlyDeleteWithdrawal, sendLineNotification,
   addWithdrawalItem
 } from '../services/api';
@@ -98,17 +99,22 @@ function OutModeBadge({ outMode }) {
 }
 
 /** show_actual_on_form: 0 = blank Actual CTN / Net Weight / Time out on print form, 1/null = printed. */
-function FormActualBadge({ formActual }) {
+function FormActualBadge({ formActual, item }) {
   const isHidden = formActual === 0;
+  const start = item?.form_timeout_start ? String(item.form_timeout_start).slice(0, 5) : '';
+  const end = item?.form_timeout_end ? String(item.form_timeout_end).slice(0, 5) : '';
   return (
-    <span
-      className={`mg-mode-badge ${isHidden ? 'form-hidden' : 'form-shown'}`}
-      title={isHidden
-        ? 'Print form: Actual CTN / Net Weight / Time out stay blank (Process and Remark always print)'
-        : 'Print form: Actual CTN / Net Weight / Time out are printed'}
-    >
-      {isHidden ? 'Hidden' : 'Shown'}
-    </span>
+    <div>
+      <span
+        className={`mg-mode-badge ${isHidden ? 'form-hidden' : 'form-shown'}`}
+        title={isHidden
+          ? 'Print form: Actual CTN / Net Weight / Time out stay blank (Process and Remark always print)'
+          : 'Print form: Actual CTN / Net Weight / Time out are printed'}
+      >
+        {isHidden ? 'Hidden' : 'Shown'}
+      </span>
+      {start && end && <div className="mg-item-timeout">{start} - {end}</div>}
+    </div>
   );
 }
 
@@ -196,7 +202,7 @@ function ManageWithdrawItemRow({
         )}
       </td>
       <td><OutModeBadge outMode={outMode} /></td>
-      <td><FormActualBadge formActual={formActual} /></td>
+      <td><FormActualBadge formActual={formActual} item={item} /></td>
     </tr>
   );
 }
@@ -223,6 +229,8 @@ function Manage() {
   const [managerName, setManagerName] = useState('');
   const [managerNameSaved, setManagerNameSaved] = useState(false);
   const [dispatcherName, setDispatcherName] = useState('');
+  const [formDisplay, setFormDisplay] = useState({ date: '', start_time: '', end_time: '', notice: '' });
+  const [savingFormDisplay, setSavingFormDisplay] = useState(false);
 
   const [selectedItemIds, setSelectedItemIds] = useState(() => new Set());
   const [settingOutMode, setSettingOutMode] = useState(false);
@@ -333,6 +341,7 @@ function Manage() {
       setShowAddItem(false);
       setAddItemResults([]);
       setDispatcherName('');
+      setFormDisplay({ date: '', start_time: '', end_time: '', notice: '' });
       setSelectedItemIds(new Set());
       return;
     }
@@ -345,6 +354,12 @@ function Manage() {
       setExpandedId(id);
       applyManagerNameFromRequest(wRes.data);
       applyDispatcherFromRequest(wRes.data);
+      setFormDisplay({
+        date: wRes.data.form_timeout_date ? String(wRes.data.form_timeout_date).split('T')[0] : '',
+        start_time: wRes.data.form_timeout_start ? String(wRes.data.form_timeout_start).slice(0, 5) : '',
+        end_time: wRes.data.form_timeout_end ? String(wRes.data.form_timeout_end).slice(0, 5) : '',
+        notice: wRes.data.form_notice || '',
+      });
       setEditedQty({});
       setSelectedItemIds(new Set());
       setInventory(invRes.data || []);
@@ -354,6 +369,35 @@ function Manage() {
       setPickRouteTab(savedMode);
     } catch (err) {
       toast.error('Failed to load details');
+    }
+  };
+
+  const handleSaveFormDisplay = async (requestId, clear = false) => {
+    if (!isSuperadmin) return;
+    if (selectedItemIds.size === 0) {
+      toast.info('Select at least one item first');
+      return;
+    }
+    const payload = {
+      date: clear ? '' : formDisplay.date,
+      start_time: clear ? '' : formDisplay.start_time,
+      end_time: clear ? '' : formDisplay.end_time,
+      notice: formDisplay.notice,
+      item_ids: [...selectedItemIds],
+    };
+    setSavingFormDisplay(true);
+    try {
+      await setWithdrawalFormDisplay(requestId, payload);
+      const refreshed = await getWithdrawal(requestId);
+      setExpandedData(refreshed.data);
+      if (clear) {
+        setFormDisplay((prev) => ({ ...prev, date: '', start_time: '', end_time: '' }));
+      }
+      toast.success(clear ? 'Selected item time cleared' : `Time saved for ${selectedItemIds.size} selected item(s)`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to save print form display');
+    } finally {
+      setSavingFormDisplay(false);
     }
   };
 
@@ -1239,7 +1283,7 @@ function Manage() {
                                     )}
                                   </td>
                                         <td><OutModeBadge outMode={outModeById[Number(item.id)]} /></td>
-                                        <td><FormActualBadge formActual={formActualById[Number(item.id)]} /></td>
+                                        <td><FormActualBadge formActual={formActualById[Number(item.id)]} item={item} /></td>
                                 </tr>
                               );
                                   } else {
@@ -1381,6 +1425,78 @@ function Manage() {
                               )}
                             </div>
                           )}
+                        </div>
+                      )}
+
+                      {isSuperadmin && (
+                        <div className="mg-form-display-panel">
+                          <div className="mg-form-display-heading">
+                            <div>
+                              <strong>Print Form — Time out Display</strong>
+                              <p>
+                                Select item rows above, then assign their display-only take-out time.
+                                Current selection: <strong>{selectedItemIds.size} item(s)</strong>.
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mg-form-display-grid">
+                            <label>
+                              <span>Date</span>
+                              <input
+                                type="date"
+                                className="form-control"
+                                value={formDisplay.date}
+                                onChange={(e) => setFormDisplay((prev) => ({ ...prev, date: e.target.value }))}
+                              />
+                            </label>
+                            <label>
+                              <span>Start time</span>
+                              <input
+                                type="time"
+                                className="form-control"
+                                value={formDisplay.start_time}
+                                onChange={(e) => setFormDisplay((prev) => ({ ...prev, start_time: e.target.value }))}
+                              />
+                            </label>
+                            <label>
+                              <span>End time</span>
+                              <input
+                                type="time"
+                                className="form-control"
+                                value={formDisplay.end_time}
+                                onChange={(e) => setFormDisplay((prev) => ({ ...prev, end_time: e.target.value }))}
+                              />
+                            </label>
+                          </div>
+                          <label className="mg-form-display-notice">
+                            <span>Custom message shown on form</span>
+                            <textarea
+                              className="form-control"
+                              rows="3"
+                              maxLength="1000"
+                              placeholder="Enter any message for this withdraw form"
+                              value={formDisplay.notice}
+                              onChange={(e) => setFormDisplay((prev) => ({ ...prev, notice: e.target.value }))}
+                            />
+                          </label>
+                          <div className="mg-form-display-actions">
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              disabled={savingFormDisplay || selectedItemIds.size === 0}
+                              onClick={() => handleSaveFormDisplay(req.id)}
+                            >
+                              <FiSave /> {savingFormDisplay ? 'Saving...' : 'Save Time for Selected'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-outline btn-sm"
+                              disabled={savingFormDisplay || selectedItemIds.size === 0}
+                              onClick={() => handleSaveFormDisplay(req.id, true)}
+                            >
+                              Clear Selected Time
+                            </button>
+                          </div>
                         </div>
                       )}
 

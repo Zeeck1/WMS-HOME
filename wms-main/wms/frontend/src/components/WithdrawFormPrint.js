@@ -21,6 +21,9 @@ export function summarizeWithdrawItems(items) {
       Number(it.bulk_weight_kg),
       st,
       it.order_code || '',
+      it.form_timeout_date || '',
+      it.form_timeout_start || '',
+      it.form_timeout_end || '',
     ].join('\0');
     const req = Number(it.requested_mc || it.quantity_mc);
     const act = Number(it.quantity_mc);
@@ -72,6 +75,16 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
   const finishedDateStr = data.finished_at
     ? bangkokLocaleDateString(new Date(data.finished_at), { day: '2-digit', month: '2-digit', year: 'numeric' })
     : '';
+  const configuredDate = data.form_timeout_date ? String(data.form_timeout_date).split('T')[0] : '';
+  const configuredDateStr = configuredDate && /^\d{4}-\d{2}-\d{2}$/.test(configuredDate)
+    ? `${configuredDate.slice(8, 10)}/${configuredDate.slice(5, 7)}/${configuredDate.slice(0, 4)}`
+    : '';
+  const configuredStart = data.form_timeout_start ? String(data.form_timeout_start).slice(0, 5) : '';
+  const configuredEnd = data.form_timeout_end ? String(data.form_timeout_end).slice(0, 5) : '';
+  const configuredTimeRange = configuredStart && configuredEnd
+    ? `${configuredStart} - ${configuredEnd}`
+    : '';
+  const hasConfiguredTimeout = Boolean(configuredDateStr || configuredTimeRange);
 
   const totalRequestMC = items.reduce((s, it) => s + Number(it.requested_mc || it.quantity_mc), 0);
   const totalRequestKG = items.reduce(
@@ -118,6 +131,17 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
           </div>
         </div>
 
+        {(data.form_notice || hasConfiguredTimeout) && (
+          <div className="wf-form-notice">
+            {data.form_notice && <div className="wf-form-notice-text">{data.form_notice}</div>}
+            {hasConfiguredTimeout && (
+              <div className="wf-form-notice-window">
+                TIME OUT: {[configuredTimeRange, configuredDateStr].filter(Boolean).join(' · ')}
+              </div>
+            )}
+          </div>
+        )}
+
         <table className="wf-table">
           <thead>
             <tr>
@@ -161,6 +185,20 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
                 : st === 'IMPORT' ? (item.order_code || 'IMPORT')
                 : 'SCK';
               const showRow = rowShowsActual(item);
+              const itemDate = item.form_timeout_date
+                ? String(item.form_timeout_date).split('T')[0]
+                : configuredDate;
+              const itemDateStr = itemDate && /^\d{4}-\d{2}-\d{2}$/.test(itemDate)
+                ? `${itemDate.slice(8, 10)}/${itemDate.slice(5, 7)}/${itemDate.slice(0, 4)}`
+                : '';
+              const itemStart = item.form_timeout_start
+                ? String(item.form_timeout_start).slice(0, 5)
+                : configuredStart;
+              const itemEnd = item.form_timeout_end
+                ? String(item.form_timeout_end).slice(0, 5)
+                : configuredEnd;
+              const itemTimeRange = itemStart && itemEnd ? `${itemStart} - ${itemEnd}` : '';
+              const hasItemTimeout = Boolean(itemDateStr || itemTimeRange);
               return (
                 <tr key={item.id}>
                   <td className="wf-center">{i + 1}</td>
@@ -172,7 +210,12 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
                   <td className="wf-center wf-bold">{showActualMc && showRow ? actualMc : ''}</td>
                   <td className="wf-center">{showFinalFields && showRow ? netKg.toFixed(1) : ''}</td>
                   <td className="wf-center">
-                    {showFinalFields && showRow ? (
+                    {hasItemTimeout && showRow ? (
+                      <>
+                        {itemTimeRange && <div>{itemTimeRange}</div>}
+                        {itemDateStr && <div className="wf-timeout-date">{itemDateStr}</div>}
+                      </>
+                    ) : showFinalFields && showRow ? (
                       <>
                         <div>{finishedAtStr}</div>
                         {finishedDateStr && <div className="wf-timeout-date">{finishedDateStr}</div>}

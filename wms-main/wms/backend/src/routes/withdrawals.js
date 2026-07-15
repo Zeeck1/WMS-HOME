@@ -754,6 +754,68 @@ router.put('/:id/form-actual-mode', async (req, res) => {
   }
 });
 
+// ─── PUT superadmin display-only timeout window / notice for the print form ──
+router.put('/:id/form-display', authMiddleware, superadminOnly, async (req, res) => {
+  try {
+    const clean = (value) => String(value ?? '').trim();
+    const date = clean(req.body?.date);
+    const start = clean(req.body?.start_time);
+    const end = clean(req.body?.end_time);
+    const notice = clean(req.body?.notice);
+    const itemIds = Array.isArray(req.body?.item_ids)
+      ? req.body.item_ids.map((value) => parseInt(value, 10)).filter(Number.isFinite)
+      : [];
+
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'Date must use YYYY-MM-DD' });
+    }
+    if ((start || end) && (!start || !end)) {
+      return res.status(400).json({ error: 'Both start and end time are required' });
+    }
+    if ((start && !/^\d{2}:\d{2}$/.test(start)) || (end && !/^\d{2}:\d{2}$/.test(end))) {
+      return res.status(400).json({ error: 'Time must use HH:MM' });
+    }
+    if (start && end && start >= end) {
+      return res.status(400).json({ error: 'End time must be later than start time' });
+    }
+    if (notice.length > 1000) {
+      return res.status(400).json({ error: 'Form notice must be 1000 characters or fewer' });
+    }
+
+    const [result] = await pool.query(
+      `UPDATE withdraw_requests
+       SET form_timeout_date = ?, form_timeout_start = ?, form_timeout_end = ?,
+           form_notice = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [
+        itemIds.length > 0 ? null : (date || null),
+        itemIds.length > 0 ? null : (start || null),
+        itemIds.length > 0 ? null : (end || null),
+        notice || null,
+        req.params.id,
+      ]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Request not found' });
+    }
+    if (itemIds.length > 0) {
+      const placeholders = itemIds.map(() => '?').join(',');
+      await pool.query(
+        `UPDATE withdraw_items
+         SET form_timeout_date = ?, form_timeout_start = ?, form_timeout_end = ?
+         WHERE request_id = ? AND id IN (${placeholders})`,
+        [date || null, start || null, end || null, req.params.id, ...itemIds]
+      );
+    }
+
+    const [rows] = await pool.query('SELECT * FROM withdraw_requests WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Withdraw form display updated', request: rows[0] });
+  } catch (error) {
+    console.error('Error updating withdraw form display:', error);
+    res.status(500).json({ error: 'Failed to update withdraw form display' });
+  }
+});
+
 // ─── PUT superadmin stock adjust — edit actual MC without balance checks; syncs FINISHED stock OUT ──
 router.put('/:id/superadmin-stock-adjust', authMiddleware, superadminOnly, async (req, res) => {
   const conn = await pool.getConnection();

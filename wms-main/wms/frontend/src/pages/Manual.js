@@ -12,6 +12,8 @@ import {
   inventoryRowKey,
   dedupeInventoryRows,
 } from '../utils/manualInventoryShared';
+import { useAuth } from '../context/AuthContext';
+import { toMonthInput } from '../utils/monthYearDate';
 
 const normLotNoNumeric = (v) => String(v ?? '').replace(/\D/g, '');
 
@@ -151,6 +153,8 @@ const parseMonthYearInput = (raw) => {
   if (raw == null) return '';
   const s = String(raw).trim();
   if (!s) return '';
+  const nativeMonth = s.match(/^(\d{4})-(\d{2})$/);
+  if (nativeMonth) return `${nativeMonth[1]}-${nativeMonth[2]}-01`;
   // "MM/YYYY" (or "M/YYYY")
   const mmY = s.match(/^(\d{1,2})[\/\-](\d{4})$/);
   if (mmY) {
@@ -297,6 +301,8 @@ function buildInitialFromDraft(activeTab, d) {
 
 // ─── Component ─────────────────────────────────────────────────────────
 function Manual() {
+  const { user } = useAuth();
+  const isSuperadmin = user?.role === 'superadmin';
   const [activeTab, setActiveTab] = useState('BULK');
   const [rows, setRows] = useState([]);
   const [originalRows, setOriginalRows] = useState([]);
@@ -331,7 +337,11 @@ function Manual() {
 
   const isNonBulk = activeTab !== 'BULK';
   const isImport = activeTab === 'IMPORT';
-  const columns = useMemo(() => (isNonBulk ? nonBulkCols(isImport) : BULK_COLS), [isNonBulk, isImport]);
+  const columns = useMemo(() => {
+    const base = isNonBulk ? nonBulkCols(isImport) : BULK_COLS;
+    if (isImport && !isSuperadmin) return base.map((col) => ({ ...col, editable: false }));
+    return base;
+  }, [isNonBulk, isImport, isSuperadmin]);
   const columnsRef = useRef(columns);
   useEffect(() => { columnsRef.current = columns; }, [columns]);
 
@@ -955,12 +965,18 @@ function Manual() {
           <button className="btn btn-outline btn-sm" onClick={handleUndo} disabled={undoStack.length === 0} title="Undo (Ctrl+Z)">
             <FiRotateCcw /> Undo {undoStack.length > 0 && `(${undoStack.length})`}
           </button>
-          <button className="btn btn-success btn-sm" onClick={handleSaveAll} disabled={!isDirty || saving} title="Save all (Ctrl+S)">
-            <FiSave /> {saving ? 'Saving...' : `Save${editCount > 0 ? ` (${editCount})` : ''}`}
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={handleAddRow} title="Add blank row">
-            <FiPlus /> Add Row
-          </button>
+          {(!isImport || isSuperadmin) ? (
+            <>
+              <button className="btn btn-success btn-sm" onClick={handleSaveAll} disabled={!isDirty || saving} title="Save all (Ctrl+S)">
+                <FiSave /> {saving ? 'Saving...' : `Save${editCount > 0 ? ` (${editCount})` : ''}`}
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={handleAddRow} title="Add blank row">
+                <FiPlus /> Add Row
+              </button>
+            </>
+          ) : (
+            <span className="imp-readonly-badge">Import read only · Superadmin edit</span>
+          )}
         </div>
       </div>
       <div className="page-body">
@@ -1146,7 +1162,7 @@ function Manual() {
                               ? normNumberField(draftRow[col.key])
                               : (draftRow[col.key] ?? '');
                     const inputDisplayVal = col.type === 'month_year'
-                      ? toMonthYearDisplay(draftRow[col.key])
+                      ? toMonthInput(draftRow[col.key])
                       : col.field === 'lot_no_numeric'
                         ? normLotNoNumeric(draftRow[col.key])
                         : (col.key === 'stack_no' || col.key === 'stack_total')
@@ -1158,7 +1174,7 @@ function Manual() {
                       <td key={col.key} className="ms-cell ms-cell-ed ms-draft-cell">
                         <input
                           className={`ms-input ${col.type === 'number' || col.field === 'lot_no_numeric' ? 'ms-input-num' : ''}`}
-                          type={col.type === 'month_year' ? 'text' : col.type === 'date' ? 'date' : col.type === 'number' ? 'number' : 'text'}
+                          type={col.type === 'month_year' ? 'month' : col.type === 'date' ? 'date' : col.type === 'number' ? 'number' : 'text'}
                           inputMode={col.field === 'lot_no_numeric' ? 'numeric' : undefined}
                           value={inputDisplayVal}
                           onChange={e => handleDraftFieldChange(col, e.target.value)}
@@ -1234,7 +1250,7 @@ function Manual() {
                         : valNormalized;
                       const isChanged = String(valNormalized) !== String(origValNormalized);
                       const inputDisplayVal = col.type === 'month_year'
-                        ? toMonthYearDisplay(row[col.key])
+                        ? toMonthInput(row[col.key])
                         : col.field === 'lot_no_numeric'
                           ? normLotNoNumeric(row[col.key])
                           : (col.key === 'stack_no' || col.key === 'stack_total')
@@ -1246,7 +1262,7 @@ function Manual() {
                         <td key={col.key} className={`ms-cell ms-cell-ed ${isActive ? 'ms-cell-active' : ''} ${isChanged ? 'ms-cell-dirty' : ''}`}>
                           <input
                             className={`ms-input ${col.type === 'number' || col.field === 'lot_no_numeric' ? 'ms-input-num' : ''}`}
-                            type={col.type === 'month_year' ? 'text' : col.type === 'date' ? 'date' : col.type === 'number' ? 'number' : 'text'}
+                            type={col.type === 'month_year' ? 'month' : col.type === 'date' ? 'date' : col.type === 'number' ? 'number' : 'text'}
                             inputMode={col.field === 'lot_no_numeric' ? 'numeric' : undefined}
                             value={inputDisplayVal}
                             onChange={e => handleCellChange(fullIdx, col, e.target.value)}
@@ -1262,8 +1278,12 @@ function Manual() {
                       );
                     })}
                     <td className="ms-act no-print">
-                      <button className="ms-btn-copy" onClick={() => handleDuplicateRow(filteredIdx)} title="Duplicate"><FiCopy size={13} /></button>
-                      <button className="ms-btn-del" onClick={() => handleDeleteRow(filteredIdx)} title="Delete"><FiTrash2 size={13} /></button>
+                      {(!isImport || isSuperadmin) && (
+                        <>
+                          <button className="ms-btn-copy" onClick={() => handleDuplicateRow(filteredIdx)} title="Duplicate"><FiCopy size={13} /></button>
+                          <button className="ms-btn-del" onClick={() => handleDeleteRow(filteredIdx)} title="Delete"><FiTrash2 size={13} /></button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 );

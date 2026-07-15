@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const XLSX = require('xlsx');
 const path = require('path');
 const pool = require('../config/db');
+const { authMiddleware, superadminOnly } = require('../middleware/auth');
 const { purgeDuplicateLocationsForLineStack } = require('../utils/locationMaster');
 const {
   bangkokYYYYMMDD,
@@ -449,7 +450,7 @@ router.post('/container-extra', upload.single('file'), async (req, res) => {
 });
 
 // POST upload Import Excel file
-router.post('/import', upload.single('file'), async (req, res) => {
+router.post('/import', authMiddleware, superadminOnly, upload.single('file'), async (req, res) => {
   const conn = await pool.getConnection();
   try {
     if (!req.file) {

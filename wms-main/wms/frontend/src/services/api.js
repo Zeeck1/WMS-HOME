@@ -57,7 +57,7 @@ export const updateLotCsInDate = (id, cs_in_date) => api.patch(`/lots/${id}`, { 
 // ─── Movements ────────────────────────────────────────
 export const getMovements = (params) => api.get('/movements', { params });
 export const stockIn = (data) => api.post('/movements/stock-in', data);
-export const stockOut = (data) => api.post('/movements/stock-out', data);
+export const stockOut = (data) => api.post('/movements/stock-out', data, withAuth());
 export const adjustInventoryBalance = (data) => api.post('/movements/adjust', data);
 
 // ─── Inventory ────────────────────────────────────────
@@ -75,6 +75,9 @@ export const updateWithdrawalItems = (id, data) => api.put(`/withdrawals/${id}/i
 export const setWithdrawalStockOutMode = (id, data) => api.put(`/withdrawals/${id}/stock-out-mode`, data, withAuth());
 /** Per-item print form visibility: show_actual 1 = print Actual/Net Weight/Time out/Process/Remark, 0 = blank */
 export const setWithdrawalFormActualMode = (id, data) => api.put(`/withdrawals/${id}/form-actual-mode`, data);
+/** Superadmin: display-only date/time range and custom notice on the printable form */
+export const setWithdrawalFormDisplay = (id, data) =>
+  api.put(`/withdrawals/${id}/form-display`, data, withAuth());
 /** Superadmin: adjust actual MC without stock balance checks; syncs FINISHED stock OUT records */
 export const superadminStockAdjustWithdrawal = (id, data) =>
   api.put(`/withdrawals/${id}/superadmin-stock-adjust`, data, withAuth());
@@ -107,9 +110,9 @@ export const uploadContainerExtra = (file) => {
 export const uploadImport = (file) => {
   const formData = new FormData();
   formData.append('file', file);
-  return api.post('/upload/import', formData, {
+  return api.post('/upload/import', formData, withAuth({
     headers: { 'Content-Type': 'multipart/form-data' }
-  });
+  }));
 };
 
 // ─── Reports ─────────────────────────────────────────
@@ -119,10 +122,11 @@ export const sendLineNotification = (data) => api.post('/reports/no-movement/sen
 export const sendEmailReport = (data) => api.post('/reports/no-movement/send-email', data);
 
 // ─── Manual (spreadsheet editing) ────────────────────
-export const manualUpdateCell = (data) => api.patch('/manual/cell', data);
-export const manualDeleteRow = (lot_id, location_id) => api.delete('/manual/row', { params: { lot_id, location_id } });
-export const manualAddRow = (data) => api.post('/manual/row', data);
-export const manualReformat = (changes) => api.put('/manual/reformat', { changes });
+export const manualUpdateCell = (data) => api.patch('/manual/cell', data, withAuth());
+export const manualDeleteRow = (lot_id, location_id) =>
+  api.delete('/manual/row', withAuth({ params: { lot_id, location_id } }));
+export const manualAddRow = (data) => api.post('/manual/row', data, withAuth());
+export const manualReformat = (changes) => api.put('/manual/reformat', { changes }, withAuth());
 
 // ─── OAC (Order Availability Checker) ────────────────
 export const checkOrderAvailability = (files) => {
@@ -147,12 +151,14 @@ export const getImportShipments = () => api.get('/imports');
 export const getImportStockTable = () => api.get('/imports/stock-table');
 export const getImportMovementHistory = (params) => api.get('/imports/movement-history', { params });
 export const getImportShipment = (id) => api.get(`/imports/${id}`);
-export const createImportShipment = (data) => api.post('/imports', data);
-export const updateImportShipment = (id, data) => api.put(`/imports/${id}`, data);
-export const deleteImportShipment = (id) => api.delete(`/imports/${id}`);
-export const createImportStockOut = (shipmentId, data) => api.post(`/imports/${shipmentId}/stock-out`, data);
-export const updateImportStockOut = (outId, data) => api.put(`/imports/stock-out/${outId}`, data);
-export const deleteImportStockOut = (outId) => api.delete(`/imports/stock-out/${outId}`);
+export const createImportShipment = (data) => api.post('/imports', data, withAuth());
+export const updateImportShipment = (id, data) => api.put(`/imports/${id}`, data, withAuth());
+export const deleteImportShipment = (id) => api.delete(`/imports/${id}`, withAuth());
+export const createImportStockOut = (shipmentId, data) =>
+  api.post(`/imports/${shipmentId}/stock-out`, data, withAuth());
+export const updateImportStockOut = (outId, data) =>
+  api.put(`/imports/stock-out/${outId}`, data, withAuth());
+export const deleteImportStockOut = (outId) => api.delete(`/imports/stock-out/${outId}`, withAuth());
 
 // ─── Settings ────────────────────────────────────────
 export const getSettings = () => api.get('/settings');

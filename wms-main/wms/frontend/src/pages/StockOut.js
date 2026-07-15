@@ -3,6 +3,7 @@ import { FiArrowUpCircle, FiPackage, FiBox, FiAnchor } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { getInventory, stockOut, createImportStockOut } from '../services/api';
 import { bangkokYYYYMMDD, dateToYYYYMMDDInBangkok } from '../utils/bangkokTime';
+import { useAuth } from '../context/AuthContext';
 
 const formatArrivalDate = (d) => {
   if (!d) return '—';
@@ -31,6 +32,8 @@ function stockOutRowKey(item) {
 }
 
 function StockOut() {
+  const { user } = useAuth();
+  const isSuperadmin = user?.role === 'superadmin';
   const [activeTab, setActiveTab] = useState('BULK');
   const [inventory, setInventory] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -106,6 +109,10 @@ function StockOut() {
   }, [inventory, searchQuery]);
 
   const selectItem = (item) => {
+    if (String(item?.stock_type || '').toUpperCase() === 'IMPORT' && !isSuperadmin) {
+      toast.info('Import stock is read only. Superadmin access is required.');
+      return;
+    }
     setSelectedRow(item);
     setForm({
       quantity_mc: '', weight_kg: '', reference_no: '', notes: '', date_out: bangkokYYYYMMDD()
@@ -198,6 +205,12 @@ function StockOut() {
             </button>
           ))}
         </div>
+
+        {isImport && !isSuperadmin && (
+          <div className="alert alert-info">
+            Import stock is read only. Only superadmin can record or edit Import stock OUT.
+          </div>
+        )}
 
         {selectedRow && (
           <div className="card" style={{ marginBottom: 20, maxWidth: 720 }}>

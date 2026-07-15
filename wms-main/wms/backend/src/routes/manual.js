@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { bangkokYYYYMMDD } = require('../utils/bangkokTime');
+const { authMiddleware } = require('../middleware/auth');
 const {
   hardDeleteLocationIfUnused,
   purgeDuplicateLocationsForLineStack,
@@ -25,6 +26,19 @@ function parsePositiveInt(raw, label) {
     return { error: `${label} must be a positive whole number (1 or greater)` };
   }
   return { value: n };
+}
+
+function parseMonthDate(raw, label) {
+  if (raw == null || String(raw).trim() === '') return { value: null };
+  const s = String(raw).trim();
+  const iso = s.match(/^(\d{4})-(\d{2})(?:-\d{2})?$/);
+  const display = s.match(/^(\d{1,2})[/-](\d{4})$/);
+  const year = iso ? iso[1] : display?.[2];
+  const month = iso ? iso[2] : display?.[1]?.padStart(2, '0');
+  if (!year || !month || Number(month) < 1 || Number(month) > 12) {
+    return { error: `${label} must be a valid month` };
+  }
+  return { value: `${year}-${month}-01` };
 }
 
 /**
@@ -170,7 +184,7 @@ async function ensureLotOwnsEditableProduct(conn, lotId, productId) {
 }
 
 // ── PATCH /cell — update a single cell value ─────────────────────────
-router.patch('/cell', async (req, res) => {
+router.patch('/cell', authMiddleware, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const { lot_id, location_id, import_item_id, field, value } = req.body;
@@ -178,6 +192,9 @@ router.patch('/cell', async (req, res) => {
 
     // Import shipment rows (no lot/location)
     if (import_item_id) {
+      if (req.user?.role !== 'superadmin') {
+        return res.status(403).json({ error: 'Superadmin access required to edit Import data' });
+      }
       const impId = parseInt(import_item_id, 10);
       if (!impId) return res.status(400).json({ error: 'Invalid import_item_id' });
       const [items] = await conn.query('SELECT id FROM import_items WHERE id = ?', [impId]);
@@ -215,11 +232,22 @@ router.patch('/cell', async (req, res) => {
     let row = inv[0];
     if (!row) {
       const [lr] = await conn.query(
-        `SELECT l.product_id, p.bulk_weight_kg FROM lots l JOIN products p ON l.product_id = p.id WHERE l.id = ?`,
+        `SELECT l.product_id, p.bulk_weight_kg, p.stock_type
+         FROM lots l JOIN products p ON l.product_id = p.id WHERE l.id = ?`,
         [lot_id]
       );
       if (!lr[0]) return res.status(404).json({ error: 'Row not found' });
-      row = { product_id: lr[0].product_id, lot_id, location_id, bulk_weight_kg: lr[0].bulk_weight_kg, hand_on_balance_mc: 0 };
+      row = {
+        product_id: lr[0].product_id,
+        lot_id,
+        location_id,
+        bulk_weight_kg: lr[0].bulk_weight_kg,
+        stock_type: lr[0].stock_type,
+        hand_on_balance_mc: 0,
+      };
+    }
+    if (String(row.stock_type || '').toUpperCase() === 'IMPORT' && req.user?.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Superadmin access required to edit Import data' });
     }
 
     if (PRODUCT_FIELDS.includes(field)) {
@@ -246,8 +274,14 @@ router.patch('/cell', async (req, res) => {
     }
 
     if (LOT_FIELDS.includes(field)) {
+      let savedValue = value === '' ? null : value;
+      if (field === 'production_date' || field === 'expiration_date') {
+        const parsed = parseMonthDate(value, field === 'production_date' ? 'Production month' : 'Expiration month');
+        if (parsed.error) return res.status(400).json({ error: parsed.error });
+        savedValue = parsed.value;
+      }
       await conn.query(`UPDATE lots SET \`${field}\` = ? WHERE id = ?`,
-        [value === '' ? null : value, lot_id]);
+        [savedValue, lot_id]);
       return res.json({ ok: true });
     }
 
@@ -364,12 +398,19 @@ router.patch('/cell', async (req, res) => {
 });
 
 // ── DELETE /row — delete a row ───────────────────────────────────────
-router.delete('/row', async (req, res) => {
+router.delete('/row', authMiddleware, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const lot_id = parseInt(req.query.lot_id);
     const location_id = parseInt(req.query.location_id);
     if (!lot_id || !location_id) return res.status(400).json({ error: 'lot_id and location_id required' });
+    const [stockRows] = await conn.query(
+      'SELECT p.stock_type FROM lots l JOIN products p ON p.id = l.product_id WHERE l.id = ?',
+      [lot_id]
+    );
+    if (String(stockRows[0]?.stock_type || '').toUpperCase() === 'IMPORT' && req.user?.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Superadmin access required to edit Import data' });
+    }
 
     await conn.beginTransaction();
     await conn.query('DELETE FROM movements WHERE lot_id = ? AND location_id = ?', [lot_id, location_id]);
@@ -395,10 +436,13 @@ router.delete('/row', async (req, res) => {
 });
 
 // ── POST /row — add a new blank row (or duplicate with initial data) ─
-router.post('/row', async (req, res) => {
+router.post('/row', authMiddleware, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const { stock_type = 'BULK', initial = {} } = req.body;
+    if (String(stock_type).toUpperCase() === 'IMPORT' && req.user?.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Superadmin access required to edit Import data' });
+    }
     const lnn = parseLotNoNumeric(initial.lot_no_numeric);
     if (lnn.error) return res.status(400).json({ error: lnn.error });
     await conn.beginTransaction();
@@ -423,8 +467,18 @@ router.post('/row', async (req, res) => {
 
     const lotNo = `MAN-${Date.now()}`;
     const csIn = initial.cs_in_date || bangkokYYYYMMDD();
-    const productionDate = initial.production_date || csIn;
-    const expirationDate = initial.expiration_date || null;
+    let productionDate = initial.production_date || csIn;
+    let expirationDate = initial.expiration_date || null;
+    if (String(stock_type).toUpperCase() === 'CONTAINER_EXTRA') {
+      const production = parseMonthDate(initial.production_date, 'Production month');
+      const expiration = parseMonthDate(initial.expiration_date, 'Expiration month');
+      if (production.error || expiration.error) {
+        await conn.rollback();
+        return res.status(400).json({ error: production.error || expiration.error });
+      }
+      productionDate = production.value;
+      expirationDate = expiration.value;
+    }
     const [lt] = await conn.query(
       'INSERT INTO lots (lot_no, lot_no_numeric, cs_in_date, sticker, product_id, remark, st_no, production_date, expiration_date) VALUES (?,?,?,?,?,?,?,?,?)',
       [lotNo, lnn.value, csIn, initial.sticker || null, productId, initial.remark || null, initial.st_no || null, productionDate, expirationDate]);
@@ -464,12 +518,25 @@ router.post('/row', async (req, res) => {
 });
 
 // ── PUT /reformat — bulk reassign locations within a line ────────────
-router.put('/reformat', async (req, res) => {
+router.put('/reformat', authMiddleware, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const { changes } = req.body;
     if (!Array.isArray(changes) || changes.length === 0)
       return res.status(400).json({ error: 'changes array required' });
+    if (req.user?.role !== 'superadmin') {
+      const lotIds = changes.map((c) => parseInt(c.lot_id, 10)).filter(Boolean);
+      if (lotIds.length > 0) {
+        const [importLots] = await conn.query(
+          `SELECT 1 FROM lots l JOIN products p ON p.id = l.product_id
+           WHERE l.id IN (?) AND p.stock_type = 'IMPORT' LIMIT 1`,
+          [lotIds]
+        );
+        if (importLots.length > 0) {
+          return res.status(403).json({ error: 'Superadmin access required to edit Import data' });
+        }
+      }
+    }
 
     await conn.beginTransaction();
     let updated = 0;

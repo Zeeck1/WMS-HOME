@@ -5094,6 +5094,26 @@ body {
   font-size: 1rem;
 }
 
+.wf-form-notice {
+  margin: -6px 0 12px;
+  padding: 8px 10px;
+  border: 1px solid #d97706;
+  background: #fffbeb;
+  color: #78350f;
+  text-align: center;
+  font-size: 0.78rem;
+}
+
+.wf-form-notice-text {
+  font-weight: 700;
+  white-space: pre-wrap;
+}
+
+.wf-form-notice-window {
+  margin-top: 3px;
+  font-weight: 600;
+}
+
 /* Main table */
 .wf-table {
   width: 100%;
@@ -5694,6 +5714,64 @@ body {
 
 .mg-manager-field .form-control {
   font-size: 0.85rem;
+}
+
+.mg-form-display-panel {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #fbbf24;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #fffbeb 0%, #fff 100%);
+}
+
+.mg-form-display-heading p {
+  margin: 4px 0 12px;
+  color: var(--gray-600);
+  font-size: 0.8rem;
+}
+
+.mg-form-display-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.mg-form-display-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--gray-700);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.mg-form-display-notice {
+  margin-top: 10px;
+}
+
+.mg-form-display-notice textarea {
+  resize: vertical;
+}
+
+.mg-form-display-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.mg-item-timeout {
+  margin-top: 3px;
+  color: #92400e;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .mg-form-display-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ── Superadmin: Add Item panel on Manage page ── */
@@ -10493,6 +10571,27 @@ body.ckic-route:has(.ckic-page[data-theme="light"]) .topbar-logout {
 .imp-page {
   padding: 24px;
   max-width: 100%;
+}
+
+.imp-readonly-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.imp-page-readonly input:disabled,
+.imp-page-readonly select:disabled,
+.imp-page-readonly textarea:disabled {
+  color: #334155;
+  background: #f8fafc;
+  opacity: 1;
+  cursor: default;
 }
 
 .imp-header {

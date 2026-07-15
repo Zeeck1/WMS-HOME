@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { pruneLocationMasterAfterStockRemoved } = require('../utils/locationMaster');
+const { authMiddleware } = require('../middleware/auth');
 
 // GET all movements with details
 router.get('/', async (req, res) => {
@@ -81,7 +82,7 @@ router.post('/stock-in', async (req, res) => {
 });
 
 // POST Stock OUT
-router.post('/stock-out', async (req, res) => {
+router.post('/stock-out', authMiddleware, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -93,6 +94,13 @@ router.post('/stock-out', async (req, res) => {
     }
     if (quantity_mc <= 0) {
       return res.status(400).json({ error: 'Quantity must be greater than 0' });
+    }
+    const [productRows] = await conn.query(
+      'SELECT p.stock_type FROM lots l JOIN products p ON p.id = l.product_id WHERE l.id = ?',
+      [lot_id]
+    );
+    if (String(productRows[0]?.stock_type || '').toUpperCase() === 'IMPORT' && req.user?.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Superadmin access required to edit Import data' });
     }
 
     // Check available balance

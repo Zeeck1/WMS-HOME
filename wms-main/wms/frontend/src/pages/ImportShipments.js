@@ -4,11 +4,15 @@ import { FiPlus, FiEdit2, FiTrash2, FiSearch, FiAnchor, FiEye } from 'react-icon
 import { toast } from 'react-toastify';
 import { getImportShipments, deleteImportShipment } from '../services/api';
 import { bangkokLocaleDateString } from '../utils/bangkokTime';
+import { useAuth } from '../context/AuthContext';
+import { formatMonthYear } from '../utils/monthYearDate';
 
 const fmtDate = (d) => d ? bangkokLocaleDateString(new Date(d), { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
 
 function ImportShipments() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isSuperadmin = user?.role === 'superadmin';
   const [shipments, setShipments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -50,9 +54,11 @@ function ImportShipments() {
             <p>Manage import stock, expenses, and tracking</p>
           </div>
         </div>
-        <button className="imp-btn imp-btn-primary" onClick={() => navigate('/imports/new')}>
-          <FiPlus /> Create New Import
-        </button>
+        {isSuperadmin && (
+          <button className="imp-btn imp-btn-primary" onClick={() => navigate('/imports/new')}>
+            <FiPlus /> Create New Import
+          </button>
+        )}
       </div>
 
       <div className="imp-card">
@@ -74,9 +80,11 @@ function ImportShipments() {
           <div className="imp-empty">
             <FiAnchor />
             <p>No import shipments found</p>
-            <button className="imp-btn imp-btn-primary" onClick={() => navigate('/imports/new')}>
-              <FiPlus /> Create New Import
-            </button>
+            {isSuperadmin && (
+              <button className="imp-btn imp-btn-primary" onClick={() => navigate('/imports/new')}>
+                <FiPlus /> Create New Import
+              </button>
+            )}
           </div>
         ) : (
           <div className="imp-table-wrap">
@@ -106,8 +114,8 @@ function ImportShipments() {
                       {s.container_no || '-'}{s.seal_no ? ` / ${s.seal_no}` : ''}
                     </td>
                     <td>{fmtDate(s.eta)}</td>
-                    <td>{fmtDate(s.production_date)}</td>
-                    <td>{fmtDate(s.expiry_date)}</td>
+                    <td>{formatMonthYear(s.production_date)}</td>
+                    <td>{formatMonthYear(s.expiry_date)}</td>
                     <td className="imp-cell-center">{s.item_count}</td>
                     <td className="imp-cell-right">{Number(s.total_inv_kgs || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                     <td>{s.last_update_stock ? fmtDate(s.last_update_stock) : '-'}</td>
@@ -116,12 +124,16 @@ function ImportShipments() {
                         <button className="imp-action-btn imp-action-view" title="View / Edit" onClick={() => navigate(`/imports/${s.id}`)}>
                           <FiEye />
                         </button>
-                        <button className="imp-action-btn imp-action-edit" title="Edit" onClick={() => navigate(`/imports/${s.id}`)}>
-                          <FiEdit2 />
-                        </button>
-                        <button className="imp-action-btn imp-action-delete" title="Delete" onClick={() => handleDelete(s.id, s.inv_no)}>
-                          <FiTrash2 />
-                        </button>
+                        {isSuperadmin && (
+                          <>
+                            <button className="imp-action-btn imp-action-edit" title="Edit" onClick={() => navigate(`/imports/${s.id}`)}>
+                              <FiEdit2 />
+                            </button>
+                            <button className="imp-action-btn imp-action-delete" title="Delete" onClick={() => handleDelete(s.id, s.inv_no)}>
+                              <FiTrash2 />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>

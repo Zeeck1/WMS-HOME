@@ -451,6 +451,10 @@ async function initDatabase() {
         withdraw_date DATE DEFAULT NULL,
         request_time TIME DEFAULT NULL,
         finished_at TIMESTAMP NULL DEFAULT NULL,
+        form_timeout_date DATE DEFAULT NULL,
+        form_timeout_start TIME DEFAULT NULL,
+        form_timeout_end TIME DEFAULT NULL,
+        form_notice TEXT DEFAULT NULL,
         notes TEXT DEFAULT NULL,
         requested_by VARCHAR(100) DEFAULT 'system',
         managed_by VARCHAR(100) DEFAULT NULL,
@@ -477,6 +481,23 @@ async function initDatabase() {
       }
     } catch (e) {
       // ignore migration errors
+    }
+
+    // Migration: display-only timeout window and custom notice for printable withdraw forms
+    try {
+      const formColumns = [
+        ['form_timeout_date', 'DATE DEFAULT NULL'],
+        ['form_timeout_start', 'TIME DEFAULT NULL'],
+        ['form_timeout_end', 'TIME DEFAULT NULL'],
+        ['form_notice', 'TEXT DEFAULT NULL'],
+      ];
+      for (const [column, definition] of formColumns) {
+        if (!(await tableHasColumn(connection, 'withdraw_requests', column, dbName))) {
+          await connection.query(`ALTER TABLE withdraw_requests ADD COLUMN \`${column}\` ${definition}`);
+        }
+      }
+    } catch (e) {
+      console.error('  Migration withdraw form display columns:', e.message);
     }
 
     // Migration: allow Branch.05 (SM) on existing installs
@@ -558,6 +579,9 @@ async function initDatabase() {
         quantity_mc INT NOT NULL DEFAULT 0,
         weight_kg DECIMAL(10,2) NOT NULL DEFAULT 0,
         production_process VARCHAR(100) DEFAULT NULL,
+        form_timeout_date DATE DEFAULT NULL,
+        form_timeout_start TIME DEFAULT NULL,
+        form_timeout_end TIME DEFAULT NULL,
         movement_id INT DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (request_id) REFERENCES withdraw_requests(id) ON DELETE CASCADE,
@@ -568,6 +592,21 @@ async function initDatabase() {
       ) ENGINE=InnoDB
     `);
     console.log('  Table created: withdraw_items');
+
+    try {
+      const itemFormColumns = [
+        ['form_timeout_date', 'DATE DEFAULT NULL'],
+        ['form_timeout_start', 'TIME DEFAULT NULL'],
+        ['form_timeout_end', 'TIME DEFAULT NULL'],
+      ];
+      for (const [column, definition] of itemFormColumns) {
+        if (!(await tableHasColumn(connection, 'withdraw_items', column, dbName))) {
+          await connection.query(`ALTER TABLE withdraw_items ADD COLUMN \`${column}\` ${definition}`);
+        }
+      }
+    } catch (e) {
+      console.error('  Migration withdraw item timeout columns:', e.message);
+    }
 
     // Migration: add requested_mc column if it doesn't exist
     try {

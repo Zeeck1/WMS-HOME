@@ -75,6 +75,7 @@ async function runStartupMigrations() {
   const { ensureLocationsLineStackUnique } = require('./utils/locationSchema');
   const { ensureUserWithdrawDepartmentsTable } = require('./utils/withdrawDepartments');
   const { ensureProductsAllowLotClones } = require('./utils/productSchema');
+  const { ensureWithdrawFormColumns } = require('./utils/withdrawFormSchema');
   const conn = await pool.getConnection();
   try {
     await ensureUsersAuthColumns(conn);
@@ -113,6 +114,16 @@ async function runStartupMigrations() {
     console.error('  [startup] Products unique-key migration failed:', e.message);
   } finally {
     conn4.release();
+  }
+
+  const conn5 = await pool.getConnection();
+  try {
+    await ensureWithdrawFormColumns(conn5);
+    console.log('  [startup] Withdraw form display columns OK');
+  } catch (e) {
+    console.error('  [startup] Withdraw form column migration failed:', e.message);
+  } finally {
+    conn5.release();
   }
 }
 
