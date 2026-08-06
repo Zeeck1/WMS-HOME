@@ -32,7 +32,7 @@ async function ensureLocationsLineStackUnique(conn) {
     for (let i = 1; i < ids.length; i++) {
       await conn.query('UPDATE movements SET location_id = ? WHERE location_id = ?', [keeperId, ids[i]]);
       try {
-        await conn.query('UPDATE withdraw_items SET location_id = ? WHERE location_id = ?', [keeperId, ids[i]]);
+        await conn.query('UPDATE withdraw_items wi INNER JOIN withdraw_requests wr ON wr.id = wi.request_id SET wi.location_id = ? WHERE wi.location_id = ? AND wr.status != \'FINISHED\'', [keeperId, ids[i]]);
       } catch (e) {
         if (e.code !== 'ER_NO_SUCH_TABLE') throw e;
       }

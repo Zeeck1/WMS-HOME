@@ -30,6 +30,7 @@ import {
   withdrawDisplayLineKey,
   getManageDisplayItems,
   linesToPickRoutePayload,
+  appendSameFishAlternatives,
 } from '../utils/withdrawItemGrouping';
 
 /** Same labels as withdraw LINE: invoice (import), order no (extra), BULK + lot. */
@@ -118,33 +119,76 @@ function FormActualBadge({ formActual, item }) {
   );
 }
 
+function StockAvailabilityBadge({
+  balance, requestedMc, unlimitedQty = false, isEditable = false, qtyNeedsFix = false, isAlt = false,
+}) {
+  if (isAlt) {
+    return (
+      <span className="mg-stock-alt" title="Same fish available at this location">
+        Available
+      </span>
+    );
+  }
+  if (unlimitedQty) {
+    return <span className="mg-stock-superadmin" title="Superadmin — no stock cap">SA</span>;
+  }
+  if (balance <= 0) {
+    return (
+      <span className="mg-stock-out" title="Requested stock is gone or deleted in Manual — request line is kept">
+        Out
+      </span>
+    );
+  }
+  if (isEditable && qtyNeedsFix) {
+    return <span className="mg-stock-warn">Low Stock</span>;
+  }
+  if (balance < requestedMc) {
+    return <span className="mg-stock-warn">Low Stock</span>;
+  }
+  return (
+    <span className="mg-stock-ok">
+      <FiCheck size={12} /> OK
+    </span>
+  );
+}
+
 function ManageWithdrawItemRow({
   item, rowNum, isEditable, editedQty, setEditedQty, unlimitedQty = false,
   selectable = false, selected = false, onToggleSelect = null, outMode = null, formActual = null,
 }) {
+  const isAlt = Boolean(item._altSuggestion);
   const balance = Number(item.hand_on_balance || 0);
   const requestedMc = Number(item.requested_mc || item.quantity_mc);
   const currentQty = currentItemQty(item, editedQty);
-  const isInsufficient = !unlimitedQty && balance < requestedMc;
+  const isInsufficient = !unlimitedQty && !isAlt && balance < requestedMc;
   const qtyKey = lineQtyKey(item);
   const isEdited = editedQty[qtyKey] !== undefined;
   const weightKg = currentQty * Number(item.bulk_weight_kg);
   const actualDiffers = currentQty !== requestedMc;
 
   return (
-    <tr className={`mg-group-detail-row ${isInsufficient && isEditable ? 'mg-row-warn' : ''} ${selected ? 'mg-row-selected' : ''}`}>
+    <tr className={`mg-group-detail-row ${isAlt ? 'mg-row-alt' : ''} ${isInsufficient && isEditable ? 'mg-row-warn' : ''} ${selected ? 'mg-row-selected' : ''}`}>
       {selectable && (
         <td className="mg-select-cell">
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={() => onToggleSelect && onToggleSelect(item)}
-            aria-label="Select item"
-          />
+          {!isAlt && (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => onToggleSelect && onToggleSelect(item)}
+              aria-label="Select item"
+            />
+          )}
         </td>
       )}
       <td>{rowNum}</td>
-      <td><strong>{item.fish_name}</strong></td>
+      <td>
+        <strong>{item.fish_name}</strong>
+        {isAlt && (
+          <span className="mg-alt-badge" title={`Same fish still available (requested ${item._altForLinePlace || 'location'} is Out)`}>
+            Alt
+          </span>
+        )}
+      </td>
       <td>{item.size}</td>
       <td>{item.line_place}</td>
       <td className="mg-lot-cell">{item.lot_no || item.order_code || '—'}</td>
@@ -154,10 +198,12 @@ function ManageWithdrawItemRow({
         </span>
       </td>
       <td className="num-cell">
-        <span className="mg-requested-val">{requestedMc}</span>
+        <span className="mg-requested-val">{isAlt ? '—' : requestedMc}</span>
       </td>
       <td className="num-cell">
-        {isEditable ? (
+        {isAlt ? (
+          <span className="mg-alt-qty-note">—</span>
+        ) : isEditable ? (
           <div className="mg-qty-edit">
             <input
               type="number"
@@ -189,20 +235,19 @@ function ManageWithdrawItemRow({
           </span>
         )}
       </td>
-      <td className="num-cell">{weightKg.toFixed(0)}</td>
+      <td className="num-cell">{isAlt ? '—' : weightKg.toFixed(0)}</td>
       <td>
-        {unlimitedQty ? (
-          <span className="mg-stock-superadmin" title="Superadmin — no stock cap">SA</span>
-        ) : isInsufficient && isEditable && editedQty[qtyKey] === undefined ? (
-          <span className="mg-stock-warn">Low Stock</span>
-        ) : (
-          <span className="mg-stock-ok">
-            <FiCheck size={12} /> OK
-          </span>
-        )}
+        <StockAvailabilityBadge
+          balance={balance}
+          requestedMc={requestedMc}
+          unlimitedQty={unlimitedQty}
+          isEditable={isEditable}
+          qtyNeedsFix={isInsufficient && editedQty[qtyKey] === undefined}
+          isAlt={isAlt}
+        />
       </td>
-      <td><OutModeBadge outMode={outMode} /></td>
-      <td><FormActualBadge formActual={formActual} item={item} /></td>
+      <td>{!isAlt && <OutModeBadge outMode={outMode} />}</td>
+      <td>{!isAlt && <FormActualBadge formActual={formActual} item={item} />}</td>
     </tr>
   );
 }
@@ -408,14 +453,18 @@ function Manage() {
   const pickRouteDirty = pickRouteTab !== savedPickMode;
   const canUndoPickRoute = Boolean(expandedData?.pick_route_saved);
 
-  const useSavedPickLines = expandedData?.status === 'FINISHED'
-    || (!pickRouteDirty && expandedData?.pick_route_saved);
+  const useSavedPickLines = !(expandedData?.status === 'PENDING' && pickRouteDirty);
 
   const displayItems = useMemo(() => {
     if (!expandedData?.items) return [];
-    return getManageDisplayItems(expandedData.items, inventory, pickRouteSortMode, editedQty, {
+    const lines = getManageDisplayItems(expandedData.items, inventory, pickRouteSortMode, editedQty, {
       useSavedLines: useSavedPickLines,
     });
+    // Out request locations stay visible; also list other locations that still have the same fish
+    if (expandedData.status === 'CANCELLED' || expandedData.status === 'FINISHED') {
+      return lines;
+    }
+    return appendSameFishAlternatives(lines, inventory, pickRouteSortMode);
   }, [expandedData, inventory, pickRouteSortMode, useSavedPickLines, editedQty]);
 
   const baselineQtyByKey = useMemo(() => {
@@ -448,7 +497,7 @@ function Manage() {
     setSaving(true);
     try {
       const items = displayItems
-        .filter((it) => it.id != null && Number.isFinite(Number(it.id)))
+        .filter((it) => !it._altSuggestion && it.id != null && Number.isFinite(Number(it.id)))
         .map((it) => {
           const key = lineQtyKey(it);
           const qty = editedQty[key] !== undefined ? Number(editedQty[key]) : Number(it.quantity_mc);
@@ -925,7 +974,7 @@ function Manage() {
               const canSelectItems = canSelectOutMode || canSelectFormActual;
               const selectableIds = isExpanded
                 ? [...new Set(displayItems
-                    .filter((it) => it.id != null && Number.isFinite(Number(it.id)))
+                    .filter((it) => !it._altSuggestion && it.id != null && Number.isFinite(Number(it.id)))
                     .map((it) => Number(it.id)))]
                 : [];
               const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedItemIds.has(id));
@@ -1139,19 +1188,24 @@ function Manage() {
                                 || (isSuperadmin && req.status !== 'CANCELLED');
                               const unlimitedQty = isSuperadmin && req.status !== 'CANCELLED';
                               return itemGroups.flatMap((group) => {
-                                const multiLine = group.lines.length > 1;
-                                const groupActualTotal = group.lines.reduce(
+                                const requestLines = group.lines.filter((item) => !item._altSuggestion);
+                                const altLines = group.lines.filter((item) => item._altSuggestion);
+                                const multiLine = requestLines.length > 1;
+                                const groupActualTotal = requestLines.reduce(
                                   (s, item) => s + currentItemQty(item, editedQty),
                                   0
                                 );
-                                const groupWeightKg = group.lines.reduce(
+                                const groupWeightKg = requestLines.reduce(
                                   (s, item) => s + currentItemQty(item, editedQty) * Number(item.bulk_weight_kg),
                                   0
                                 );
-                                const groupHasLowStock = isQtyEditable && !unlimitedQty && group.lines.some((item) => {
-                              const balance = Number(item.hand_on_balance || 0);
-                              const requestedMc = Number(item.requested_mc || item.quantity_mc);
-                                  return balance < requestedMc && editedQty[lineQtyKey(item)] === undefined;
+                                const groupHasOut = !unlimitedQty && requestLines.some(
+                                  (item) => Number(item.hand_on_balance || 0) <= 0
+                                );
+                                const groupHasLowStock = isQtyEditable && !unlimitedQty && requestLines.some((item) => {
+                                  const balance = Number(item.hand_on_balance || 0);
+                                  const requestedMc = Number(item.requested_mc || item.quantity_mc);
+                                  return balance > 0 && balance < requestedMc && editedQty[lineQtyKey(item)] === undefined;
                                 });
                                 const groupActualDiffers = groupActualTotal !== group.totalReqMc;
 
@@ -1163,11 +1217,15 @@ function Manage() {
                                       <td className="mg-group-num">—</td>
                                       <td>
                                         <strong>{withdrawFishNameLabel(group)}</strong>
-                                        <span className="mg-group-badge">{group.lines.length} loc</span>
+                                        <span className="mg-group-badge">{requestLines.length} loc</span>
+                                        {altLines.length > 0 && (
+                                          <span className="mg-alt-badge">{altLines.length} alt</span>
+                                        )}
                                       </td>
                                       <td>{group.size}</td>
                                       <td colSpan={2} className="mg-group-loc-summary">
-                                        {group.lines.length} locations
+                                        {requestLines.length} locations
+                                        {altLines.length > 0 ? ` · ${altLines.length} available alt` : ''}
                                       </td>
                                       <td className="num-cell">—</td>
                                       <td className="num-cell">
@@ -1180,7 +1238,9 @@ function Manage() {
                                       </td>
                                       <td className="num-cell">{groupWeightKg.toFixed(0)}</td>
                                       <td>
-                                        {groupHasLowStock ? (
+                                        {groupHasOut ? (
+                                          <span className="mg-stock-out" title="One or more locations have no stock left">Out</span>
+                                        ) : groupHasLowStock ? (
                                           <span className="mg-stock-warn">Low Stock</span>
                                         ) : (
                                           <span className="mg-stock-ok">
@@ -1194,8 +1254,27 @@ function Manage() {
                                   );
                                 }
 
-                                group.lines.forEach((item) => {
+                                [...requestLines, ...altLines].forEach((item) => {
                                   rowNum += 1;
+                                  if (item._altSuggestion) {
+                                    rows.push(
+                                      <ManageWithdrawItemRow
+                                        key={`alt-${item.lot_id}-${item.location_id}-${item.line_place}-${rowNum}`}
+                                        item={item}
+                                        rowNum={rowNum}
+                                        isEditable={false}
+                                        editedQty={editedQty}
+                                        setEditedQty={setEditedQty}
+                                        unlimitedQty={false}
+                                        selectable={canSelectItems}
+                                        selected={false}
+                                        onToggleSelect={null}
+                                        outMode={null}
+                                        formActual={null}
+                                      />
+                                    );
+                                    return;
+                                  }
                                   if (multiLine) {
                                     rows.push(
                                       <tr
@@ -1274,14 +1353,18 @@ function Manage() {
                                           {(currentItemQty(item, editedQty) * Number(item.bulk_weight_kg)).toFixed(0)}
                                         </td>
                                         <td>
-                                          {unlimitedQty ? (
-                                            <span className="mg-stock-superadmin" title="Superadmin — no stock cap">SA</span>
-                                          ) : isQtyEditable && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc) && editedQty[lineQtyKey(item)] === undefined ? (
-                                            <span className="mg-stock-warn">Low Stock</span>
-                                          ) : (
-                                            <span className="mg-stock-ok"><FiCheck size={12} /> OK</span>
-                                    )}
-                                  </td>
+                                          <StockAvailabilityBadge
+                                            balance={Number(item.hand_on_balance || 0)}
+                                            requestedMc={Number(item.requested_mc || item.quantity_mc)}
+                                            unlimitedQty={unlimitedQty}
+                                            isEditable={isQtyEditable}
+                                            qtyNeedsFix={
+                                              !unlimitedQty
+                                              && Number(item.hand_on_balance || 0) < Number(item.requested_mc || item.quantity_mc)
+                                              && editedQty[lineQtyKey(item)] === undefined
+                                            }
+                                          />
+                                        </td>
                                         <td><OutModeBadge outMode={outModeById[Number(item.id)]} /></td>
                                         <td><FormActualBadge formActual={formActualById[Number(item.id)]} item={item} /></td>
                                 </tr>

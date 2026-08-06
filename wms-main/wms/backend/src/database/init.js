@@ -275,7 +275,10 @@ async function initDatabase() {
           );
           if (wiTable.length > 0) {
             await connection.query(
-              'UPDATE withdraw_items SET location_id = ? WHERE location_id = ?',
+              `UPDATE withdraw_items wi
+               INNER JOIN withdraw_requests wr ON wr.id = wi.request_id
+               SET wi.location_id = ?
+               WHERE wi.location_id = ? AND wr.status != 'FINISHED'`,
               [keeperId, ids[i]]
             );
           }
@@ -924,20 +927,28 @@ async function initDatabase() {
       }
     }
 
-    // Backfill snapshots for existing FINISHED withdrawals
+    // Backfill snapshots for existing withdrawals (open + finished) while live joins still work
     try {
-      const { freezeWithdrawItemsSnapshot } = require('../utils/withdrawItemSnapshot');
+      const { snapshotWithdrawItems, freezeWithdrawItemsSnapshot } = require('../utils/withdrawItemSnapshot');
+      const [openReqs] = await connection.query(
+        `SELECT id FROM withdraw_requests WHERE status != 'FINISHED'`
+      );
+      for (const row of openReqs) {
+        await snapshotWithdrawItems(connection, row.id);
+      }
       const [finishedReqs] = await connection.query(
         `SELECT id FROM withdraw_requests WHERE status = 'FINISHED'`
       );
       for (const row of finishedReqs) {
         await freezeWithdrawItemsSnapshot(connection, row.id);
       }
-      if (finishedReqs.length > 0) {
-        console.log(`  Migration: backfilled snapshots for ${finishedReqs.length} finished withdrawal(s)`);
+      if (openReqs.length > 0 || finishedReqs.length > 0) {
+        console.log(
+          `  Migration: snapshotted ${openReqs.length} open + ${finishedReqs.length} finished withdrawal(s)`
+        );
       }
     } catch (e) {
-      console.error('  Migration backfill finished withdraw snapshots:', e.message);
+      console.error('  Migration backfill withdraw snapshots:', e.message);
     }
 
     // Backfill: import_stock_outs created from withdrawals stored the request number

@@ -73,8 +73,10 @@ export function findInventoryRowForWithdrawLine(line, inventory) {
   return null;
 }
 
-/** Overlay stack_no / st_no from live Manual inventory so reports match the Manual page. */
+/** Overlay stack_no / st_no from live Manual inventory so open reports match Manual.
+ *  Never call for FINISHED withdrawals — those must keep frozen snap values. */
 export function enrichWithdrawLineFromInventory(line, inventory) {
+  if (line?.frozen_at) return line;
   const inv = findInventoryRowForWithdrawLine(line, inventory);
   if (!inv) return line;
   return {
@@ -355,7 +357,96 @@ export function withdrawDisplayLineKey(item) {
 
 function inventoryBalanceForLine(inventory, line) {
   const inv = (inventory || []).find((row) => withdrawLineMatchesInventory(line, row));
-  return inv != null ? Number(inv.hand_on_balance_mc) : Number(line.hand_on_balance ?? 0);
+  if (!inv) return Number(line.hand_on_balance ?? 0);
+  // Location still has stock, but product was changed away from the requested fish → treat as Out
+  if (sameFishKey(inv) !== sameFishKey(line)) return 0;
+  return Number(inv.hand_on_balance_mc) || 0;
+}
+
+/** Match same fish product for alternative locations (ignore order/sticker). */
+export function sameFishKey(item) {
+  return [
+    String(item?.fish_name || '').trim().toUpperCase(),
+    String(item?.size || '').trim().toUpperCase(),
+    Number(item?.bulk_weight_kg) || 0,
+    String(item?.type || '').trim().toUpperCase(),
+    String(item?.glazing || '').trim().toUpperCase(),
+    String(item?.stock_type || 'BULK').toUpperCase(),
+  ].join('||');
+}
+
+function lineLocationOccupiedKey(line) {
+  if (line?.import_item_id != null || line?._imp_item_id != null) {
+    return `imp:${line.import_item_id ?? line._imp_item_id}`;
+  }
+  if (line?.lot_id != null && line?.location_id != null) {
+    return `lot:${line.lot_id}:${line.location_id}`;
+  }
+  const lp = String(line?.line_place || '').trim().toUpperCase();
+  return lp ? `place:${sameFishKey(line)}:${lp}` : null;
+}
+
+/**
+ * When a requested location is Out, append other inventory lines that still have the same fish.
+ * Suggestion-only rows (_altSuggestion) — shown on Manage, not saved as request lines.
+ */
+export function appendSameFishAlternatives(lines, inventory, sortMode = 'nearest') {
+  const base = [...(lines || [])];
+  const stock = inventory || [];
+  if (!base.length || !stock.length) return base;
+
+  const occupied = new Set(base.map(lineLocationOccupiedKey).filter(Boolean));
+  const extras = [];
+
+  for (const line of base) {
+    if (line._altSuggestion) continue;
+    const balance = Number(line.hand_on_balance ?? 0);
+    if (balance > 0) continue;
+
+    const pk = sameFishKey(line);
+    if (!String(line.fish_name || '').trim()) continue;
+
+    const alts = stock.filter((inv) => {
+      if (Number(inv.hand_on_balance_mc) <= 0) return false;
+      if (sameFishKey(inv) !== pk) return false;
+      const key = lineLocationOccupiedKey(inv);
+      if (!key || occupied.has(key)) return false;
+      return true;
+    });
+
+    const sorted = sortWithdrawItems(alts, sortMode);
+    for (const inv of sorted) {
+      const key = lineLocationOccupiedKey(inv);
+      if (!key || occupied.has(key)) continue;
+      occupied.add(key);
+      extras.push({
+        ...inv,
+        id: null,
+        _altSuggestion: true,
+        _altForItemId: line.id ?? null,
+        _altForLinePlace: line.line_place || '',
+        fish_name: inv.fish_name ?? line.fish_name,
+        size: inv.size ?? line.size,
+        bulk_weight_kg: inv.bulk_weight_kg ?? line.bulk_weight_kg,
+        type: inv.type ?? line.type ?? '',
+        glazing: inv.glazing ?? line.glazing ?? '',
+        sticker: inv.sticker ?? line.sticker ?? '',
+        stock_type: inv.stock_type ?? line.stock_type,
+        order_code: inv.order_code ?? line.order_code ?? '',
+        production_process: line.production_process || '',
+        requested_mc: 0,
+        quantity_mc: 0,
+        hand_on_balance: Number(inv.hand_on_balance_mc) || 0,
+        lot_id: inv.lot_id ?? null,
+        location_id: inv.location_id ?? null,
+        import_item_id: inv._imp_item_id ?? null,
+      });
+    }
+  }
+
+  if (!extras.length) return base;
+  // Keep original request order; append alternatives after their product group by sorting together
+  return sortWithdrawItems([...base, ...extras], sortMode);
 }
 
 /** Overlay user-edited actual MC onto request lines before pick-route allocation. */

@@ -5510,6 +5510,50 @@ body {
   font-weight: 700;
 }
 
+.mg-stock-out {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.mg-stock-alt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.mg-alt-badge {
+  display: inline-flex;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #bae6fd;
+  color: #075985;
+  font-size: 0.68rem;
+  font-weight: 800;
+  vertical-align: middle;
+}
+
+.mg-row-alt {
+  background: #f0f9ff;
+}
+
+.mg-row-alt td {
+  border-top-style: dashed;
+}
+
 .mg-stock-ok {
   display: inline-flex;
   align-items: center;

@@ -125,6 +125,33 @@ async function runStartupMigrations() {
   } finally {
     conn5.release();
   }
+
+  const conn6 = await pool.getConnection();
+  try {
+    const { snapshotWithdrawItems, freezeWithdrawItemsSnapshot } = require('./utils/withdrawItemSnapshot');
+    const [needsSnap] = await conn6.query(
+      `SELECT DISTINCT wr.id, wr.status
+       FROM withdraw_requests wr
+       INNER JOIN withdraw_items wi ON wi.request_id = wr.id
+       WHERE wi.snap_fish_name IS NULL`
+    );
+    for (const row of needsSnap) {
+      if (row.status === 'FINISHED') {
+        await freezeWithdrawItemsSnapshot(conn6, row.id);
+      } else {
+        await snapshotWithdrawItems(conn6, row.id);
+      }
+    }
+    if (needsSnap.length > 0) {
+      console.log(`  [startup] Backfilled withdraw snapshots for ${needsSnap.length} request(s)`);
+    } else {
+      console.log('  [startup] Withdraw line snapshots OK');
+    }
+  } catch (e) {
+    console.error('  [startup] Withdraw snapshot backfill failed:', e.message);
+  } finally {
+    conn6.release();
+  }
 }
 
 async function startServer() {

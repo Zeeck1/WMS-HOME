@@ -19,6 +19,7 @@ function getOptionalUser(req) {
 const {
   queryWithdrawItemsDetailed,
   freezeWithdrawItemsSnapshot,
+  snapshotWithdrawItems,
 } = require('../utils/withdrawItemSnapshot');
 const {
   WITHDRAW_DEPARTMENTS,
@@ -119,9 +120,21 @@ router.get('/', async (req, res) => {
         (SELECT COALESCE(SUM(wi.quantity_mc), 0) FROM withdraw_items wi WHERE wi.request_id = wr.id) AS total_mc,
         (SELECT COALESCE(SUM(wi.weight_kg), 0) FROM withdraw_items wi WHERE wi.request_id = wr.id) AS total_kg,
         (SELECT GROUP_CONCAT(DISTINCT CONCAT(
-            COALESCE(wi.snap_fish_name, p.fish_name, ii.item_name),
-            IF(COALESCE(wi.snap_size, p.size, ii.size) IS NOT NULL AND TRIM(COALESCE(wi.snap_size, p.size, ii.size)) != '', CONCAT(' ', COALESCE(wi.snap_size, p.size, ii.size)), '')
-          ) ORDER BY COALESCE(wi.snap_fish_name, p.fish_name, ii.item_name) SEPARATOR ' · ')
+            CASE WHEN wr.status = 'FINISHED' OR wi.frozen_at IS NOT NULL
+              THEN wi.snap_fish_name
+              ELSE COALESCE(wi.snap_fish_name, p.fish_name, ii.item_name) END,
+            IF(
+              TRIM(CASE WHEN wr.status = 'FINISHED' OR wi.frozen_at IS NOT NULL
+                THEN COALESCE(wi.snap_size, '')
+                ELSE COALESCE(wi.snap_size, p.size, ii.size, '') END) != '',
+              CONCAT(' ', CASE WHEN wr.status = 'FINISHED' OR wi.frozen_at IS NOT NULL
+                THEN wi.snap_size
+                ELSE COALESCE(wi.snap_size, p.size, ii.size) END),
+              ''
+            )
+          ) ORDER BY CASE WHEN wr.status = 'FINISHED' OR wi.frozen_at IS NOT NULL
+            THEN wi.snap_fish_name
+            ELSE COALESCE(wi.snap_fish_name, p.fish_name, ii.item_name) END SEPARATOR ' · ')
          FROM withdraw_items wi
          LEFT JOIN lots l ON wi.lot_id = l.id
          LEFT JOIN products p ON l.product_id = p.id
@@ -154,15 +167,20 @@ router.get('/', async (req, res) => {
           LEFT JOIN import_items ii ON wi.import_item_id = ii.id
           LEFT JOIN import_shipments s ON ii.shipment_id = s.id
           WHERE wi.request_id = wr.id AND (
-            p.fish_name LIKE ? OR p.size LIKE ? OR p.type LIKE ? OR p.order_code LIKE ?
-            OR l.lot_no LIKE ? OR loc.line_place LIKE ?
-            OR ii.item_name LIKE ? OR ii.size LIKE ? OR s.inv_no LIKE ?
-            OR wi.production_process LIKE ?
+            wi.production_process LIKE ?
             OR wi.snap_fish_name LIKE ? OR wi.snap_size LIKE ? OR wi.snap_lot_no LIKE ?
             OR wi.snap_line_place LIKE ? OR wi.snap_order_code LIKE ?
+            OR (
+              (wr.status != 'FINISHED' AND wi.frozen_at IS NULL) AND (
+                p.fish_name LIKE ? OR p.size LIKE ? OR p.type LIKE ? OR p.order_code LIKE ?
+                OR l.lot_no LIKE ? OR loc.line_place LIKE ?
+                OR ii.item_name LIKE ? OR ii.size LIKE ? OR s.inv_no LIKE ?
+              )
+            )
           )
         )
       )`;
+      // request_no, notes, requested_by, production_process, 5 snap fields, 9 live fields
       params.push(q, q, q, q, q, q, q, q, q, q, q, q, q, q, q, q, q, q);
     }
     sql += ' ORDER BY wr.created_at DESC';
@@ -242,6 +260,7 @@ router.put('/:id/pick-route', async (req, res) => {
     for (const item of items) {
       await insertWithdrawItemLine(conn, req.params.id, item);
     }
+    await snapshotWithdrawItems(conn, req.params.id, { overwrite: true });
     await conn.query(
       'UPDATE withdraw_requests SET pick_route_mode = ?, updated_at = NOW() WHERE id = ?',
       [mode, req.params.id]
@@ -294,6 +313,7 @@ router.post('/:id/undo-pick-route', async (req, res) => {
     for (const item of backup.items) {
       await insertWithdrawItemLine(conn, req.params.id, item);
     }
+    await snapshotWithdrawItems(conn, req.params.id, { overwrite: true });
     await conn.query(
       'UPDATE withdraw_requests SET pick_route_mode = NULL, pick_route_backup = NULL, updated_at = NOW() WHERE id = ?',
       [req.params.id]
@@ -406,6 +426,7 @@ router.post('/', authMiddleware, async (req, res) => {
       );
     }
 
+    await snapshotWithdrawItems(conn, requestId);
     await conn.commit();
 
     const [created] = await pool.query('SELECT * FROM withdraw_requests WHERE id = ?', [requestId]);
@@ -573,21 +594,13 @@ router.post('/:id/add-item', authMiddleware, superadminOnly, async (req, res) =>
       [req.params.id, lot_id, location_id, quantity_mc, quantity_mc, quantity_mc * bulkKg, production_process || null]
     );
 
+    await snapshotWithdrawItems(conn, req.params.id);
     await conn.commit();
 
-    const [newItem] = await pool.query(`
-      SELECT wi.*,
-        p.fish_name, p.size, p.bulk_weight_kg, p.type, p.glazing, p.stock_type, p.order_code,
-        l.lot_no, l.lot_no_numeric, l.cs_in_date, l.sticker,
-        loc.line_place, loc.stack_no, loc.stack_total
-      FROM withdraw_items wi
-      LEFT JOIN lots l ON wi.lot_id = l.id
-      LEFT JOIN products p ON l.product_id = p.id
-      LEFT JOIN locations loc ON wi.location_id = loc.id
-      WHERE wi.id = ?
-    `, [ins.insertId]);
+    const items = await queryWithdrawItemsDetailed(pool, req.params.id, { includeHandOn: true });
+    const newItem = items.find((it) => Number(it.id) === Number(ins.insertId));
 
-    res.status(201).json({ message: 'Item added', item: newItem[0] });
+    res.status(201).json({ message: 'Item added', item: newItem || items[items.length - 1] });
   } catch (error) {
     await conn.rollback();
     console.error('Error adding withdrawal item:', error);
@@ -950,6 +963,9 @@ router.put('/:id/status', async (req, res) => {
     }
 
     if (status === 'FINISHED' && request.status !== 'FINISHED' && !request.manual_adjust) {
+      // Freeze display fields before stock-out / location prune so Manual edits later cannot rewrite history
+      await freezeWithdrawItemsSnapshot(conn, req.params.id);
+
       const [items] = await conn.query(`
         SELECT wi.*, p.bulk_weight_kg, ii.wet_mc AS import_wet_mc, ii.shipment_id
         FROM withdraw_items wi
@@ -1043,6 +1059,7 @@ router.put('/:id/status', async (req, res) => {
     );
 
     if (status === 'FINISHED') {
+      // Ensure freeze also runs for manual_adjust finishes (and is idempotent otherwise)
       await freezeWithdrawItemsSnapshot(conn, req.params.id);
     }
 

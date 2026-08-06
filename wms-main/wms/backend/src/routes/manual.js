@@ -417,8 +417,7 @@ router.delete('/row', authMiddleware, async (req, res) => {
 
     const [rem] = await conn.query('SELECT COUNT(*) as c FROM movements WHERE lot_id = ?', [lot_id]);
     if (rem[0].c === 0) {
-      const { deleteWithdrawItemsForLotExcludingFinished } = require('../utils/withdrawItemSnapshot');
-      await deleteWithdrawItemsForLotExcludingFinished(conn, lot_id);
+      // Keep open withdraw lines — lot_id SET NULL via FK; display uses snap_*
       await conn.query('DELETE FROM lots WHERE id = ?', [lot_id]);
     }
 

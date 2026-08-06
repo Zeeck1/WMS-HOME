@@ -44,6 +44,8 @@ import {
 
   groupWithdrawItemsByLine,
 
+  isWithdrawalFrozen,
+
 } from '../utils/withdrawItemGrouping';
 
 
@@ -119,34 +121,17 @@ function WithdrawReport() {
 
     const raw = data?.items || [];
 
-    let lines;
+    // Always keep the request's own lines so Manual delete/rename cannot erase them.
+    // Live inventory is only used to refresh stack display for open (non-finished) requests.
+    const lines = sortWithdrawItems(
+      [...raw],
+      sortByCsIn ? 'cs_in_date' : 'nearest'
+    );
 
-    if (data?.status === 'FINISHED' || data?.pick_route_saved) {
-
-      lines = sortWithdrawItems([...raw], sortByCsIn ? 'cs_in_date' : 'nearest');
-
-    } else if (sortMode === 'single_place' && inventory.length) {
-
-      lines = buildSinglePlaceReportFromStockSummary(raw, inventory);
-
-    } else if (sortByCsIn && inventory.length) {
-
-      lines = buildOldestLotReportFromStockSummary(raw, inventory);
-
-    } else if (inventory.length) {
-
-      lines = buildNearestLineReportFromStockSummary(raw, inventory);
-
-    } else {
-
-      lines = raw;
-
-    }
-
-    // Stack No must match the Manual page — resolve from live inventory (lot + line place)
+    if (isWithdrawalFrozen(data?.status)) return lines;
     return enrichWithdrawLinesFromInventory(lines, inventory);
 
-  }, [data, inventory, sortMode, sortByCsIn]);
+  }, [data, inventory, sortByCsIn]);
 
 
 

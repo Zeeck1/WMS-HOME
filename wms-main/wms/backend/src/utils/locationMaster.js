@@ -39,10 +39,13 @@ async function purgeDuplicateLocationsForLineStack(conn, keeperId, linePlace, st
       keeperId,
       row.id,
     ]);
-    await conn.query('UPDATE withdraw_items SET location_id = ? WHERE location_id = ?', [
-      keeperId,
-      row.id,
-    ]);
+    await conn.query(
+      `UPDATE withdraw_items wi
+       INNER JOIN withdraw_requests wr ON wr.id = wi.request_id
+       SET wi.location_id = ?
+       WHERE wi.location_id = ? AND wr.status != 'FINISHED'`,
+      [keeperId, row.id]
+    );
     if (await hardDeleteLocationIfUnused(conn, row.id)) removed += 1;
   }
   return removed;
