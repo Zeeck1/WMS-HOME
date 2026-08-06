@@ -12,6 +12,21 @@ const {
   dateToYYYYMMDDInBangkok,
   excelSerialToBangkokYYYYMMDD,
 } = require('../utils/bangkokTime');
+const { parseFlexibleLotDate } = require('../utils/flexibleLotDate');
+
+function parseExcelLotDate(raw) {
+  if (raw == null || raw === '') return null;
+  if (raw instanceof Date && !isNaN(raw.getTime())) {
+    return dateToYYYYMMDDInBangkok(raw);
+  }
+  const s = raw.toString().trim();
+  if (!s) return null;
+  const parsed = parseFlexibleLotDate(s, 'Date');
+  if (!parsed.error) return parsed.value;
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return dateToYYYYMMDDInBangkok(d);
+  return null;
+}
 
 /**
  * Parse MC / integer quantities from Excel. Fixes "1,277" → 1277 (parseInt alone yields 1).
@@ -362,43 +377,9 @@ router.post('/container-extra', upload.single('file'), async (req, res) => {
         if (location.isNew) locationsCreated++;
         else locationsReused++;
 
-        // 3. Parse dates
-        let productionDate = null;
-        if (productionDateRaw) {
-          const raw = productionDateRaw;
-          if (raw instanceof Date && !isNaN(raw.getTime())) {
-            productionDate = dateToYYYYMMDDInBangkok(raw);
-          } else {
-            const s = raw.toString().trim();
-            const mmY = s.match(/^(\d{1,2})[\/\-](\d{4})$/);
-            if (mmY) {
-              const mm = mmY[1].padStart(2, '0');
-              const yyyy = mmY[2];
-              productionDate = `${yyyy}-${mm}-01`;
-            } else {
-              const d = new Date(s);
-              if (!isNaN(d.getTime())) productionDate = dateToYYYYMMDDInBangkok(d);
-            }
-          }
-        }
-        let expirationDate = null;
-        if (expirationDateRaw) {
-          const raw = expirationDateRaw;
-          if (raw instanceof Date && !isNaN(raw.getTime())) {
-            expirationDate = dateToYYYYMMDDInBangkok(raw);
-          } else {
-            const s = raw.toString().trim();
-            const mmY = s.match(/^(\d{1,2})[\/\-](\d{4})$/);
-            if (mmY) {
-              const mm = mmY[1].padStart(2, '0');
-              const yyyy = mmY[2];
-              expirationDate = `${yyyy}-${mm}-01`;
-            } else {
-              const d = new Date(s);
-              if (!isNaN(d.getTime())) expirationDate = dateToYYYYMMDDInBangkok(d);
-            }
-          }
-        }
+        // 3. Parse dates (DD/MM/YYYY or MM/YYYY)
+        const productionDate = parseExcelLotDate(productionDateRaw);
+        const expirationDate = parseExcelLotDate(expirationDateRaw);
 
         // 4. Create lot with extra fields
         const lotNo = makeUniqueLotNo('CE', i);

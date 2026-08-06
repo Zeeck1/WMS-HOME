@@ -28,9 +28,8 @@ import {
   groupWithdrawItems,
   withdrawFishNameLabel,
   withdrawDisplayLineKey,
-  getManageDisplayItems,
+  getWithdrawPickDisplayItems,
   linesToPickRoutePayload,
-  appendSameFishAlternatives,
 } from '../utils/withdrawItemGrouping';
 
 /** Same labels as withdraw LINE: invoice (import), order no (extra), BULK + lot. */
@@ -124,7 +123,7 @@ function StockAvailabilityBadge({
 }) {
   if (isAlt) {
     return (
-      <span className="mg-stock-alt" title="Same fish available at this location">
+      <span className="mg-stock-alt" title="Suggested alternate location for the request shortfall">
         Available
       </span>
     );
@@ -184,7 +183,7 @@ function ManageWithdrawItemRow({
       <td>
         <strong>{item.fish_name}</strong>
         {isAlt && (
-          <span className="mg-alt-badge" title={`Same fish still available (requested ${item._altForLinePlace || 'location'} is Out)`}>
+          <span className="mg-alt-badge" title={`Covers up to ${item._altCoverMc || '—'} MC for request (${item._altForLinePlace || 'location'} is Out)`}>
             Alt
           </span>
         )}
@@ -198,7 +197,9 @@ function ManageWithdrawItemRow({
         </span>
       </td>
       <td className="num-cell">
-        <span className="mg-requested-val">{isAlt ? '—' : requestedMc}</span>
+        <span className="mg-requested-val">
+          {isAlt ? (item._altCoverMc ? item._altCoverMc : '—') : requestedMc}
+        </span>
       </td>
       <td className="num-cell">
         {isAlt ? (
@@ -453,31 +454,20 @@ function Manage() {
   const pickRouteDirty = pickRouteTab !== savedPickMode;
   const canUndoPickRoute = Boolean(expandedData?.pick_route_saved);
 
-  const useSavedPickLines = !(expandedData?.status === 'PENDING' && pickRouteDirty);
-
   const displayItems = useMemo(() => {
     if (!expandedData?.items) return [];
-    const lines = getManageDisplayItems(expandedData.items, inventory, pickRouteSortMode, editedQty, {
-      useSavedLines: useSavedPickLines,
-    });
-    // Out request locations stay visible; also list other locations that still have the same fish
-    if (expandedData.status === 'CANCELLED' || expandedData.status === 'FINISHED') {
-      return lines;
-    }
-    return appendSameFishAlternatives(lines, inventory, pickRouteSortMode);
-  }, [expandedData, inventory, pickRouteSortMode, useSavedPickLines, editedQty]);
+    return getWithdrawPickDisplayItems(expandedData, inventory, pickRouteSortMode, editedQty);
+  }, [expandedData, inventory, pickRouteSortMode, editedQty]);
 
   const baselineQtyByKey = useMemo(() => {
     if (!expandedData?.items) return {};
-    const baseline = getManageDisplayItems(expandedData.items, inventory, pickRouteSortMode, {}, {
-      useSavedLines: useSavedPickLines,
-    });
+    const baseline = getWithdrawPickDisplayItems(expandedData, inventory, pickRouteSortMode, {});
     const map = {};
     baseline.forEach((line) => {
       map[lineQtyKey(line)] = Number(line.quantity_mc);
     });
     return map;
-  }, [expandedData, inventory, pickRouteSortMode, useSavedPickLines]);
+  }, [expandedData, inventory, pickRouteSortMode]);
 
   const itemGroups = useMemo(
     () => groupWithdrawItems(displayItems, pickRouteSortMode),
@@ -692,7 +682,7 @@ function Manage() {
         getInventory({ merge_import_shipments: 1 }),
       ]);
       const sortMode = mode === 'fifo' ? 'cs_in_date' : 'nearest';
-      payloadLines = getManageDisplayItems(wRes.data.items, invRes.data || [], sortMode, {});
+      payloadLines = getWithdrawPickDisplayItems(wRes.data, invRes.data || [], sortMode, {});
     }
     await saveWithdrawalPickRoute(requestId, {
       mode,
@@ -779,8 +769,8 @@ function Manage() {
         await handleSaveQty(req.id);
       }
       if (req.status === 'PENDING' && config.next === 'TAKING_OUT') {
-        const routeLines = getManageDisplayItems(
-          expandedData.items,
+        const routeLines = getWithdrawPickDisplayItems(
+          expandedData,
           inventory,
           pickRouteSortMode,
           editedQty

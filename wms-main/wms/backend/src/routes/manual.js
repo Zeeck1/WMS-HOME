@@ -8,6 +8,7 @@ const {
   purgeDuplicateLocationsForLineStack,
   pruneLocationMasterAfterStockRemoved,
 } = require('../utils/locationMaster');
+const { parseFlexibleLotDate } = require('../utils/flexibleLotDate');
 
 const PRODUCT_FIELDS = ['fish_name', 'size', 'bulk_weight_kg', 'type', 'glazing', 'order_code'];
 const LOT_FIELDS = ['cs_in_date', 'sticker', 'remark', 'st_no', 'production_date', 'expiration_date'];
@@ -26,19 +27,6 @@ function parsePositiveInt(raw, label) {
     return { error: `${label} must be a positive whole number (1 or greater)` };
   }
   return { value: n };
-}
-
-function parseMonthDate(raw, label) {
-  if (raw == null || String(raw).trim() === '') return { value: null };
-  const s = String(raw).trim();
-  const iso = s.match(/^(\d{4})-(\d{2})(?:-\d{2})?$/);
-  const display = s.match(/^(\d{1,2})[/-](\d{4})$/);
-  const year = iso ? iso[1] : display?.[2];
-  const month = iso ? iso[2] : display?.[1]?.padStart(2, '0');
-  if (!year || !month || Number(month) < 1 || Number(month) > 12) {
-    return { error: `${label} must be a valid month` };
-  }
-  return { value: `${year}-${month}-01` };
 }
 
 /**
@@ -276,7 +264,7 @@ router.patch('/cell', authMiddleware, async (req, res) => {
     if (LOT_FIELDS.includes(field)) {
       let savedValue = value === '' ? null : value;
       if (field === 'production_date' || field === 'expiration_date') {
-        const parsed = parseMonthDate(value, field === 'production_date' ? 'Production month' : 'Expiration month');
+        const parsed = parseFlexibleLotDate(value, field === 'production_date' ? 'Production date' : 'Expiration date');
         if (parsed.error) return res.status(400).json({ error: parsed.error });
         savedValue = parsed.value;
       }
@@ -469,8 +457,8 @@ router.post('/row', authMiddleware, async (req, res) => {
     let productionDate = initial.production_date || csIn;
     let expirationDate = initial.expiration_date || null;
     if (String(stock_type).toUpperCase() === 'CONTAINER_EXTRA') {
-      const production = parseMonthDate(initial.production_date, 'Production month');
-      const expiration = parseMonthDate(initial.expiration_date, 'Expiration month');
+      const production = parseFlexibleLotDate(initial.production_date, 'Production date');
+      const expiration = parseFlexibleLotDate(initial.expiration_date, 'Expiration date');
       if (production.error || expiration.error) {
         await conn.rollback();
         return res.status(400).json({ error: production.error || expiration.error });

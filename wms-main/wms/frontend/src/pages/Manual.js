@@ -13,7 +13,7 @@ import {
   dedupeInventoryRows,
 } from '../utils/manualInventoryShared';
 import { useAuth } from '../context/AuthContext';
-import { toMonthInput } from '../utils/monthYearDate';
+import { formatFlexibleDateDisplay, parseFlexibleDateInput } from '../utils/monthYearDate';
 
 const normLotNoNumeric = (v) => String(v ?? '').replace(/\D/g, '');
 
@@ -124,63 +124,13 @@ const toDateOnly = (d) => {
   try { return dateToYYYYMMDDInBangkok(d); } catch { return ''; }
 };
 
-// For month/year inputs like "12/2024" stored as "YYYY-MM-01" in DB
-// Display rules:
-// - if only month/year (DB day is "01") => MM/YYYY
-// - if day exists => DD/MM/YYYY
-const toMonthYearDisplay = (d) => {
-  if (d == null || d === '') return '';
-  const s = String(d).trim();
-  // Already "MM/YYYY"
-  const mmY = s.match(/^(\d{1,2})[\/\-](\d{4})$/);
-  if (mmY) {
-    const mm = mmY[1].padStart(2, '0');
-    return `${mm}/${mmY[2]}`;
-  }
-  // "YYYY-MM-DD"
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (iso) {
-    const yyyy = iso[1];
-    const mm = iso[2];
-    const dd = iso[3];
-    if (dd === '01') return `${mm}/${yyyy}`;
-    return `${dd}/${mm}/${yyyy}`;
-  }
-  return s;
-};
-
-const parseMonthYearInput = (raw) => {
-  if (raw == null) return '';
-  const s = String(raw).trim();
-  if (!s) return '';
-  const nativeMonth = s.match(/^(\d{4})-(\d{2})$/);
-  if (nativeMonth) return `${nativeMonth[1]}-${nativeMonth[2]}-01`;
-  // "MM/YYYY" (or "M/YYYY")
-  const mmY = s.match(/^(\d{1,2})[\/\-](\d{4})$/);
-  if (mmY) {
-    const mm = mmY[1].padStart(2, '0');
-    const yyyy = mmY[2];
-    return `${yyyy}-${mm}-01`;
-  }
-  // "DD/MM/YYYY" (or "D/M/YYYY")
-  const ddmmyyyy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (ddmmyyyy) {
-    const dd = ddmmyyyy[1].padStart(2, '0');
-    const mm = ddmmyyyy[2].padStart(2, '0');
-    const yyyy = ddmmyyyy[3];
-    return `${yyyy}-${mm}-${dd}`;
-  }
-  // Allow already ISO dates
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  return s;
-};
+const FLEX_DATE_PLACEHOLDER = 'DD/MM/YYYY or MM/YYYY';
 
 const getCellDisplay = (row, col) => {
   if (col.formula) return (Number(row.bulk_weight_kg) || 0) * (Number(row.hand_on_balance_mc) || 0);
   const v = row[col.key];
   if (col.type === 'date') return toDateOnly(v);
-  if (col.type === 'month_year') return toMonthYearDisplay(v);
+  if (col.type === 'month_year') return formatFlexibleDateDisplay(v);
   if (col.field === 'lot_no_numeric') return normLotNoNumeric(v);
   if (col.key === 'stack_no' || col.key === 'stack_total') return formatStackField(v);
   if (col.type === 'number') return normNumberField(v);
@@ -196,7 +146,7 @@ function manualCellFilterValue(row, col) {
     return d || null;
   }
   if (col.type === 'month_year') {
-    const d = toMonthYearDisplay(v);
+    const d = formatFlexibleDateDisplay(v);
     return d || null;
   }
   if (col.field === 'lot_no_numeric') {
@@ -536,7 +486,7 @@ function Manual() {
       ? (col.type === 'date'
           ? toDateOnly(orig[col.key])
           : col.type === 'month_year'
-            ? parseMonthYearInput(orig[col.key])
+            ? parseFlexibleDateInput(orig[col.key])
             : col.field === 'lot_no_numeric'
               ? normLotNoNumeric(orig[col.key])
               : col.type === 'number'
@@ -546,7 +496,7 @@ function Manual() {
     const normNew = col.type === 'date'
       ? toDateOnly(newVal)
       : col.type === 'month_year'
-        ? parseMonthYearInput(newVal)
+        ? parseFlexibleDateInput(newVal)
         : col.field === 'lot_no_numeric'
           ? normLotNoNumeric(newVal)
           : col.type === 'number'
@@ -649,7 +599,7 @@ function Manual() {
       if (!prev) return prev;
       let v = rawVal;
       if (col.type === 'date') v = toDateOnly(rawVal);
-      else if (col.type === 'month_year') v = parseMonthYearInput(rawVal);
+      else if (col.type === 'month_year') v = parseFlexibleDateInput(rawVal);
       else if (col.field === 'lot_no_numeric') v = normLotNoNumeric(rawVal);
       else if (col.type === 'number') v = normNumberField(rawVal);
       else v = String(rawVal ?? '');
@@ -769,7 +719,7 @@ function Manual() {
         const origVal = col.type === 'date'
           ? toDateOnly(origRow[col.key])
           : col.type === 'month_year'
-            ? parseMonthYearInput(origRow[col.key])
+            ? parseFlexibleDateInput(origRow[col.key])
             : col.field === 'lot_no_numeric'
               ? normLotNoNumeric(origRow[col.key])
               : col.type === 'number'
@@ -778,7 +728,7 @@ function Manual() {
         const reverted = col.type === 'date'
           ? toDateOnly(action.oldValue)
           : col.type === 'month_year'
-            ? parseMonthYearInput(action.oldValue)
+            ? parseFlexibleDateInput(action.oldValue)
             : col.field === 'lot_no_numeric'
               ? normLotNoNumeric(action.oldValue)
               : col.type === 'number'
@@ -1153,7 +1103,7 @@ function Manual() {
                     const valNormalized = col.type === 'date'
                       ? toDateOnly(draftRow[col.key])
                       : col.type === 'month_year'
-                        ? parseMonthYearInput(draftRow[col.key])
+                        ? parseFlexibleDateInput(draftRow[col.key])
                         : col.field === 'lot_no_numeric'
                           ? normLotNoNumeric(draftRow[col.key])
                           : (col.key === 'stack_no' || col.key === 'stack_total')
@@ -1162,7 +1112,7 @@ function Manual() {
                               ? normNumberField(draftRow[col.key])
                               : (draftRow[col.key] ?? '');
                     const inputDisplayVal = col.type === 'month_year'
-                      ? toMonthInput(draftRow[col.key])
+                      ? formatFlexibleDateDisplay(draftRow[col.key])
                       : col.field === 'lot_no_numeric'
                         ? normLotNoNumeric(draftRow[col.key])
                         : (col.key === 'stack_no' || col.key === 'stack_total')
@@ -1174,14 +1124,20 @@ function Manual() {
                       <td key={col.key} className="ms-cell ms-cell-ed ms-draft-cell">
                         <input
                           className={`ms-input ${col.type === 'number' || col.field === 'lot_no_numeric' ? 'ms-input-num' : ''}`}
-                          type={col.type === 'month_year' ? 'month' : col.type === 'date' ? 'date' : col.type === 'number' ? 'number' : 'text'}
+                          type={col.type === 'date' ? 'date' : col.type === 'number' ? 'number' : 'text'}
                           inputMode={col.field === 'lot_no_numeric' ? 'numeric' : undefined}
                           value={inputDisplayVal}
                           onChange={e => handleDraftFieldChange(col, e.target.value)}
                           onKeyDown={e => {
                             if (e.key === 'Tab' || e.key === 'Enter') e.currentTarget.blur();
                           }}
-                          placeholder={col.key === 'line_place' ? 'e.g. B01R-1' : undefined}
+                          placeholder={
+                            col.key === 'line_place'
+                              ? 'e.g. B01R-1'
+                              : col.type === 'month_year'
+                                ? FLEX_DATE_PLACEHOLDER
+                                : undefined
+                          }
                         />
                         <span className="only-print-ms">{manualPrintCellText(draftRow, col)}</span>
                       </td>
@@ -1227,7 +1183,7 @@ function Manual() {
                       const valNormalized = col.type === 'date'
                         ? toDateOnly(row[col.key])
                         : col.type === 'month_year'
-                          ? parseMonthYearInput(row[col.key])
+                          ? parseFlexibleDateInput(row[col.key])
                           : col.field === 'lot_no_numeric'
                             ? normLotNoNumeric(row[col.key])
                             : (col.key === 'stack_no' || col.key === 'stack_total')
@@ -1239,7 +1195,7 @@ function Manual() {
                         ? (col.type === 'date'
                             ? toDateOnly(orig[col.key])
                             : col.type === 'month_year'
-                              ? parseMonthYearInput(orig[col.key])
+                              ? parseFlexibleDateInput(orig[col.key])
                               : col.field === 'lot_no_numeric'
                                 ? normLotNoNumeric(orig[col.key])
                                 : (col.key === 'stack_no' || col.key === 'stack_total')
@@ -1250,7 +1206,7 @@ function Manual() {
                         : valNormalized;
                       const isChanged = String(valNormalized) !== String(origValNormalized);
                       const inputDisplayVal = col.type === 'month_year'
-                        ? toMonthInput(row[col.key])
+                        ? formatFlexibleDateDisplay(row[col.key])
                         : col.field === 'lot_no_numeric'
                           ? normLotNoNumeric(row[col.key])
                           : (col.key === 'stack_no' || col.key === 'stack_total')
@@ -1262,13 +1218,14 @@ function Manual() {
                         <td key={col.key} className={`ms-cell ms-cell-ed ${isActive ? 'ms-cell-active' : ''} ${isChanged ? 'ms-cell-dirty' : ''}`}>
                           <input
                             className={`ms-input ${col.type === 'number' || col.field === 'lot_no_numeric' ? 'ms-input-num' : ''}`}
-                            type={col.type === 'month_year' ? 'month' : col.type === 'date' ? 'date' : col.type === 'number' ? 'number' : 'text'}
+                            type={col.type === 'date' ? 'date' : col.type === 'number' ? 'number' : 'text'}
                             inputMode={col.field === 'lot_no_numeric' ? 'numeric' : undefined}
                             value={inputDisplayVal}
                             onChange={e => handleCellChange(fullIdx, col, e.target.value)}
                             onKeyDown={e => {
                               if (e.key === 'Tab' || e.key === 'Enter') e.currentTarget.blur();
                             }}
+                            placeholder={col.type === 'month_year' ? FLEX_DATE_PLACEHOLDER : undefined}
                           />
                           <span className="only-print-ms">{manualPrintCellText(row, col)}</span>
                           {isActive && (

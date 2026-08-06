@@ -5,7 +5,7 @@ import {
   updateWithdrawalStatus,
 } from '../services/api';
 import {
-  getManageDisplayItems,
+  getWithdrawPickDisplayItems,
   linesToPickRoutePayload,
 } from './withdrawItemGrouping';
 
@@ -26,7 +26,7 @@ export async function approveWithdrawalToTakingOut(requestId, managedBy) {
   const inventory = invRes.data || [];
   const pickRouteTab = data.pick_route_saved ? (data.pick_route_mode || 'nearest') : 'nearest';
   const sortMode = pickRouteTab === 'fifo' ? 'cs_in_date' : 'nearest';
-  const routeLines = getManageDisplayItems(data.items, inventory, sortMode, {});
+  const routeLines = getWithdrawPickDisplayItems(data, inventory, sortMode, {});
 
   await saveWithdrawalPickRoute(requestId, {
     mode: pickRouteTab,

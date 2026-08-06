@@ -17,35 +17,15 @@ import { bangkokLocaleDateString } from '../utils/bangkokTime';
 import { fetchManualInventoryAllTabs } from '../utils/manualInventoryShared';
 
 import {
-
   requestedMc,
-
   actualMc,
-
   groupWithdrawItems,
-
-  buildOldestLotReportFromStockSummary,
-
-  buildNearestLineReportFromStockSummary,
-
-  buildSinglePlaceReportFromStockSummary,
-
-  sortWithdrawItems,
-
+  getWithdrawReportItems,
   withdrawFishNameLabel,
-
   formatWithdrawCsInDate,
-
   oldestCsInDateInGroup,
-
   withdrawLineStackNo,
-
-  enrichWithdrawLinesFromInventory,
-
   groupWithdrawItemsByLine,
-
-  isWithdrawalFrozen,
-
 } from '../utils/withdrawItemGrouping';
 
 
@@ -118,20 +98,8 @@ function WithdrawReport() {
   const sortByCsIn = sortMode === 'cs_in_date';
 
   const reportItems = useMemo(() => {
-
-    const raw = data?.items || [];
-
-    // Always keep the request's own lines so Manual delete/rename cannot erase them.
-    // Live inventory is only used to refresh stack display for open (non-finished) requests.
-    const lines = sortWithdrawItems(
-      [...raw],
-      sortByCsIn ? 'cs_in_date' : 'nearest'
-    );
-
-    if (isWithdrawalFrozen(data?.status)) return lines;
-    return enrichWithdrawLinesFromInventory(lines, inventory);
-
-  }, [data, inventory, sortByCsIn]);
+    return getWithdrawReportItems(data, inventory, sortMode);
+  }, [data, inventory, sortMode]);
 
 
 

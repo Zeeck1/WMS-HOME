@@ -387,8 +387,16 @@ function lineLocationOccupiedKey(line) {
 }
 
 /**
+ * Alt location suggestions only while planning a PENDING request (not during pick or after finish).
+ */
+export function shouldShowWithdrawAltSuggestions(status) {
+  return status === 'PENDING';
+}
+
+/**
  * When a requested location is Out, append other inventory lines that still have the same fish.
- * Suggestion-only rows (_altSuggestion) — shown on Manage, not saved as request lines.
+ * Suggestion-only rows (_altSuggestion) — shown on Manage while PENDING only, not saved as request lines.
+ * Only lists enough locations to cover the request shortfall (not every same-fish location).
  */
 export function appendSameFishAlternatives(lines, inventory, sortMode = 'nearest') {
   const base = [...(lines || [])];
@@ -401,7 +409,8 @@ export function appendSameFishAlternatives(lines, inventory, sortMode = 'nearest
   for (const line of base) {
     if (line._altSuggestion) continue;
     const balance = Number(line.hand_on_balance ?? 0);
-    if (balance > 0) continue;
+    const need = Math.max(0, requestedMc(line) - balance);
+    if (need <= 0) continue;
 
     const pk = sameFishKey(line);
     if (!String(line.fish_name || '').trim()) continue;
@@ -415,16 +424,23 @@ export function appendSameFishAlternatives(lines, inventory, sortMode = 'nearest
     });
 
     const sorted = sortWithdrawItems(alts, sortMode);
+    let remaining = need;
     for (const inv of sorted) {
+      if (remaining <= 0) break;
       const key = lineLocationOccupiedKey(inv);
       if (!key || occupied.has(key)) continue;
+      const avail = Number(inv.hand_on_balance_mc) || 0;
+      if (avail <= 0) continue;
+      const take = Math.min(remaining, avail);
       occupied.add(key);
+      remaining -= take;
       extras.push({
         ...inv,
         id: null,
         _altSuggestion: true,
         _altForItemId: line.id ?? null,
         _altForLinePlace: line.line_place || '',
+        _altCoverMc: take,
         fish_name: inv.fish_name ?? line.fish_name,
         size: inv.size ?? line.size,
         bulk_weight_kg: inv.bulk_weight_kg ?? line.bulk_weight_kg,
@@ -436,7 +452,7 @@ export function appendSameFishAlternatives(lines, inventory, sortMode = 'nearest
         production_process: line.production_process || '',
         requested_mc: 0,
         quantity_mc: 0,
-        hand_on_balance: Number(inv.hand_on_balance_mc) || 0,
+        hand_on_balance: avail,
         lot_id: inv.lot_id ?? null,
         location_id: inv.location_id ?? null,
         import_item_id: inv._imp_item_id ?? null,
@@ -445,7 +461,6 @@ export function appendSameFishAlternatives(lines, inventory, sortMode = 'nearest
   }
 
   if (!extras.length) return base;
-  // Keep original request order; append alternatives after their product group by sorting together
   return sortWithdrawItems([...base, ...extras], sortMode);
 }
 
@@ -459,41 +474,82 @@ export function applyEditedQtyToWithdrawList(withdrawItems, editedQtyByKey = {})
 }
 
 /**
- * Manage / report display lines for current pick-route tab.
- * @param {Record<string, number>} [editedQtyByKey] — keyed by withdrawDisplayLineKey
+ * Manage / report pick lines from live Stock Summary (open requests)
+ * or saved snapshot (FINISHED). Omits locations with no stock left.
  */
-export function getManageDisplayItems(withdrawItems, inventory, sortMode, editedQtyByKey = {}, options = {}) {
-  const { useSavedLines = false } = options;
-  const itemsForAlloc = applyEditedQtyToWithdrawList(withdrawItems, editedQtyByKey);
+export function getWithdrawPickDisplayItems(withdrawal, inventory, sortMode = 'nearest', editedQtyByKey = {}) {
+  const raw = (withdrawal?.items || []).filter((it) => !it._altSuggestion);
+  if (!raw.length) return [];
+
+  const itemsForAlloc = applyEditedQtyToWithdrawList(raw, editedQtyByKey);
+  const stockSort = sortMode === 'cs_in_date' ? 'cs_in_date' : 'nearest';
+  const inv = inventory || [];
+
   let lines;
-  if (useSavedLines) {
-    lines = sortWithdrawItems([...itemsForAlloc], sortMode);
-  } else if (sortMode === 'cs_in_date' && inventory?.length) {
-    lines = buildOldestLotReportFromStockSummary(itemsForAlloc, inventory);
-  } else if (inventory?.length) {
-    lines = buildNearestLineReportFromStockSummary(itemsForAlloc, inventory);
+  if (isWithdrawalFrozen(withdrawal?.status)) {
+    lines = sortWithdrawItems([...itemsForAlloc], stockSort);
+  } else if (!inv.length) {
+    lines = sortWithdrawItems([...itemsForAlloc], stockSort);
+  } else if (sortMode === 'single_place') {
+    lines = buildSinglePlaceReportFromStockSummary(itemsForAlloc, inv);
+  } else if (sortMode === 'cs_in_date') {
+    lines = buildOldestLotReportFromStockSummary(itemsForAlloc, inv);
   } else {
-    lines = sortWithdrawItems([...itemsForAlloc], 'nearest');
+    lines = buildNearestLineReportFromStockSummary(itemsForAlloc, inv);
   }
+
+  if (!isWithdrawalFrozen(withdrawal?.status) && inv.length) {
+    lines = lines.filter((line) => {
+      const match = findInventoryRowForWithdrawLine(line, inv);
+      if (!match) return false;
+      if (sameFishKey(match) !== sameFishKey(line)) return false;
+      return Number(match.hand_on_balance_mc) > 0;
+    });
+  }
+
   return lines.map((line) => {
     const key = withdrawDisplayLineKey(line);
     const reqMc = requestedMc(line);
-    const actMc = editedQtyByKey[key] !== undefined ? Number(editedQtyByKey[key]) : actualMc(line);
+    const actMcVal = editedQtyByKey[key] !== undefined ? Number(editedQtyByKey[key]) : actualMc(line);
     return {
       ...line,
       _lineKey: key,
-      hand_on_balance: inventoryBalanceForLine(inventory, line),
+      hand_on_balance: inventoryBalanceForLine(inv, line),
       requested_mc: reqMc,
-      quantity_mc: actMc,
+      quantity_mc: actMcVal,
       reqMc,
-      actMc,
+      actMc: actMcVal,
     };
   });
 }
 
+/**
+ * Manage / report display lines for current pick-route tab.
+ * @deprecated Prefer getWithdrawPickDisplayItems — kept for callers passing items only.
+ */
+export function getManageDisplayItems(withdrawItems, inventory, sortMode, editedQtyByKey = {}, options = {}) {
+  return getWithdrawPickDisplayItems(
+    { items: withdrawItems, status: options.status },
+    inventory,
+    sortMode,
+    editedQtyByKey
+  );
+}
+
+/**
+ * Stock Report lines: FINISHED requests keep saved snapshot lines.
+ * Open requests allocate from live Stock Summary (nearest / FIFO / single place)
+ * and omit original request locations that no longer have stock.
+ */
+export function getWithdrawReportItems(withdrawal, inventory, sortMode = 'nearest') {
+  return getWithdrawPickDisplayItems(withdrawal, inventory, sortMode, {});
+}
+
 /** Payload for PUT /withdrawals/:id/pick-route */
 export function linesToPickRoutePayload(lines) {
-  return (lines || []).map((line) => {
+  return (lines || [])
+    .filter((line) => !line._altSuggestion)
+    .map((line) => {
     const qty = actualMc(line);
     const req = requestedMc(line);
     const weightKg = qty * Number(line.bulk_weight_kg || 0);

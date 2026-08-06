@@ -18,6 +18,7 @@ import {
   dedupeInventoryRows,
   inventoryRowKey,
 } from '../utils/manualInventoryShared';
+import { formatFlexibleDateDisplay } from '../utils/monthYearDate';
 
 const TABS = [
   { id: 'BULK', label: 'Bulk', icon: <FiPackage /> },
@@ -73,36 +74,6 @@ const CE_IMPORT_COLUMNS = [
 ];
 
 const BULK_AGGREGATE_KEYS = ['old_balance_mc', 'new_income_mc', 'hand_on_balance_mc', 'hand_on_balance_kg'];
-
-// Month/year dates from Excel like "12/2024" are stored in DB as "YYYY-MM-01".
-// Display rules:
-// - if only month/year (DB day is "01") => MM/YYYY
-// - if day exists => DD/MM/YYYY
-const formatMonthYearDisplay = (v) => {
-  if (v == null || v === '') return v;
-  const s = String(v).trim();
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (iso) {
-    const yyyy = iso[1];
-    const mm = iso[2];
-    const dd = iso[3];
-    if (dd === '01') return `${mm}/${yyyy}`;
-    return `${dd}/${mm}/${yyyy}`;
-  }
-  const mmY = s.match(/^(\d{1,2})[\/\-](\d{4})$/);
-  if (mmY) {
-    const mm = mmY[1].padStart(2, '0');
-    return `${mm}/${mmY[2]}`;
-  }
-  const ddmmyyyy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (ddmmyyyy) {
-    const dd = ddmmyyyy[1].padStart(2, '0');
-    const mm = ddmmyyyy[2].padStart(2, '0');
-    const yyyy = ddmmyyyy[3];
-    return `${dd}/${mm}/${yyyy}`;
-  }
-  return s;
-};
 
 // ISO date YYYY-MM-DD => DD/MM/YYYY (for IMPORT Arrival Date)
 const formatISODateToDMY = (v) => {
@@ -246,8 +217,8 @@ function StockTable() {
         return {
           ...base,
           cs_in_date: isImport ? formatISODateToDMY(base.cs_in_date) : base.cs_in_date,
-          production_date: formatMonthYearDisplay(base.production_date),
-          expiration_date: formatMonthYearDisplay(base.expiration_date),
+          production_date: formatFlexibleDateDisplay(base.production_date),
+          expiration_date: formatFlexibleDateDisplay(base.expiration_date),
         };
       });
       setInventory(normalized);
