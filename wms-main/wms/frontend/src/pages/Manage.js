@@ -5,7 +5,7 @@ import {
   FiMapPin, FiCalendar, FiRotateCcw, FiSave, FiPlus, FiEdit3
 } from 'react-icons/fi';
 import {
-  STATUS_FLOW, STATUS_CONFIG, withdrawDeptBadgeClass,
+  STATUS_FLOW, STATUS_CONFIG, withdrawDeptBadgeClass, isWithdrawStopped,
   loadWithdrawApproverName, saveWithdrawApproverName,
 } from './manageShared';
 import { toast } from 'react-toastify';
@@ -21,8 +21,8 @@ import {
   bangkokYYYYMMDD,
   bangkokYMDYesterday,
   bangkokLocaleDateString,
-  bangkokLocaleString,
   dateToYYYYMMDDInBangkok,
+  formatWithdrawRequestedAt,
 } from '../utils/bangkokTime';
 import {
   groupWithdrawItems,
@@ -500,7 +500,7 @@ function Manage() {
 
       if (items.length === 0) return;
       const lineMessage = formatWithdrawalQtyChangeLineMessage(expandedData, displayItems, editedQty);
-      if (isSuperadmin && expandedData?.status !== 'CANCELLED') {
+      if (isSuperadmin && !isWithdrawStopped(expandedData?.status)) {
         const res = await superadminStockAdjustWithdrawal(requestId, { items });
         toast.success(res.data?.message || 'Stock amounts updated');
       } else {
@@ -954,10 +954,10 @@ function Manage() {
               const config = STATUS_CONFIG[req.status];
               const isExpanded = expandedId === req.id;
               const isProcessing = processing === req.id;
-              const canAdvance = config?.next && req.status !== 'CANCELLED';
-              const canCancel = req.status !== 'FINISHED' && req.status !== 'CANCELLED';
+              const canAdvance = config?.next && !isWithdrawStopped(req.status);
+              const canCancel = req.status !== 'FINISHED' && !isWithdrawStopped(req.status);
               // Superadmin may still flip Actual Out / Not Actual Out after FINISHED (syncs stock records)
-              const canSelectOutMode = req.status !== 'CANCELLED'
+              const canSelectOutMode = !isWithdrawStopped(req.status)
                 && (req.status !== 'FINISHED' || isSuperadmin);
               // Print-form actual columns can be chosen from Ready onward, even when Finished
               const canSelectFormActual = req.status === 'READY' || req.status === 'FINISHED';
@@ -980,7 +980,7 @@ function Manage() {
                         {req.manual_adjust ? (
                           <span className="mg-manual-badge" title="Manual adjust — no stock deduction"><FiEdit3 /> Manual</span>
                         ) : null}
-                        <span className="mg-req-date">{bangkokLocaleString(new Date(req.created_at))}</span>
+                        <span className="mg-req-date">{formatWithdrawRequestedAt(req)}</span>
                       </div>
                     </div>
                     <div className="mg-req-right">
@@ -998,8 +998,8 @@ function Manage() {
                   <div className="mg-progress">
                     {STATUS_FLOW.map((s, i) => {
                       const currentIdx = STATUS_FLOW.indexOf(req.status);
-                      const isDone = i <= currentIdx && req.status !== 'CANCELLED';
-                      const isCurrent = i === currentIdx && req.status !== 'CANCELLED';
+                      const isDone = i <= currentIdx && !isWithdrawStopped(req.status);
+                      const isCurrent = i === currentIdx && !isWithdrawStopped(req.status);
                       return (
                         <React.Fragment key={s}>
                           <div className={`mg-progress-step ${isDone ? 'done' : ''} ${isCurrent ? 'current' : ''}`}>
@@ -1009,7 +1009,7 @@ function Manage() {
                             <span className="mg-progress-label">{STATUS_CONFIG[s].label}</span>
                           </div>
                           {i < STATUS_FLOW.length - 1 && (
-                            <div className={`mg-progress-line ${i < currentIdx && req.status !== 'CANCELLED' ? 'done' : ''}`} />
+                            <div className={`mg-progress-line ${i < currentIdx && !isWithdrawStopped(req.status) ? 'done' : ''}`} />
                           )}
                         </React.Fragment>
                       );
@@ -1020,7 +1020,7 @@ function Manage() {
                   {isExpanded && expandedData && (
                     <div className="mg-req-detail">
                       <div className="mg-detail-items">
-                        {isSuperadmin && req.status !== 'CANCELLED' && (
+                        {isSuperadmin && !isWithdrawStopped(req.status) && (
                           <p className="mg-superadmin-stock-hint">
                             <strong>Superadmin:</strong> Actual MC can be adjusted without stock balance limits
                             {req.status === 'FINISHED' ? ' — saving updates linked stock OUT records' : ''}.
@@ -1175,8 +1175,8 @@ function Manage() {
                             {(() => {
                               let rowNum = 0;
                               const isQtyEditable = req.status === 'PENDING' || req.status === 'TAKING_OUT'
-                                || (isSuperadmin && req.status !== 'CANCELLED');
-                              const unlimitedQty = isSuperadmin && req.status !== 'CANCELLED';
+                                || (isSuperadmin && !isWithdrawStopped(req.status));
+                              const unlimitedQty = isSuperadmin && !isWithdrawStopped(req.status);
                               return itemGroups.flatMap((group) => {
                                 const requestLines = group.lines.filter((item) => !item._altSuggestion);
                                 const altLines = group.lines.filter((item) => item._altSuggestion);
@@ -1639,7 +1639,7 @@ function Manage() {
                         >
                           <FiPrinter /> Print Form
                         </button>
-                        {((req.status === 'PENDING' || req.status === 'TAKING_OUT' || (isSuperadmin && req.status !== 'CANCELLED')) && hasQtyChanges) && (
+                        {((req.status === 'PENDING' || req.status === 'TAKING_OUT' || (isSuperadmin && !isWithdrawStopped(req.status))) && hasQtyChanges) && (
                           <button
                             className="btn btn-warning"
                             onClick={() => handleSaveQty(req.id)}

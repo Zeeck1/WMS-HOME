@@ -52,6 +52,47 @@ export function bangkokHHMM(date = new Date()) {
   return `${get('hour')}:${get('minute')}`;
 }
 
+export function bangkokHHMMSS(date = new Date()) {
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: BANGKOK_TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(date);
+  const get = (t) => parts.find((p) => p.type === t)?.value ?? '';
+  return `${get('hour')}:${get('minute')}:${get('second')}`;
+}
+
+function normalizeRequestTime(raw) {
+  if (raw == null || raw === '') return '';
+  const s = String(raw).trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return '';
+  return `${m[1].padStart(2, '0')}:${m[2]}:${m[3] || '00'}`;
+}
+
+/**
+ * Exact requested withdraw datetime: DD/MM/YYYY HH:MM:SS
+ * Uses withdraw_date + request_time when set, otherwise created_at.
+ */
+export function formatWithdrawRequestedAt(row) {
+  if (!row) return '';
+  const dateYmd = row.withdraw_date
+    ? dateToYYYYMMDDInBangkok(row.withdraw_date)
+    : (row.created_at ? dateToYYYYMMDDInBangkok(row.created_at) : '');
+  let time = normalizeRequestTime(row.request_time);
+  if (!time && row.created_at) {
+    const d = new Date(row.created_at);
+    if (!Number.isNaN(d.getTime())) time = bangkokHHMMSS(d);
+  }
+  if (!dateYmd) return time;
+  const [y, m, d] = dateYmd.split('-');
+  const dateStr = `${d}/${m}/${y}`;
+  return time ? `${dateStr} ${time}` : dateStr;
+}
+
 export function bangkokLocaleString(date = new Date(), options = {}) {
   return date.toLocaleString('en-GB', { timeZone: BANGKOK_TZ, ...options });
 }

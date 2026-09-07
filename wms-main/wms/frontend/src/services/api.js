@@ -85,6 +85,10 @@ export const saveWithdrawalPickRoute = (id, data) => api.put(`/withdrawals/${id}
 export const undoWithdrawalPickRoute = (id) => api.post(`/withdrawals/${id}/undo-pick-route`);
 export const updateWithdrawalStatus = (id, data) => api.put(`/withdrawals/${id}/status`, data);
 export const cancelWithdrawal = (id) => api.delete(`/withdrawals/${id}`);
+/** Approval: reject — keep visible, block next process */
+export const rejectWithdrawal = (id) => api.put(`/withdrawals/${id}/reject`, {}, withAuth());
+/** Approval: permanently delete request and all linked data */
+export const purgeWithdrawal = (id) => api.delete(`/withdrawals/${id}/purge`, withAuth());
 /** Superadmin: add a new item to a withdrawal in TAKING_OUT state */
 export const addWithdrawalItem = (id, data) => api.post(`/withdrawals/${id}/add-item`, data, withAuth());
 /** Superadmin: remove request and all linked stock-out / import-out rows everywhere */

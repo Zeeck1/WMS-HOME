@@ -12,7 +12,7 @@ import { jsPDF } from 'jspdf';
 
 import { getWithdrawal, getInventory } from '../services/api';
 
-import { bangkokLocaleDateString } from '../utils/bangkokTime';
+import { formatWithdrawRequestedAt } from '../utils/bangkokTime';
 
 import { fetchManualInventoryAllTabs } from '../utils/manualInventoryShared';
 
@@ -323,7 +323,7 @@ function WithdrawReport() {
 
               <span><strong>Department:</strong> {data.department}</span>
 
-              <span><strong>Date:</strong> {bangkokLocaleDateString(new Date(data.withdraw_date || data.created_at), { day: '2-digit', month: '2-digit', year: 'numeric' })}</span>
+              <span><strong>Requested:</strong> {formatWithdrawRequestedAt(data)}</span>
 
               <span><strong>Status:</strong> {data.status}</span>
 

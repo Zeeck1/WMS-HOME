@@ -9,8 +9,13 @@ export const STATUS_CONFIG = {
   TAKING_OUT:  { label: 'Taking Out',      icon: <FiTruck />,       color: '#3b82f6', bg: '#eff6ff', next: 'READY',      nextLabel: 'Mark as Ready' },
   READY:       { label: 'Ready to Take',   icon: <FiPackage />,     color: '#8b5cf6', bg: '#f5f3ff', next: 'FINISHED',   nextLabel: 'Finish Take Out' },
   FINISHED:    { label: 'Finished',         icon: <FiCheckCircle />, color: '#22c55e', bg: '#f0fdf4', next: null,         nextLabel: null },
+  REJECTED:    { label: 'Rejected',         icon: <FiXCircle />,    color: '#b45309', bg: '#fffbeb', next: null,         nextLabel: null },
   CANCELLED:   { label: 'Cancelled',        icon: <FiXCircle />,    color: '#ef4444', bg: '#fef2f2', next: null,         nextLabel: null },
 };
+
+export function isWithdrawStopped(status) {
+  return status === 'CANCELLED' || status === 'REJECTED';
+}
 
 /** Shared localStorage key — Approval page & Manage page use the same approver / manager name. */
 export const WITHDRAW_APPROVER_STORAGE_KEY = 'wms_withdraw_approver_name';

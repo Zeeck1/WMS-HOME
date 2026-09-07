@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   FiCheckCircle, FiSearch, FiRefreshCw, FiUser,
-  FiPrinter, FiShield, FiX, FiAlertCircle, FiCopy
+  FiPrinter, FiShield, FiX, FiAlertCircle, FiCopy, FiXCircle, FiTrash2
 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { copyWithdrawFormImageToClipboard } from '../utils/captureWithdrawFormImage';
-import { getWithdrawals, getWithdrawal } from '../services/api';
+import { getWithdrawals, getWithdrawal, rejectWithdrawal, purgeWithdrawal } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { approveWithdrawalToTakingOut } from '../utils/withdrawApprove';
 import WithdrawFormPrint from '../components/WithdrawFormPrint';
 import {
-  STATUS_CONFIG, withdrawDeptBadgeClass,
+  STATUS_CONFIG, withdrawDeptBadgeClass, isWithdrawStopped,
   loadWithdrawApproverName, saveWithdrawApproverName,
 } from './manageShared';
 import {
@@ -18,9 +18,10 @@ import {
   bangkokYMDYesterday,
   bangkokLocaleDateString,
   dateToYYYYMMDDInBangkok,
+  formatWithdrawRequestedAt,
 } from '../utils/bangkokTime';
 
-const STATUS_TABS = ['PENDING', 'ALL', 'TAKING_OUT', 'READY', 'FINISHED'];
+const STATUS_TABS = ['PENDING', 'REJECTED', 'ALL', 'TAKING_OUT', 'READY', 'FINISHED'];
 
 export default function Approval() {
   const { user } = useAuth();
@@ -36,7 +37,7 @@ export default function Approval() {
   const [selectedData, setSelectedData] = useState(null);
   const [loadingForm, setLoadingForm] = useState(false);
   const [processingId, setProcessingId] = useState(null);
-  const [confirmModal, setConfirmModal] = useState(null);
+  const [confirmModal, setConfirmModal] = useState(null); // { action: 'approve'|'reject'|'delete', req }
   const [copyingImage, setCopyingImage] = useState(false);
   const formRef = useRef(null);
 
@@ -131,25 +132,82 @@ export default function Approval() {
       toast.error('Only pending requests can be approved');
       return;
     }
-    setConfirmModal(req);
+    setConfirmModal({ action: 'approve', req });
+  };
+
+  const openRejectModal = (req) => {
+    if (req.status === 'FINISHED') {
+      toast.error('Finished requests cannot be rejected');
+      return;
+    }
+    if (isWithdrawStopped(req.status)) {
+      toast.error('This request is already rejected or cancelled');
+      return;
+    }
+    setConfirmModal({ action: 'reject', req });
+  };
+
+  const openDeleteModal = (req) => {
+    setConfirmModal({ action: 'delete', req });
   };
 
   const executeApprove = async () => {
-    if (!confirmModal) return;
+    const req = confirmModal?.req;
+    if (!req) return;
     const name = approverName.trim();
-    setProcessingId(confirmModal.id);
+    setProcessingId(req.id);
     try {
       persistApproverName(name);
-      await approveWithdrawalToTakingOut(confirmModal.id, name);
-      toast.success(`อนุมัติแล้ว — ${confirmModal.request_no} moved to Taking Out`);
+      await approveWithdrawalToTakingOut(req.id, name);
+      toast.success(`อนุมัติแล้ว — ${req.request_no} moved to Taking Out`);
       setConfirmModal(null);
-      if (selectedId === confirmModal.id) {
-        const res = await getWithdrawal(confirmModal.id);
+      if (selectedId === req.id) {
+        const res = await getWithdrawal(req.id);
         setSelectedData(res.data);
       }
       fetchRequests();
     } catch (err) {
       toast.error(err.response?.data?.error || err.message || 'Failed to approve');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const executeReject = async () => {
+    const req = confirmModal?.req;
+    if (!req) return;
+    setProcessingId(req.id);
+    try {
+      await rejectWithdrawal(req.id);
+      toast.success(`ปฏิเสธแล้ว — ${req.request_no} stays visible and cannot go to the next process`);
+      setConfirmModal(null);
+      if (selectedId === req.id) {
+        const res = await getWithdrawal(req.id);
+        setSelectedData(res.data);
+      }
+      fetchRequests();
+    } catch (err) {
+      toast.error(err.response?.data?.error || err.message || 'Failed to reject');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const executeDelete = async () => {
+    const req = confirmModal?.req;
+    if (!req) return;
+    setProcessingId(req.id);
+    try {
+      await purgeWithdrawal(req.id);
+      toast.success(`ลบแล้ว — ${req.request_no} deleted from the database`);
+      setConfirmModal(null);
+      if (selectedId === req.id) {
+        setSelectedId(null);
+        setSelectedData(null);
+      }
+      fetchRequests();
+    } catch (err) {
+      toast.error(err.response?.data?.error || err.message || 'Failed to delete');
     } finally {
       setProcessingId(null);
     }
@@ -186,8 +244,13 @@ export default function Approval() {
 
   const todayStr = bangkokYYYYMMDD();
   const yesterdayStr = bangkokYMDYesterday();
-  const selectedReq = filtered.find((r) => r.id === selectedId);
+  const selectedReq = filtered.find((r) => r.id === selectedId) || (selectedData ? { id: selectedData.id, status: selectedData.status, request_no: selectedData.request_no, department: selectedData.department } : null);
   const isSelectedPending = selectedReq?.status === 'PENDING';
+  const canRejectSelected = selectedReq && selectedReq.status !== 'FINISHED' && !isWithdrawStopped(selectedReq.status);
+  const canDeleteSelected = Boolean(selectedReq);
+  const modalReq = confirmModal?.req;
+  const isRejectModal = confirmModal?.action === 'reject';
+  const isDeleteModal = confirmModal?.action === 'delete';
 
   return (
     <div className="ap-page">
@@ -315,6 +378,7 @@ export default function Approval() {
                             </span>
                           </div>
                           <span className="ap-card-btn-no">{req.request_no}</span>
+                          <span className="ap-card-btn-when">{formatWithdrawRequestedAt(req)}</span>
                           <span className="ap-card-btn-meta">
                             {req.item_count} items · {Number(req.total_requested_mc || req.total_mc)} MC
                           </span>
@@ -352,6 +416,9 @@ export default function Approval() {
                 <div>
                   <strong>{selectedData.request_no}</strong>
                   <span className="ap-form-panel-dept">{selectedData.department}</span>
+                  <div className="ap-form-panel-when">
+                    Requested {formatWithdrawRequestedAt(selectedData)}
+                  </div>
                 </div>
                 <div className="ap-form-panel-actions">
                   <button
@@ -371,6 +438,36 @@ export default function Approval() {
                   >
                     {copyingImage ? <span className="login-spinner" /> : <FiCopy />}
                   </button>
+                  {canRejectSelected && (
+                    <button
+                      type="button"
+                      className="ap-reject-btn ap-reject-btn--sm"
+                      onClick={() => openRejectModal(selectedReq)}
+                      disabled={processingId === selectedId}
+                    >
+                      {processingId === selectedId ? (
+                        <span className="login-spinner" />
+                      ) : (
+                        <FiXCircle />
+                      )}
+                      ปฏิเสธ Reject
+                    </button>
+                  )}
+                  {canDeleteSelected && (
+                    <button
+                      type="button"
+                      className="ap-delete-btn ap-delete-btn--sm"
+                      onClick={() => openDeleteModal(selectedReq)}
+                      disabled={processingId === selectedId}
+                    >
+                      {processingId === selectedId ? (
+                        <span className="login-spinner" />
+                      ) : (
+                        <FiTrash2 />
+                      )}
+                      ลบ Delete
+                    </button>
+                  )}
                   {isSelectedPending && (
                     <button
                       type="button"
@@ -388,6 +485,11 @@ export default function Approval() {
                   )}
                 </div>
               </div>
+              {selectedData.status === 'REJECTED' && (
+                <div className="ap-rejected-banner">
+                  This request is <strong>Rejected</strong> — it stays on record and cannot go to the next process.
+                </div>
+              )}
               <div className="ap-form-scroll ap-form-print-target">
                 <WithdrawFormPrint ref={formRef} data={selectedData} />
               </div>
@@ -396,8 +498,8 @@ export default function Approval() {
         </div>
       </div>
 
-      {/* Approve confirm modal */}
-      {confirmModal && (
+      {/* Approve / Reject / Delete confirm modal */}
+      {confirmModal && modalReq && (
         <div className="ap-modal-overlay" onClick={() => !processingId && setConfirmModal(null)}>
           <div className="ap-modal" onClick={(e) => e.stopPropagation()}>
             <button
@@ -408,26 +510,53 @@ export default function Approval() {
             >
               <FiX />
             </button>
-            <div className="ap-modal-icon">
-              <FiAlertCircle />
+            <div className={`ap-modal-icon ${isDeleteModal ? 'ap-modal-icon--delete' : isRejectModal ? 'ap-modal-icon--reject' : ''}`}>
+              {isDeleteModal ? <FiTrash2 /> : isRejectModal ? <FiXCircle /> : <FiAlertCircle />}
             </div>
-            <h3 className="ap-modal-title">ยืนยันการอนุมัติ</h3>
-            <p className="ap-modal-sub">Confirm Approval</p>
+            <h3 className="ap-modal-title">
+              {isDeleteModal ? 'ยืนยันการลบ' : isRejectModal ? 'ยืนยันการปฏิเสธ' : 'ยืนยันการอนุมัติ'}
+            </h3>
+            <p className="ap-modal-sub">
+              {isDeleteModal
+                ? 'Confirm Delete — remove from database'
+                : isRejectModal
+                  ? 'Confirm Reject — keep visible, stop next process'
+                  : 'Confirm Approval'}
+            </p>
             <div className="ap-modal-body">
               <div className="ap-modal-row">
                 <span className="ap-modal-label">Request No</span>
-                <strong>{confirmModal.request_no}</strong>
+                <strong>{modalReq.request_no}</strong>
               </div>
               <div className="ap-modal-row">
                 <span className="ap-modal-label">Department</span>
-                <strong>{confirmModal.department}</strong>
+                <strong>{modalReq.department}</strong>
               </div>
               <div className="ap-modal-row">
-                <span className="ap-modal-label">ผู้อนุมัติ / Approver</span>
-                <strong className="ap-modal-approver">{approverName.trim()}</strong>
+                <span className="ap-modal-label">Requested</span>
+                <strong>{formatWithdrawRequestedAt(modalReq)}</strong>
               </div>
+              {!isRejectModal && !isDeleteModal && (
+                <div className="ap-modal-row">
+                  <span className="ap-modal-label">ผู้อนุมัติ / Approver</span>
+                  <strong className="ap-modal-approver">{approverName.trim()}</strong>
+                </div>
+              )}
               <p className="ap-modal-note">
-                This will advance the request to <strong>Taking Out</strong> — same as Manage → Start Taking Out.
+                {isDeleteModal ? (
+                  <>
+                    This will <strong>permanently delete</strong> the request, items, and any linked stock records from the database.
+                    It cannot be undone.
+                  </>
+                ) : isRejectModal ? (
+                  <>
+                    The request will stay visible as <strong>Rejected</strong>. It cannot be approved or moved to the next process.
+                  </>
+                ) : (
+                  <>
+                    This will advance the request to <strong>Taking Out</strong> — same as Manage → Start Taking Out.
+                  </>
+                )}
               </p>
             </div>
             <div className="ap-modal-footer">
@@ -439,15 +568,37 @@ export default function Approval() {
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                className="ap-approve-btn"
-                onClick={executeApprove}
-                disabled={Boolean(processingId)}
-              >
-                {processingId ? <span className="login-spinner" /> : <FiCheckCircle />}
-                {processingId ? 'กำลังอนุมัติ...' : 'อนุมัติ Confirm'}
-              </button>
+              {isDeleteModal ? (
+                <button
+                  type="button"
+                  className="ap-delete-btn"
+                  onClick={executeDelete}
+                  disabled={Boolean(processingId)}
+                >
+                  {processingId ? <span className="login-spinner" /> : <FiTrash2 />}
+                  {processingId ? 'กำลังลบ...' : 'ลบทั้งหมด Delete'}
+                </button>
+              ) : isRejectModal ? (
+                <button
+                  type="button"
+                  className="ap-reject-btn"
+                  onClick={executeReject}
+                  disabled={Boolean(processingId)}
+                >
+                  {processingId ? <span className="login-spinner" /> : <FiXCircle />}
+                  {processingId ? 'กำลังปฏิเสธ...' : 'ปฏิเสธ Reject'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="ap-approve-btn"
+                  onClick={executeApprove}
+                  disabled={Boolean(processingId)}
+                >
+                  {processingId ? <span className="login-spinner" /> : <FiCheckCircle />}
+                  {processingId ? 'กำลังอนุมัติ...' : 'อนุมัติ Confirm'}
+                </button>
+              )}
             </div>
           </div>
         </div>

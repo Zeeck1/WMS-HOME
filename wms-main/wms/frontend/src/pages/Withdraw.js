@@ -20,6 +20,7 @@ import {
   bangkokHHMM,
   bangkokLocaleDateString,
   dateToYYYYMMDDInBangkok,
+  formatWithdrawRequestedAt,
 } from '../utils/bangkokTime';
 import { useAuth } from '../context/AuthContext';
 import MaintenanceNotice from '../components/MaintenanceNotice';
@@ -52,10 +53,7 @@ function withdrawLineRefSuffix(r) {
 
 /** LINE text only — built from create response + distributed rows (no extra API, no image). */
 function buildWithdrawLineMessageFromClient(requestRow, distributedRows, notesText) {
-  const d = requestRow.withdraw_date
-    ? bangkokLocaleDateString(new Date(requestRow.withdraw_date))
-    : bangkokLocaleDateString(new Date(requestRow.created_at));
-  const t = requestRow.request_time ? String(requestRow.request_time).slice(0, 5) : '';
+  const requestedAt = formatWithdrawRequestedAt(requestRow);
   const lines = distributedRows.map((r, i) => {
     const fish = r._fish_label || '';
     const loc = r._line_place || '';
@@ -65,7 +63,7 @@ function buildWithdrawLineMessageFromClient(requestRow, distributedRows, notesTe
     '📦 Withdrawal request',
     `Request: ${requestRow.request_no || '—'}`,
     `Dept: ${requestRow.department}`,
-    `Date: ${d}${t ? ` ${t}` : ''}`,
+    `Date: ${requestedAt || '—'}`,
     `Requester: ${requestRow.requested_by || '—'}`,
     '',
     ...lines,
@@ -91,6 +89,7 @@ const STATUS_CONFIG = {
   TAKING_OUT: { label: 'Taking Out', color: '#3b82f6', bg: '#eff6ff', icon: TbForklift },
   READY: { label: 'Ready to Take', color: '#8b5cf6', bg: '#f5f3ff', icon: FiPackage },
   FINISHED: { label: 'Finished', color: '#22c55e', bg: '#f0fdf4', icon: FiCheckCircle },
+  REJECTED: { label: 'Rejected', color: '#b45309', bg: '#fffbeb', icon: FiXCircle },
   CANCELLED: { label: 'Cancelled', color: '#ef4444', bg: '#fef2f2', icon: FiXCircle }
 };
 
@@ -596,7 +595,7 @@ function Withdraw() {
 
             {/* Status Tabs */}
             <div className="wd-orders-tabs">
-              {['ALL', 'PENDING', 'TAKING_OUT', 'READY', 'FINISHED', 'CANCELLED'].map(s => (
+              {['ALL', 'PENDING', 'TAKING_OUT', 'READY', 'FINISHED', 'REJECTED', 'CANCELLED'].map(s => (
                 <button
                   key={s}
                   className={`wd-order-tab ${statusFilter === s ? 'active' : ''}`}
@@ -646,7 +645,7 @@ function Withdraw() {
                           <p className="wd-orders-search-hit-meta">
                             {req.item_count} items · {Number(req.total_mc)} MC · {Number(req.total_kg || 0).toFixed(0)} KG
                             {' · '}
-                            {bangkokLocaleDateString(new Date(req.withdraw_date || req.created_at), { dateStyle: 'medium' })}
+                            {formatWithdrawRequestedAt(req)}
                           </p>
                         </div>
                         <span className="wd-orders-search-hit-action">
@@ -700,7 +699,7 @@ function Withdraw() {
                             <span className="wd-order-summary">
                               {req.item_count} items · {Number(req.total_mc)} MC · {Number(req.total_kg || 0).toFixed(0)} KG
                             </span>
-                            <span className="wd-order-date">{bangkokLocaleDateString(new Date(req.created_at), { dateStyle: 'medium' })}</span>
+                            <span className="wd-order-date">{formatWithdrawRequestedAt(req)}</span>
                           </div>
                           <div className="wd-order-status-row">
                             <span className="wd-order-status-badge" style={{ background: STATUS_CONFIG[req.status]?.bg, color: STATUS_CONFIG[req.status]?.color }}>

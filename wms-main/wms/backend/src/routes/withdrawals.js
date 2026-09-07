@@ -26,6 +26,45 @@ const {
   getUserAllowedWithdrawDepartments,
 } = require('../utils/withdrawDepartments');
 
+function isStoppedStatus(status) {
+  return status === 'CANCELLED' || status === 'REJECTED';
+}
+
+/** Permanently remove a request, its items, and linked stock-out / import-out rows. */
+async function permanentlyEraseWithdrawal(conn, id) {
+  const [items] = await conn.query(
+    'SELECT id, movement_id, import_stock_out_id, import_item_id FROM withdraw_items WHERE request_id = ?',
+    [id]
+  );
+
+  const movementIds = [...new Set(items.map((i) => i.movement_id).filter(Boolean))];
+  const importOutIds = [...new Set(items.map((i) => i.import_stock_out_id).filter(Boolean))];
+
+  if (movementIds.length) {
+    const ph = movementIds.map(() => '?').join(',');
+    await conn.query(`DELETE FROM movements WHERE id IN (${ph})`, movementIds);
+  }
+
+  if (importOutIds.length) {
+    const phOut = importOutIds.map(() => '?').join(',');
+    const [shipRows] = await conn.query(
+      `SELECT DISTINCT ii.shipment_id
+       FROM withdraw_items wi
+       JOIN import_items ii ON ii.id = wi.import_item_id
+       WHERE wi.request_id = ? AND wi.import_item_id IS NOT NULL`,
+      [id]
+    );
+    await conn.query(`DELETE FROM import_stock_outs WHERE id IN (${phOut})`, importOutIds);
+    for (const row of shipRows) {
+      if (row.shipment_id) {
+        await conn.query('UPDATE import_shipments SET last_update_stock = NOW() WHERE id = ?', [row.shipment_id]);
+      }
+    }
+  }
+
+  await conn.query('DELETE FROM withdraw_requests WHERE id = ?', [id]);
+}
+
 /** Compact segment for request_no (avoids spaces/special chars in WD-... codes). */
 function departmentRequestCode(department) {
   if (department === 'Branch.05 (SM)') return 'B05SM';
@@ -629,8 +668,8 @@ router.put('/:id/stock-out-mode', async (req, res) => {
       return res.status(404).json({ error: 'Request not found' });
     }
     const request = requests[0];
-    if (request.status === 'CANCELLED') {
-      return res.status(400).json({ error: 'Cannot modify a cancelled request' });
+    if (isStoppedStatus(request.status)) {
+      return res.status(400).json({ error: 'Cannot modify a cancelled or rejected request' });
     }
     const isFinished = request.status === 'FINISHED';
     if (isFinished) {
@@ -740,8 +779,8 @@ router.put('/:id/form-actual-mode', async (req, res) => {
     if (requests.length === 0) {
       return res.status(404).json({ error: 'Request not found' });
     }
-    if (requests[0].status === 'CANCELLED') {
-      return res.status(400).json({ error: 'Cannot modify a cancelled request' });
+    if (isStoppedStatus(requests[0].status)) {
+      return res.status(400).json({ error: 'Cannot modify a cancelled or rejected request' });
     }
 
     const ids = item_ids.map((v) => parseInt(v, 10)).filter((v) => Number.isFinite(v));
@@ -847,9 +886,9 @@ router.put('/:id/superadmin-stock-adjust', authMiddleware, superadminOnly, async
       return res.status(404).json({ error: 'Request not found' });
     }
     const request = requests[0];
-    if (request.status === 'CANCELLED') {
+    if (isStoppedStatus(request.status)) {
       await conn.rollback();
-      return res.status(400).json({ error: 'Cannot adjust a cancelled request' });
+      return res.status(400).json({ error: 'Cannot adjust a cancelled or rejected request' });
     }
 
     for (const item of items) {
@@ -935,7 +974,7 @@ router.put('/:id/status', async (req, res) => {
   try {
     await conn.beginTransaction();
     const { status, managed_by, dispatcher } = req.body;
-    const validStatuses = ['PENDING', 'TAKING_OUT', 'READY', 'FINISHED', 'CANCELLED'];
+    const validStatuses = ['PENDING', 'TAKING_OUT', 'READY', 'FINISHED', 'CANCELLED', 'REJECTED'];
     if (!validStatuses.includes(status)) {
       await conn.rollback();
       return res.status(400).json({ error: `Status must be one of: ${validStatuses.join(', ')}` });
@@ -948,6 +987,11 @@ router.put('/:id/status', async (req, res) => {
     }
 
     const request = requests[0];
+
+    if (isStoppedStatus(request.status)) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Rejected or cancelled requests cannot move to the next process' });
+    }
 
     if (request.status === 'FINISHED') {
       await conn.rollback();
@@ -1093,38 +1137,7 @@ router.delete('/:id/erase', authMiddleware, superadminOnly, async (req, res) => 
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-
-    const [items] = await conn.query(
-      'SELECT id, movement_id, import_stock_out_id, import_item_id FROM withdraw_items WHERE request_id = ?',
-      [id]
-    );
-
-    const movementIds = [...new Set(items.map((i) => i.movement_id).filter(Boolean))];
-    const importOutIds = [...new Set(items.map((i) => i.import_stock_out_id).filter(Boolean))];
-
-    if (movementIds.length) {
-      const ph = movementIds.map(() => '?').join(',');
-      await conn.query(`DELETE FROM movements WHERE id IN (${ph})`, movementIds);
-    }
-
-    if (importOutIds.length) {
-      const phOut = importOutIds.map(() => '?').join(',');
-      const [shipRows] = await conn.query(
-        `SELECT DISTINCT ii.shipment_id
-         FROM withdraw_items wi
-         JOIN import_items ii ON ii.id = wi.import_item_id
-         WHERE wi.request_id = ? AND wi.import_item_id IS NOT NULL`,
-        [id]
-      );
-      await conn.query(`DELETE FROM import_stock_outs WHERE id IN (${phOut})`, importOutIds);
-      for (const row of shipRows) {
-        if (row.shipment_id) {
-          await conn.query('UPDATE import_shipments SET last_update_stock = NOW() WHERE id = ?', [row.shipment_id]);
-        }
-      }
-    }
-
-    await conn.query('DELETE FROM withdraw_requests WHERE id = ?', [id]);
+    await permanentlyEraseWithdrawal(conn, id);
     await conn.commit();
 
     res.json({
@@ -1137,6 +1150,77 @@ router.delete('/:id/erase', authMiddleware, superadminOnly, async (req, res) => 
     res.status(500).json({ error: 'Failed to remove withdrawal' });
   } finally {
     conn.release();
+  }
+});
+
+// ─── DELETE purge from Approval — permanently remove request + all linked data ──
+router.delete('/:id/purge', authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (Number.isNaN(id)) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
+
+  const [exists] = await pool.query(
+    'SELECT id, request_no FROM withdraw_requests WHERE id = ?',
+    [id]
+  );
+  if (exists.length === 0) {
+    return res.status(404).json({ error: 'Request not found' });
+  }
+
+  const requestNo = exists[0].request_no;
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await permanentlyEraseWithdrawal(conn, id);
+    await conn.commit();
+    res.json({
+      message: 'Request permanently deleted',
+      request_no: requestNo,
+    });
+  } catch (error) {
+    await conn.rollback();
+    console.error('Error purging withdrawal:', error);
+    res.status(500).json({ error: 'Failed to delete withdrawal' });
+  } finally {
+    conn.release();
+  }
+});
+
+// ─── PUT reject from Approval — keep visible, block next process ──
+router.put('/:id/reject', authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (Number.isNaN(id)) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
+
+  const [exists] = await pool.query(
+    'SELECT id, request_no, status FROM withdraw_requests WHERE id = ?',
+    [id]
+  );
+  if (exists.length === 0) {
+    return res.status(404).json({ error: 'Request not found' });
+  }
+  if (exists[0].status === 'FINISHED') {
+    return res.status(400).json({ error: 'Finished requests cannot be rejected' });
+  }
+  if (isStoppedStatus(exists[0].status)) {
+    return res.status(400).json({ error: 'This request is already rejected or cancelled' });
+  }
+
+  try {
+    await pool.query(
+      'UPDATE withdraw_requests SET status = "REJECTED", updated_at = NOW() WHERE id = ?',
+      [id]
+    );
+    res.json({
+      message: 'Request rejected — still visible, cannot go to the next process',
+      request_no: exists[0].request_no,
+      status: 'REJECTED',
+    });
+  } catch (error) {
+    console.error('Error rejecting withdrawal:', error);
+    res.status(500).json({ error: 'Failed to reject withdrawal' });
   }
 });
 

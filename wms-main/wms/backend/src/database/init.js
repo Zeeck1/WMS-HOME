@@ -450,7 +450,7 @@ async function initDatabase() {
         id INT AUTO_INCREMENT PRIMARY KEY,
         request_no VARCHAR(50) NOT NULL UNIQUE,
         department ENUM('PK','RM','Branch.05 (SM)') NOT NULL,
-        status ENUM('PENDING','TAKING_OUT','READY','FINISHED','CANCELLED') NOT NULL DEFAULT 'PENDING',
+        status ENUM('PENDING','TAKING_OUT','READY','FINISHED','CANCELLED','REJECTED') NOT NULL DEFAULT 'PENDING',
         withdraw_date DATE DEFAULT NULL,
         request_time TIME DEFAULT NULL,
         finished_at TIMESTAMP NULL DEFAULT NULL,
@@ -519,6 +519,25 @@ async function initDatabase() {
       }
     } catch (e) {
       // ignore migration errors
+    }
+
+    // Migration: REJECTED status (Approval reject — keep visible, block next process)
+    try {
+      const [stCol] = await connection.query(
+        `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'withdraw_requests' AND COLUMN_NAME = 'status'`,
+        [dbName]
+      );
+      const stType = stCol[0] && String(stCol[0].COLUMN_TYPE);
+      if (stType && !stType.includes('REJECTED')) {
+        await connection.query(
+          `ALTER TABLE withdraw_requests
+           MODIFY COLUMN status ENUM('PENDING','TAKING_OUT','READY','FINISHED','CANCELLED','REJECTED') NOT NULL DEFAULT 'PENDING'`
+        );
+        console.log('  Migration: withdraw_requests.status includes REJECTED');
+      }
+    } catch (e) {
+      console.error('  Migration withdraw_requests REJECTED status:', e.message);
     }
 
     // Migration: pick route (FIFO / nearest) save + undo backup on withdraw_requests

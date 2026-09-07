@@ -1,6 +1,6 @@
 import React, { forwardRef } from 'react';
 import { sortLocationsNearestFirst } from '../config/warehouseConfig';
-import { bangkokLocaleDateString, bangkokLocaleString } from '../utils/bangkokTime';
+import { bangkokLocaleDateString, bangkokLocaleString, formatWithdrawRequestedAt } from '../utils/bangkokTime';
 
 /** Per-item flag: 0 = leave Actual CTN / Net Weight / Time out blank on the form (Process and Remark always print). */
 function rowShowsActual(item) {
@@ -59,15 +59,12 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
   if (!data) return null;
 
   const items = summarizeWithdrawItems(data.items || []);
-
-  const formDate = data.withdraw_date
-    ? new Date(data.withdraw_date)
-    : new Date(data.created_at);
-  const dateStr = formDate.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-
-  const requestTimeStr = data.request_time
-    ? data.request_time.slice(0, 5)
-    : '';
+  const requestedAt = formatWithdrawRequestedAt(data);
+  const requestedParts = requestedAt.split(' ');
+  const dateStr = requestedParts[0] || '';
+  const requestTimeStr = requestedParts.slice(1).join(' ') || (
+    data.request_time ? String(data.request_time).slice(0, 8) : ''
+  );
 
   const finishedAtStr = data.finished_at
     ? bangkokLocaleString(new Date(data.finished_at), { hour: '2-digit', minute: '2-digit' })
@@ -103,7 +100,7 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
   const showActualMc = data.status === 'FINISHED';
   const showFinalFields = data.status === 'FINISHED';
   /** Approver is saved only after Approve / Start Taking Out — not while still PENDING */
-  const showApprover = data.status && data.status !== 'PENDING' && data.status !== 'CANCELLED';
+  const showApprover = data.status && data.status !== 'PENDING' && data.status !== 'CANCELLED' && data.status !== 'REJECTED';
 
   return (
     <div className="wf-page">
@@ -120,6 +117,10 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
           <div className="wf-meta-item">
             <span className="wf-meta-label">DATE (วันที่) :</span>
             <span className="wf-meta-value">{dateStr}</span>
+          </div>
+          <div className="wf-meta-item">
+            <span className="wf-meta-label">TIME (เวลา) :</span>
+            <span className="wf-meta-value">{requestTimeStr || '—'}</span>
           </div>
           <div className="wf-meta-item">
             <span className="wf-meta-label">DEP (แผนก) :</span>
