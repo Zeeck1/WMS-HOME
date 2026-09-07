@@ -317,8 +317,8 @@ async function initDatabase() {
         sticker VARCHAR(100) DEFAULT NULL,
         product_id INT NOT NULL,
         notes TEXT DEFAULT NULL,
-        production_date DATE DEFAULT NULL,
-        expiration_date DATE DEFAULT NULL,
+        production_date VARCHAR(10) DEFAULT NULL,
+        expiration_date VARCHAR(10) DEFAULT NULL,
         st_no VARCHAR(50) DEFAULT NULL,
         remark TEXT DEFAULT NULL,
         country VARCHAR(100) DEFAULT NULL,
@@ -366,14 +366,30 @@ async function initDatabase() {
         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'lots' AND COLUMN_NAME = 'production_date'
       `, [dbName]);
       if (pdCols.length === 0) {
-        await connection.query('ALTER TABLE lots ADD COLUMN production_date DATE DEFAULT NULL AFTER notes');
-        await connection.query('ALTER TABLE lots ADD COLUMN expiration_date DATE DEFAULT NULL AFTER production_date');
+        await connection.query('ALTER TABLE lots ADD COLUMN production_date VARCHAR(10) DEFAULT NULL AFTER notes');
+        await connection.query('ALTER TABLE lots ADD COLUMN expiration_date VARCHAR(10) DEFAULT NULL AFTER production_date');
         await connection.query('ALTER TABLE lots ADD COLUMN st_no VARCHAR(50) DEFAULT NULL AFTER expiration_date');
         await connection.query('ALTER TABLE lots ADD COLUMN remark TEXT DEFAULT NULL AFTER st_no');
         console.log('  Migration: added production_date, expiration_date, st_no, remark to lots');
       }
     } catch (e) {
       // ignore migration errors
+    }
+
+    // Allow 01/MM/YYYY vs MM/YYYY: store month-only as YYYY-MM, full dates as YYYY-MM-DD
+    try {
+      const [pdType] = await connection.query(
+        `SELECT DATA_TYPE FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'lots' AND COLUMN_NAME = 'production_date'`,
+        [dbName]
+      );
+      if (pdType[0] && String(pdType[0].DATA_TYPE).toLowerCase() === 'date') {
+        await connection.query('ALTER TABLE lots MODIFY COLUMN production_date VARCHAR(10) DEFAULT NULL');
+        await connection.query('ALTER TABLE lots MODIFY COLUMN expiration_date VARCHAR(10) DEFAULT NULL');
+        console.log('  Migration: lots production_date / expiration_date VARCHAR(10) for day-01 dates');
+      }
+    } catch (e) {
+      console.error('  Migration lots date varchar:', e.message);
     }
 
     await connection.query(`

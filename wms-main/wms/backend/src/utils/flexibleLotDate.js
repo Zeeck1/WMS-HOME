@@ -1,19 +1,28 @@
 /**
- * Production / expiration dates: MM/YYYY (stored as YYYY-MM-01) or DD/MM/YYYY (full date).
+ * Production / expiration dates:
+ * - MM/YYYY stored as YYYY-MM (month-only)
+ * - DD/MM/YYYY stored as YYYY-MM-DD (including day 01)
  */
 function parseFlexibleLotDate(raw, label = 'Date') {
   if (raw == null || String(raw).trim() === '') return { value: null };
   const s = String(raw).trim();
 
-  const iso = s.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?$/);
-  if (iso) {
-    const yyyy = iso[1];
-    const mm = iso[2];
-    const dd = (iso[3] || '01').padStart(2, '0');
+  const monthOnlyIso = s.match(/^(\d{4})-(\d{2})$/);
+  if (monthOnlyIso) {
+    const yyyy = monthOnlyIso[1];
+    const mm = monthOnlyIso[2];
     if (Number(mm) < 1 || Number(mm) > 12) {
       return { error: `${label} must be DD/MM/YYYY or MM/YYYY` };
     }
-    if (Number(dd) < 1 || Number(dd) > 31) {
+    return { value: `${yyyy}-${mm}` };
+  }
+
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) {
+    const yyyy = iso[1];
+    const mm = iso[2];
+    const dd = iso[3];
+    if (Number(mm) < 1 || Number(mm) > 12 || Number(dd) < 1 || Number(dd) > 31) {
       return { error: `${label} must be DD/MM/YYYY or MM/YYYY` };
     }
     return { value: `${yyyy}-${mm}-${dd}` };
@@ -26,7 +35,7 @@ function parseFlexibleLotDate(raw, label = 'Date') {
     if (Number(mm) < 1 || Number(mm) > 12) {
       return { error: `${label} must be DD/MM/YYYY or MM/YYYY` };
     }
-    return { value: `${yyyy}-${mm}-01` };
+    return { value: `${yyyy}-${mm}` };
   }
 
   const ddmmyyyy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
