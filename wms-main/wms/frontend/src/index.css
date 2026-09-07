@@ -5089,6 +5089,19 @@ body {
   min-width: 60px;
 }
 
+.wf-meta-value--time {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.wf-meta-date-sm {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: #475569;
+  letter-spacing: 0.01em;
+}
+
 .wf-meta-dept {
   color: #6366f1;
   font-size: 1rem;
@@ -13134,6 +13147,18 @@ body.ckic-route:has(.ckic-page[data-theme="light"]) .topbar-logout {
   font-variant-numeric: tabular-nums;
 }
 
+.ap-card-btn-submitted {
+  font-size: 0.68rem;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+.ap-card-btn-submitted {
+  font-size: 0.68rem;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
 .ap-card-btn-meta {
   font-size: 0.72rem;
   color: var(--gray-500);
@@ -13220,6 +13245,20 @@ body.ckic-route:has(.ckic-page[data-theme="light"]) .topbar-logout {
   font-size: 0.78rem;
   font-weight: 600;
   color: #0f766e;
+  font-variant-numeric: tabular-nums;
+}
+
+.ap-form-panel-submitted {
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+.ap-form-panel-submitted {
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: #64748b;
   font-variant-numeric: tabular-nums;
 }
 

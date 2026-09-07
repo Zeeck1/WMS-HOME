@@ -26,6 +26,60 @@ const {
   getUserAllowedWithdrawDepartments,
 } = require('../utils/withdrawDepartments');
 
+function sqlTimeToHHmm(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'string') {
+    const m = value.trim().match(/^(\d{1,2}):(\d{2})/);
+    if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
+    const iso = value.match(/T(\d{2}):(\d{2})/);
+    if (iso) return `${iso[1]}:${iso[2]}`;
+    return value;
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const hh = String(value.getUTCHours()).padStart(2, '0');
+    const mm = String(value.getUTCMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+  }
+  return String(value);
+}
+
+function serializeWithdrawRequestRow(row) {
+  if (!row) return row;
+  return {
+    ...row,
+    request_time: sqlTimeToHHmm(row.request_time) ?? row.request_time,
+    form_timeout_start: sqlTimeToHHmm(row.form_timeout_start) ?? row.form_timeout_start,
+    form_timeout_end: sqlTimeToHHmm(row.form_timeout_end) ?? row.form_timeout_end,
+  };
+}
+
+function sqlTimeToHHmm(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'string') {
+    const m = value.trim().match(/^(\d{1,2}):(\d{2})/);
+    if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
+    const iso = value.match(/T(\d{2}):(\d{2})/);
+    if (iso) return `${iso[1]}:${iso[2]}`;
+    return value;
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const hh = String(value.getUTCHours()).padStart(2, '0');
+    const mm = String(value.getUTCMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+  }
+  return String(value);
+}
+
+function serializeWithdrawRequestRow(row) {
+  if (!row) return row;
+  return {
+    ...row,
+    request_time: sqlTimeToHHmm(row.request_time) ?? row.request_time,
+    form_timeout_start: sqlTimeToHHmm(row.form_timeout_start) ?? row.form_timeout_start,
+    form_timeout_end: sqlTimeToHHmm(row.form_timeout_end) ?? row.form_timeout_end,
+  };
+}
+
 function isStoppedStatus(status) {
   return status === 'CANCELLED' || status === 'REJECTED';
 }
@@ -224,7 +278,7 @@ router.get('/', async (req, res) => {
     }
     sql += ' ORDER BY wr.created_at DESC';
     const [rows] = await pool.query(sql, params);
-    res.json(rows);
+    res.json(rows.map(serializeWithdrawRequestRow));
   } catch (error) {
     console.error('Error fetching withdrawals:', error);
     res.status(500).json({ error: 'Failed to fetch withdrawals' });
@@ -245,7 +299,7 @@ router.get('/:id', async (req, res) => {
       try { pickRouteBackup = JSON.parse(pickRouteBackup); } catch { pickRouteBackup = null; }
     }
     res.json({
-      ...row,
+      ...serializeWithdrawRequestRow(row),
       items,
       pick_route_mode: row.pick_route_mode || null,
       pick_route_saved: Boolean(pickRouteBackup && pickRouteBackup.items),
@@ -469,7 +523,7 @@ router.post('/', authMiddleware, async (req, res) => {
     await conn.commit();
 
     const [created] = await pool.query('SELECT * FROM withdraw_requests WHERE id = ?', [requestId]);
-    res.status(201).json({ message: 'Withdrawal request created', request: created[0] });
+    res.status(201).json({ message: 'Withdrawal request created', request: serializeWithdrawRequestRow(created[0]) });
   } catch (error) {
     await conn.rollback();
     console.error('Error creating withdrawal:', error);

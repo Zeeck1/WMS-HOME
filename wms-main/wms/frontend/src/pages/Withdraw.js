@@ -21,6 +21,7 @@ import {
   bangkokLocaleDateString,
   dateToYYYYMMDDInBangkok,
   formatWithdrawRequestedAt,
+  formatWithdrawSelectedAt,
 } from '../utils/bangkokTime';
 import { useAuth } from '../context/AuthContext';
 import MaintenanceNotice from '../components/MaintenanceNotice';
@@ -53,6 +54,7 @@ function withdrawLineRefSuffix(r) {
 
 /** LINE text only — built from create response + distributed rows (no extra API, no image). */
 function buildWithdrawLineMessageFromClient(requestRow, distributedRows, notesText) {
+  const selectedAt = formatWithdrawSelectedAt(requestRow);
   const requestedAt = formatWithdrawRequestedAt(requestRow);
   const lines = distributedRows.map((r, i) => {
     const fish = r._fish_label || '';
@@ -63,7 +65,7 @@ function buildWithdrawLineMessageFromClient(requestRow, distributedRows, notesTe
     '📦 Withdrawal request',
     `Request: ${requestRow.request_no || '—'}`,
     `Dept: ${requestRow.department}`,
-    `Date: ${requestedAt || '—'}`,
+    `Date / Time: ${selectedAt || requestedAt || '—'}`,
     `Requester: ${requestRow.requested_by || '—'}`,
     '',
     ...lines,
@@ -645,7 +647,7 @@ function Withdraw() {
                           <p className="wd-orders-search-hit-meta">
                             {req.item_count} items · {Number(req.total_mc)} MC · {Number(req.total_kg || 0).toFixed(0)} KG
                             {' · '}
-                            {formatWithdrawRequestedAt(req)}
+                            {formatWithdrawSelectedAt(req) || formatWithdrawRequestedAt(req)}
                           </p>
                         </div>
                         <span className="wd-orders-search-hit-action">
@@ -699,7 +701,7 @@ function Withdraw() {
                             <span className="wd-order-summary">
                               {req.item_count} items · {Number(req.total_mc)} MC · {Number(req.total_kg || 0).toFixed(0)} KG
                             </span>
-                            <span className="wd-order-date">{formatWithdrawRequestedAt(req)}</span>
+                            <span className="wd-order-date">{formatWithdrawSelectedAt(req) || formatWithdrawRequestedAt(req)}</span>
                           </div>
                           <div className="wd-order-status-row">
                             <span className="wd-order-status-badge" style={{ background: STATUS_CONFIG[req.status]?.bg, color: STATUS_CONFIG[req.status]?.color }}>

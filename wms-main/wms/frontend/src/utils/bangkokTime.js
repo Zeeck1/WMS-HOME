@@ -65,32 +65,46 @@ export function bangkokHHMMSS(date = new Date()) {
   return `${get('hour')}:${get('minute')}:${get('second')}`;
 }
 
-function normalizeRequestTime(raw) {
-  if (raw == null || raw === '') return '';
-  const s = String(raw).trim();
-  const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
-  if (!m) return '';
-  return `${m[1].padStart(2, '0')}:${m[2]}:${m[3] || '00'}`;
-}
-
 /**
- * Exact requested withdraw datetime: DD/MM/YYYY HH:MM:SS
- * Uses withdraw_date + request_time when set, otherwise created_at.
+ * Exact datetime when the user clicked Submit Request (created_at).
  */
 export function formatWithdrawRequestedAt(row) {
-  if (!row) return '';
-  const dateYmd = row.withdraw_date
-    ? dateToYYYYMMDDInBangkok(row.withdraw_date)
-    : (row.created_at ? dateToYYYYMMDDInBangkok(row.created_at) : '');
-  let time = normalizeRequestTime(row.request_time);
-  if (!time && row.created_at) {
-    const d = new Date(row.created_at);
-    if (!Number.isNaN(d.getTime())) time = bangkokHHMMSS(d);
-  }
+  if (!row?.created_at) return '';
+  const d = new Date(row.created_at);
+  if (Number.isNaN(d.getTime())) return '';
+  const dateYmd = dateToYYYYMMDDInBangkok(d);
+  const time = bangkokHHMMSS(d);
   if (!dateYmd) return time;
-  const [y, m, d] = dateYmd.split('-');
-  const dateStr = `${d}/${m}/${y}`;
-  return time ? `${dateStr} ${time}` : dateStr;
+  const [y, m, day] = dateYmd.split('-');
+  return `${day}/${m}/${y} ${time}`;
+}
+
+/** HH:MM from Withdraw Request Time / เวลาที่ขอ — do not convert through Date (avoids TZ shift). */
+export function formatWithdrawSelectedTime(raw) {
+  if (raw == null || raw === '') return '';
+  const s = String(raw).trim();
+  const only = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (only) return `${only[1].padStart(2, '0')}:${only[2]}`;
+  const iso = s.match(/T(\d{2}):(\d{2})/);
+  if (iso) return `${iso[1]}:${iso[2]}`;
+  return '';
+}
+
+/** DD/MM/YYYY from Withdraw Date / วันที่เบิก. */
+export function formatWithdrawSelectedDate(raw) {
+  if (raw == null || raw === '') return '';
+  const ymd = dateToYYYYMMDDInBangkok(raw);
+  if (!ymd) return '';
+  const [y, m, d] = ymd.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+/** User-selected วันที่เบิก + เวลาที่ขอ from the Withdraw cart. */
+export function formatWithdrawSelectedAt(row) {
+  const dateStr = formatWithdrawSelectedDate(row?.withdraw_date);
+  const timeStr = formatWithdrawSelectedTime(row?.request_time);
+  if (dateStr && timeStr) return `${dateStr} ${timeStr}`;
+  return dateStr || timeStr || '';
 }
 
 export function bangkokLocaleString(date = new Date(), options = {}) {

@@ -19,6 +19,7 @@ import {
   bangkokLocaleDateString,
   dateToYYYYMMDDInBangkok,
   formatWithdrawRequestedAt,
+  formatWithdrawSelectedAt,
 } from '../utils/bangkokTime';
 
 const STATUS_TABS = ['PENDING', 'REJECTED', 'ALL', 'TAKING_OUT', 'READY', 'FINISHED'];
@@ -378,7 +379,12 @@ export default function Approval() {
                             </span>
                           </div>
                           <span className="ap-card-btn-no">{req.request_no}</span>
-                          <span className="ap-card-btn-when">{formatWithdrawRequestedAt(req)}</span>
+                          <span className="ap-card-btn-when">
+                            {formatWithdrawSelectedAt(req) || formatWithdrawRequestedAt(req)}
+                          </span>
+                          {formatWithdrawSelectedAt(req) && formatWithdrawRequestedAt(req) && (
+                            <span className="ap-card-btn-submitted">Submitted {formatWithdrawRequestedAt(req)}</span>
+                          )}
                           <span className="ap-card-btn-meta">
                             {req.item_count} items · {Number(req.total_requested_mc || req.total_mc)} MC
                           </span>
@@ -417,8 +423,13 @@ export default function Approval() {
                   <strong>{selectedData.request_no}</strong>
                   <span className="ap-form-panel-dept">{selectedData.department}</span>
                   <div className="ap-form-panel-when">
-                    Requested {formatWithdrawRequestedAt(selectedData)}
+                    วันที่เบิก / เวลาที่ขอ {formatWithdrawSelectedAt(selectedData) || '—'}
                   </div>
+                  {formatWithdrawRequestedAt(selectedData) && (
+                    <div className="ap-form-panel-submitted">
+                      Submitted {formatWithdrawRequestedAt(selectedData)}
+                    </div>
+                  )}
                 </div>
                 <div className="ap-form-panel-actions">
                   <button
@@ -533,7 +544,11 @@ export default function Approval() {
                 <strong>{modalReq.department}</strong>
               </div>
               <div className="ap-modal-row">
-                <span className="ap-modal-label">Requested</span>
+                <span className="ap-modal-label">วันที่เบิก / เวลาที่ขอ</span>
+                <strong>{formatWithdrawSelectedAt(modalReq) || '—'}</strong>
+              </div>
+              <div className="ap-modal-row">
+                <span className="ap-modal-label">Submitted</span>
                 <strong>{formatWithdrawRequestedAt(modalReq)}</strong>
               </div>
               {!isRejectModal && !isDeleteModal && (

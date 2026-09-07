@@ -23,6 +23,7 @@ import {
   bangkokLocaleDateString,
   dateToYYYYMMDDInBangkok,
   formatWithdrawRequestedAt,
+  formatWithdrawSelectedAt,
 } from '../utils/bangkokTime';
 import {
   groupWithdrawItems,
@@ -980,7 +981,7 @@ function Manage() {
                         {req.manual_adjust ? (
                           <span className="mg-manual-badge" title="Manual adjust — no stock deduction"><FiEdit3 /> Manual</span>
                         ) : null}
-                        <span className="mg-req-date">{formatWithdrawRequestedAt(req)}</span>
+                        <span className="mg-req-date">{formatWithdrawSelectedAt(req) || formatWithdrawRequestedAt(req)}</span>
                       </div>
                     </div>
                     <div className="mg-req-right">

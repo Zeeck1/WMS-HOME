@@ -12,7 +12,7 @@ import { jsPDF } from 'jspdf';
 
 import { getWithdrawal, getInventory } from '../services/api';
 
-import { formatWithdrawRequestedAt } from '../utils/bangkokTime';
+import { formatWithdrawRequestedAt, formatWithdrawSelectedAt } from '../utils/bangkokTime';
 
 import { fetchManualInventoryAllTabs } from '../utils/manualInventoryShared';
 
@@ -323,7 +323,8 @@ function WithdrawReport() {
 
               <span><strong>Department:</strong> {data.department}</span>
 
-              <span><strong>Requested:</strong> {formatWithdrawRequestedAt(data)}</span>
+              <span><strong>วันที่เบิก / เวลาที่ขอ:</strong> {formatWithdrawSelectedAt(data) || '—'}</span>
+              <span><strong>Submitted:</strong> {formatWithdrawRequestedAt(data)}</span>
 
               <span><strong>Status:</strong> {data.status}</span>
 

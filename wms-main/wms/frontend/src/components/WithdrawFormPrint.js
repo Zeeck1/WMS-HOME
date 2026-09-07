@@ -1,6 +1,6 @@
 import React, { forwardRef } from 'react';
 import { sortLocationsNearestFirst } from '../config/warehouseConfig';
-import { bangkokLocaleDateString, bangkokLocaleString, formatWithdrawRequestedAt } from '../utils/bangkokTime';
+import { bangkokLocaleDateString, bangkokLocaleString, bangkokHHMMSS, formatWithdrawSelectedDate, formatWithdrawSelectedTime } from '../utils/bangkokTime';
 
 /** Per-item flag: 0 = leave Actual CTN / Net Weight / Time out blank on the form (Process and Remark always print). */
 function rowShowsActual(item) {
@@ -59,12 +59,13 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
   if (!data) return null;
 
   const items = summarizeWithdrawItems(data.items || []);
-  const requestedAt = formatWithdrawRequestedAt(data);
-  const requestedParts = requestedAt.split(' ');
-  const dateStr = requestedParts[0] || '';
-  const requestTimeStr = requestedParts.slice(1).join(' ') || (
-    data.request_time ? String(data.request_time).slice(0, 8) : ''
-  );
+  const dateStr = formatWithdrawSelectedDate(data.withdraw_date)
+    || formatWithdrawSelectedDate(data.created_at);
+  const requestTimeStr = formatWithdrawSelectedTime(data.request_time);
+  const submittedCreated = data.created_at ? new Date(data.created_at) : null;
+  const submittedValid = submittedCreated && !Number.isNaN(submittedCreated.getTime());
+  const submittedTimeStr = submittedValid ? bangkokHHMMSS(submittedCreated) : '';
+  const submittedDateStr = submittedValid ? formatWithdrawSelectedDate(submittedCreated) : '';
 
   const finishedAtStr = data.finished_at
     ? bangkokLocaleString(new Date(data.finished_at), { hour: '2-digit', minute: '2-digit' })
@@ -119,8 +120,11 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
             <span className="wf-meta-value">{dateStr}</span>
           </div>
           <div className="wf-meta-item">
-            <span className="wf-meta-label">TIME (เวลา) :</span>
-            <span className="wf-meta-value">{requestTimeStr || '—'}</span>
+            <span className="wf-meta-label">TIME (เวลาที่ขอ) :</span>
+            <span className="wf-meta-value wf-meta-value--time">
+              {submittedTimeStr || requestTimeStr || '—'}
+              {submittedDateStr ? <span className="wf-meta-date-sm">{submittedDateStr}</span> : null}
+            </span>
           </div>
           <div className="wf-meta-item">
             <span className="wf-meta-label">DEP (แผนก) :</span>
