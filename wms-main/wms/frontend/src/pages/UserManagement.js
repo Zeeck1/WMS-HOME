@@ -7,11 +7,11 @@ import {
 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import {
-  getUsers, createUser, updateUser, deleteUser,
+  getUsers, createUser, updateUser, changeSuperadminPassword, deleteUser,
   getPendingUsers, approveUser, rejectUser,
   getEmployees, uploadEmployees, deleteAllEmployees,
 } from '../services/api';
-import { ALL_PAGES } from '../context/AuthContext';
+import { ALL_PAGES, useAuth } from '../context/AuthContext';
 
 // ─── Utility: parse xlsx/csv ──────────────────────────────
 const EXCEL_COL_MAP = {
@@ -68,9 +68,17 @@ function parseEmployeeFile(file) {
 
 // ─── Sub-components ───────────────────────────────────────
 
-function UsersTab({ users, loading, onRefresh }) {
+function UsersTab({ users, loading, onRefresh, currentUser }) {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [passwordUser, setPasswordUser] = useState(null);
+  const [passwordForm, setPasswordForm] = useState({
+    current_password: '',
+    new_password: '',
+    confirm_password: '',
+  });
+  const [showPasswordFields, setShowPasswordFields] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   const [form, setForm] = useState({
     username: '',
     password: '',
@@ -106,6 +114,42 @@ function UsersTab({ users, loading, onRefresh }) {
     });
     setShowPw(false);
     setShowModal(true);
+  };
+
+  const openPasswordChange = (u) => {
+    if (u.id !== currentUser?.id || u.role !== 'superadmin') {
+      toast.error('Superadmin password can only be changed by that account');
+      return;
+    }
+    setPasswordUser(u);
+    setPasswordForm({ current_password: '', new_password: '', confirm_password: '' });
+    setShowPasswordFields(false);
+  };
+
+  const handlePasswordChange = async (e) => {
+    e.preventDefault();
+    if (passwordForm.new_password.length < 8) {
+      toast.warning('New password must be at least 8 characters');
+      return;
+    }
+    if (passwordForm.new_password !== passwordForm.confirm_password) {
+      toast.warning('New password and confirmation do not match');
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      await changeSuperadminPassword({
+        current_password: passwordForm.current_password,
+        new_password: passwordForm.new_password,
+      });
+      toast.success('Superadmin password changed successfully');
+      setPasswordUser(null);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to change password');
+    } finally {
+      setChangingPassword(false);
+    }
   };
 
   const togglePermission = (key) => {
@@ -226,7 +270,15 @@ function UsersTab({ users, loading, onRefresh }) {
                   </span>
                 </td>
                 <td>
-                  {u.role !== 'superadmin' && (
+                  {u.role === 'superadmin' && u.id === currentUser?.id ? (
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={() => openPasswordChange(u)}
+                      title="Change my superadmin password"
+                    >
+                      <FiEdit2 /> Change Password
+                    </button>
+                  ) : u.role !== 'superadmin' && (
                     <>
                       <button className="btn btn-outline btn-sm" onClick={() => openEdit(u)}><FiEdit2 /></button>
                       {' '}
@@ -321,6 +373,73 @@ function UsersTab({ users, loading, onRefresh }) {
               <div className="modal-footer">
                 <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary">{editing ? 'Update' : 'Create'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {passwordUser && (
+        <div className="modal-overlay" onClick={() => setPasswordUser(null)}>
+          <div className="modal um-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Change Superadmin Password</h3>
+              <button className="modal-close" onClick={() => setPasswordUser(null)}>&times;</button>
+            </div>
+            <form onSubmit={handlePasswordChange}>
+              <div className="modal-body">
+                <p style={{ marginTop: 0, color: 'var(--gray-500)' }}>
+                  Signed in as <strong>{passwordUser.username}</strong>. Enter your current password to confirm this change.
+                </p>
+                <div className="form-group">
+                  <label>Current Password *</label>
+                  <input
+                    className="form-control"
+                    type={showPasswordFields ? 'text' : 'password'}
+                    value={passwordForm.current_password}
+                    onChange={e => setPasswordForm({ ...passwordForm, current_password: e.target.value })}
+                    autoComplete="current-password"
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>New Password * (minimum 8 characters)</label>
+                  <input
+                    className="form-control"
+                    type={showPasswordFields ? 'text' : 'password'}
+                    value={passwordForm.new_password}
+                    onChange={e => setPasswordForm({ ...passwordForm, new_password: e.target.value })}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Confirm New Password *</label>
+                  <input
+                    className="form-control"
+                    type={showPasswordFields ? 'text' : 'password'}
+                    value={passwordForm.confirm_password}
+                    onChange={e => setPasswordForm({ ...passwordForm, confirm_password: e.target.value })}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                </div>
+                <label className="um-replace-toggle">
+                  <input
+                    type="checkbox"
+                    checked={showPasswordFields}
+                    onChange={e => setShowPasswordFields(e.target.checked)}
+                  />
+                  Show passwords
+                </label>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-outline" onClick={() => setPasswordUser(null)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={changingPassword}>
+                  {changingPassword ? 'Changing...' : 'Change Password'}
+                </button>
               </div>
             </form>
           </div>
@@ -638,6 +757,7 @@ function PendingTab({ pending, loading, onRefresh }) {
 // ─── Main page ────────────────────────────────────────────
 
 function UserManagement() {
+  const { user } = useAuth();
   const [tab, setTab] = useState('users'); // 'users' | 'employees' | 'pending'
   const [users, setUsers] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -721,7 +841,7 @@ function UserManagement() {
 
         <div className="um-tab-content">
           {tab === 'users' && (
-            <UsersTab users={users} loading={loadingUsers} onRefresh={fetchUsers} />
+            <UsersTab users={users} loading={loadingUsers} onRefresh={fetchUsers} currentUser={user} />
           )}
           {tab === 'employees' && (
             <EmployeesTab employees={employees} loading={loadingEmployees} onRefresh={fetchEmployees} />

@@ -87,6 +87,8 @@ export const updateWithdrawalStatus = (id, data) => api.put(`/withdrawals/${id}/
 export const cancelWithdrawal = (id) => api.delete(`/withdrawals/${id}`);
 /** Approval: reject — keep visible, block next process */
 export const rejectWithdrawal = (id) => api.put(`/withdrawals/${id}/reject`, {}, withAuth());
+/** Approval: restore a rejected request to the stage it had before rejection */
+export const restoreRejectedWithdrawal = (id) => api.put(`/withdrawals/${id}/restore`, {}, withAuth());
 /** Approval: permanently delete request and all linked data */
 export const purgeWithdrawal = (id) => api.delete(`/withdrawals/${id}/purge`, withAuth());
 /** Superadmin: add a new item to a withdrawal in TAKING_OUT state */
@@ -218,6 +220,7 @@ export const getMe = () => api.get('/auth/me');
 export const getUsers = () => api.get('/users');
 export const createUser = (data) => api.post('/users', data);
 export const updateUser = (id, data) => api.put(`/users/${id}`, data);
+export const changeSuperadminPassword = (data) => api.put('/users/me/password', data);
 export const deleteUser = (id) => api.delete(`/users/${id}`);
 export const getPendingUsers = () => api.get('/users/pending');
 export const approveUser = (id, data) => api.put(`/users/${id}/approve`, data);

@@ -85,21 +85,22 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
   const hasConfiguredTimeout = Boolean(configuredDateStr || configuredTimeRange);
 
   const totalRequestMC = items.reduce((s, it) => s + Number(it.requested_mc || it.quantity_mc), 0);
-  const totalRequestKG = items.reduce(
-    (s, it) => s + (Number(it.requested_mc || it.quantity_mc) * Number(it.bulk_weight_kg)),
-    0
-  );
   // Items with hidden actual columns are excluded from the printed actual totals
   const totalActualMC = items.reduce((s, it) => s + (rowShowsActual(it) ? Number(it.quantity_mc) : 0), 0);
-  const totalNetKG = items.reduce(
-    (s, it) => s + (rowShowsActual(it) ? Number(it.quantity_mc) * Number(it.bulk_weight_kg) : 0),
-    0
-  );
 
   const minRows = 10;
   const emptyRows = Math.max(0, minRows - items.length);
   const showActualMc = data.status === 'FINISHED';
   const showFinalFields = data.status === 'FINISHED';
+  // Before Actual CTN is shown, net weight follows Requested CTN.
+  // Once Actual CTN is shown, net weight switches to Actual CTN.
+  const totalNetKG = items.reduce((sum, item) => {
+    if (!rowShowsActual(item)) return sum;
+    const packageCtn = showActualMc
+      ? Number(item.quantity_mc)
+      : Number(item.requested_mc || item.quantity_mc);
+    return sum + (packageCtn * Number(item.bulk_weight_kg));
+  }, 0);
   /** Approver is saved only after Approve / Start Taking Out — not while still PENDING */
   const showApprover = data.status && data.status !== 'PENDING' && data.status !== 'CANCELLED' && data.status !== 'REJECTED';
 
@@ -184,7 +185,7 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
             {items.map((item, i) => {
               const requestedMc = Number(item.requested_mc || item.quantity_mc);
               const actualMc = Number(item.quantity_mc);
-              const netKg = actualMc * Number(item.bulk_weight_kg);
+              const netKg = (showActualMc ? actualMc : requestedMc) * Number(item.bulk_weight_kg);
               const st = item.stock_type || 'BULK';
               const originDisplay = st === 'CONTAINER_EXTRA' ? (item.order_code || 'EXTRA')
                 : st === 'IMPORT' ? (item.order_code || 'IMPORT')
@@ -213,7 +214,7 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
                   <td className="wf-center wf-bold">{requestedMc}</td>
                   <td className="wf-center">{requestTimeStr}</td>
                   <td className="wf-center wf-bold">{showActualMc && showRow ? actualMc : ''}</td>
-                  <td className="wf-center">{showFinalFields && showRow ? netKg.toFixed(1) : ''}</td>
+                  <td className="wf-center">{showRow ? netKg.toFixed(1) : ''}</td>
                   <td className="wf-center">
                     {hasItemTimeout && showRow ? (
                       <>
@@ -250,9 +251,9 @@ const WithdrawFormPrint = forwardRef(function WithdrawFormPrint({ data }, ref) {
             <tr className="wf-total-row">
               <td colSpan="4" className="wf-right wf-bold">TOTAL</td>
               <td className="wf-center wf-bold">{totalRequestMC}</td>
-              <td className="wf-center wf-bold">{totalRequestKG.toFixed(1)}</td>
+              <td></td>
               <td className="wf-center wf-bold">{showActualMc ? totalActualMC : ''}</td>
-              <td className="wf-center wf-bold">{showFinalFields ? totalNetKG.toFixed(1) : ''}</td>
+              <td className="wf-center wf-bold">{totalNetKG.toFixed(1)}</td>
               <td></td>
               <td></td>
               <td></td>

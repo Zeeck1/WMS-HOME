@@ -4,6 +4,13 @@ import {
 
 export const STATUS_FLOW = ['PENDING', 'TAKING_OUT', 'READY', 'FINISHED'];
 
+/** Manage list / status cards — pending requests stay on Approval until acted on. */
+export const MANAGE_STATUS_FLOW = ['TAKING_OUT', 'READY', 'FINISHED'];
+
+export function isVisibleOnManage(status) {
+  return Boolean(status) && status !== 'PENDING';
+}
+
 export const STATUS_CONFIG = {
   PENDING:     { label: 'Receive Request', icon: <FiClock />,       color: '#f59e0b', bg: '#fffbeb', next: 'TAKING_OUT', nextLabel: 'Start Taking Out' },
   TAKING_OUT:  { label: 'Taking Out',      icon: <FiTruck />,       color: '#3b82f6', bg: '#eff6ff', next: 'READY',      nextLabel: 'Mark as Ready' },

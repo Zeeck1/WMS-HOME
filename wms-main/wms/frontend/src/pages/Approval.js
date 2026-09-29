@@ -5,7 +5,9 @@ import {
 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { copyWithdrawFormImageToClipboard } from '../utils/captureWithdrawFormImage';
-import { getWithdrawals, getWithdrawal, rejectWithdrawal, purgeWithdrawal } from '../services/api';
+import {
+  getWithdrawals, getWithdrawal, rejectWithdrawal, restoreRejectedWithdrawal, purgeWithdrawal,
+} from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { approveWithdrawalToTakingOut } from '../utils/withdrawApprove';
 import WithdrawFormPrint from '../components/WithdrawFormPrint';
@@ -38,7 +40,7 @@ export default function Approval() {
   const [selectedData, setSelectedData] = useState(null);
   const [loadingForm, setLoadingForm] = useState(false);
   const [processingId, setProcessingId] = useState(null);
-  const [confirmModal, setConfirmModal] = useState(null); // { action: 'approve'|'reject'|'delete', req }
+  const [confirmModal, setConfirmModal] = useState(null); // { action: 'approve'|'reject'|'restore'|'delete', req }
   const [copyingImage, setCopyingImage] = useState(false);
   const formRef = useRef(null);
 
@@ -152,6 +154,14 @@ export default function Approval() {
     setConfirmModal({ action: 'delete', req });
   };
 
+  const openRestoreModal = (req) => {
+    if (req.status !== 'REJECTED') {
+      toast.error('Only rejected requests can be restored');
+      return;
+    }
+    setConfirmModal({ action: 'restore', req });
+  };
+
   const executeApprove = async () => {
     const req = confirmModal?.req;
     if (!req) return;
@@ -189,6 +199,27 @@ export default function Approval() {
       fetchRequests();
     } catch (err) {
       toast.error(err.response?.data?.error || err.message || 'Failed to reject');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const executeRestore = async () => {
+    const req = confirmModal?.req;
+    if (!req) return;
+    setProcessingId(req.id);
+    try {
+      const res = await restoreRejectedWithdrawal(req.id);
+      const restoredStatus = res.data?.status || 'PENDING';
+      toast.success(`${req.request_no} restored to ${STATUS_CONFIG[restoredStatus]?.label || restoredStatus}`);
+      setConfirmModal(null);
+      if (selectedId === req.id) {
+        const detail = await getWithdrawal(req.id);
+        setSelectedData(detail.data);
+      }
+      fetchRequests();
+    } catch (err) {
+      toast.error(err.response?.data?.error || err.message || 'Failed to restore request');
     } finally {
       setProcessingId(null);
     }
@@ -251,6 +282,7 @@ export default function Approval() {
   const canDeleteSelected = Boolean(selectedReq);
   const modalReq = confirmModal?.req;
   const isRejectModal = confirmModal?.action === 'reject';
+  const isRestoreModal = confirmModal?.action === 'restore';
   const isDeleteModal = confirmModal?.action === 'delete';
 
   return (
@@ -464,6 +496,21 @@ export default function Approval() {
                       ปฏิเสธ Reject
                     </button>
                   )}
+                  {selectedReq?.status === 'REJECTED' && (
+                    <button
+                      type="button"
+                      className="ap-approve-btn ap-approve-btn--sm"
+                      onClick={() => openRestoreModal(selectedReq)}
+                      disabled={processingId === selectedId}
+                    >
+                      {processingId === selectedId ? (
+                        <span className="login-spinner" />
+                      ) : (
+                        <FiRefreshCw />
+                      )}
+                      คืนสู่กระบวนการ Restore Process
+                    </button>
+                  )}
                   {canDeleteSelected && (
                     <button
                       type="button"
@@ -498,7 +545,7 @@ export default function Approval() {
               </div>
               {selectedData.status === 'REJECTED' && (
                 <div className="ap-rejected-banner">
-                  This request is <strong>Rejected</strong> — it stays on record and cannot go to the next process.
+                  This request is <strong>Rejected</strong>. Use <strong>Restore Process</strong> to return it to its previous workflow stage.
                 </div>
               )}
               <div className="ap-form-scroll ap-form-print-target">
@@ -522,17 +569,25 @@ export default function Approval() {
               <FiX />
             </button>
             <div className={`ap-modal-icon ${isDeleteModal ? 'ap-modal-icon--delete' : isRejectModal ? 'ap-modal-icon--reject' : ''}`}>
-              {isDeleteModal ? <FiTrash2 /> : isRejectModal ? <FiXCircle /> : <FiAlertCircle />}
+              {isDeleteModal ? <FiTrash2 /> : isRejectModal ? <FiXCircle /> : isRestoreModal ? <FiRefreshCw /> : <FiAlertCircle />}
             </div>
             <h3 className="ap-modal-title">
-              {isDeleteModal ? 'ยืนยันการลบ' : isRejectModal ? 'ยืนยันการปฏิเสธ' : 'ยืนยันการอนุมัติ'}
+              {isDeleteModal
+                ? 'ยืนยันการลบ'
+                : isRejectModal
+                  ? 'ยืนยันการปฏิเสธ'
+                  : isRestoreModal
+                    ? 'ยืนยันการคืนสู่กระบวนการ'
+                    : 'ยืนยันการอนุมัติ'}
             </h3>
             <p className="ap-modal-sub">
               {isDeleteModal
                 ? 'Confirm Delete — remove from database'
                 : isRejectModal
                   ? 'Confirm Reject — keep visible, stop next process'
-                  : 'Confirm Approval'}
+                  : isRestoreModal
+                    ? 'Confirm Restore Process'
+                    : 'Confirm Approval'}
             </p>
             <div className="ap-modal-body">
               <div className="ap-modal-row">
@@ -551,7 +606,7 @@ export default function Approval() {
                 <span className="ap-modal-label">Submitted</span>
                 <strong>{formatWithdrawRequestedAt(modalReq)}</strong>
               </div>
-              {!isRejectModal && !isDeleteModal && (
+              {confirmModal.action === 'approve' && (
                 <div className="ap-modal-row">
                   <span className="ap-modal-label">ผู้อนุมัติ / Approver</span>
                   <strong className="ap-modal-approver">{approverName.trim()}</strong>
@@ -566,6 +621,11 @@ export default function Approval() {
                 ) : isRejectModal ? (
                   <>
                     The request will stay visible as <strong>Rejected</strong>. It cannot be approved or moved to the next process.
+                  </>
+                ) : isRestoreModal ? (
+                  <>
+                    This request will return to the workflow stage it had immediately before rejection.
+                    Older rejected records return to <strong>Receive Request</strong>.
                   </>
                 ) : (
                   <>
@@ -602,6 +662,16 @@ export default function Approval() {
                 >
                   {processingId ? <span className="login-spinner" /> : <FiXCircle />}
                   {processingId ? 'กำลังปฏิเสธ...' : 'ปฏิเสธ Reject'}
+                </button>
+              ) : isRestoreModal ? (
+                <button
+                  type="button"
+                  className="ap-approve-btn"
+                  onClick={executeRestore}
+                  disabled={Boolean(processingId)}
+                >
+                  {processingId ? <span className="login-spinner" /> : <FiRefreshCw />}
+                  {processingId ? 'กำลังคืนค่า...' : 'คืนสู่กระบวนการ Restore'}
                 </button>
               ) : (
                 <button

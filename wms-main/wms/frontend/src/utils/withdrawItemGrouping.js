@@ -2,9 +2,12 @@ import { sortLocationsNearestFirst, parseLocationCode } from '../config/warehous
 
 /** @typedef {'nearest' | 'cs_in_date'} WithdrawItemSortMode */
 
-/** FINISHED withdrawals keep saved line data even when stock is gone. */
+/**
+ * After Approval (or any step past PENDING), keep the saved request lines.
+ * PENDING still allocates from live Stock Summary.
+ */
 export function isWithdrawalFrozen(status) {
-  return status === 'FINISHED';
+  return Boolean(status) && status !== 'PENDING';
 }
 
 export const requestedMc = (it) => Number(it.requested_mc ?? it.quantity_mc ?? 0);
@@ -363,6 +366,16 @@ function inventoryBalanceForLine(inventory, line) {
   return Number(inv.hand_on_balance_mc) || 0;
 }
 
+/** Same requested fish item in Stock Summary (name, size, bulk weight, stock type). */
+export function relatedStockKey(item) {
+  return [
+    String(item?.fish_name || '').trim().toUpperCase(),
+    String(item?.size || '').trim().toUpperCase(),
+    Number(item?.bulk_weight_kg) || 0,
+    String(item?.stock_type || 'BULK').toUpperCase(),
+  ].join('||');
+}
+
 /** Match same fish product for alternative locations (ignore order/sticker). */
 export function sameFishKey(item) {
   return [
@@ -474,8 +487,9 @@ export function applyEditedQtyToWithdrawList(withdrawItems, editedQtyByKey = {})
 }
 
 /**
- * Manage / report pick lines from live Stock Summary (open requests)
- * or saved snapshot (FINISHED). Omits locations with no stock left.
+ * Manage / report pick lines from live Stock Summary (PENDING)
+ * or the saved request snapshot (after Approval / later statuses).
+ * PENDING omits locations with no stock left.
  */
 export function getWithdrawPickDisplayItems(withdrawal, inventory, sortMode = 'nearest', editedQtyByKey = {}) {
   const raw = (withdrawal?.items || []).filter((it) => !it._altSuggestion);
@@ -537,12 +551,59 @@ export function getManageDisplayItems(withdrawItems, inventory, sortMode, edited
 }
 
 /**
- * Stock Report lines: FINISHED requests keep saved snapshot lines.
- * Open requests allocate from live Stock Summary (nearest / FIFO / single place)
+ * Stock Report lines: after Approval, keep saved snapshot lines.
+ * PENDING requests allocate from live Stock Summary (nearest / FIFO / single place)
  * and omit original request locations that no longer have stock.
  */
 export function getWithdrawReportItems(withdrawal, inventory, sortMode = 'nearest') {
   return getWithdrawPickDisplayItems(withdrawal, inventory, sortMode, {});
+}
+
+/**
+ * All layout: every Stock Summary row that matches the requested fish
+ * (name, size, bulk weight, type, glazing, stock type) — not only the pick line.
+ */
+export function getWithdrawAllRelatedStockRows(withdrawal, inventory, sortMode = 'nearest') {
+  const requested = (withdrawal?.items || []).filter((it) => !it._altSuggestion);
+  if (!requested.length) return [];
+
+  const fishKeys = new Set(requested.map((it) => relatedStockKey(it)));
+  const reqByInvKey = {};
+  for (const wi of requested) {
+    const k = withdrawRequestLineKey(wi);
+    if (!k) continue;
+    if (!reqByInvKey[k]) reqByInvKey[k] = { requested_mc: 0, quantity_mc: 0 };
+    reqByInvKey[k].requested_mc += requestedMc(wi);
+    reqByInvKey[k].quantity_mc += actualMc(wi);
+  }
+
+  const stockRows = (inventory || []).filter((row) => fishKeys.has(relatedStockKey(row)));
+  const seen = new Set();
+  const uniqueStock = [];
+  for (const row of stockRows) {
+    const id = withdrawInventoryLineKey(row) || `row:${uniqueStock.length}:${row.line_place}:${row.stack_no}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    uniqueStock.push(row);
+  }
+
+  const source = uniqueStock.length ? uniqueStock : requested;
+  const lines = source.map((row) => {
+    const k = withdrawInventoryLineKey(row) || withdrawRequestLineKey(row);
+    const qty = (k && reqByInvKey[k]) || { requested_mc: 0, quantity_mc: 0 };
+    const isInv = row.hand_on_balance_mc != null || row.lot_id != null || row._imp_item_id != null;
+    return {
+      ...row,
+      requested_mc: qty.requested_mc,
+      quantity_mc: qty.quantity_mc,
+      hand_on_balance: isInv
+        ? (Number(row.hand_on_balance_mc) || 0)
+        : (Number(row.hand_on_balance) || 0),
+    };
+  });
+
+  const sort = sortMode === 'single_place' ? 'nearest' : sortMode;
+  return sortWithdrawItems(lines, sort);
 }
 
 /** Payload for PUT /withdrawals/:id/pick-route */

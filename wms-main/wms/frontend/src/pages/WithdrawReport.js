@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 
 import { useParams, useNavigate } from 'react-router-dom';
 
-import { FiPrinter, FiDownload, FiArrowLeft, FiMapPin, FiCalendar, FiBox } from 'react-icons/fi';
+import { FiPrinter, FiDownload, FiArrowLeft, FiMapPin, FiCalendar, FiBox, FiList } from 'react-icons/fi';
 
 import { toast } from 'react-toastify';
 
@@ -16,17 +16,32 @@ import { formatWithdrawRequestedAt, formatWithdrawSelectedAt } from '../utils/ba
 
 import { fetchManualInventoryAllTabs } from '../utils/manualInventoryShared';
 
+import { formatFlexibleDateDisplay } from '../utils/monthYearDate';
+
 import {
   requestedMc,
   actualMc,
   groupWithdrawItems,
   getWithdrawReportItems,
+  getWithdrawAllRelatedStockRows,
   withdrawFishNameLabel,
   formatWithdrawCsInDate,
   oldestCsInDateInGroup,
   withdrawLineStackNo,
   groupWithdrawItemsByLine,
 } from '../utils/withdrawItemGrouping';
+
+function displayDash(value) {
+  if (value == null) return '-';
+  const s = String(value).trim();
+  return s === '' ? '-' : s;
+}
+
+function allViewLotNo(line) {
+  const n = line?.lot_no_numeric;
+  if (n != null && String(n).trim() !== '') return String(n);
+  return displayDash(line?.lot_no);
+}
 
 
 
@@ -46,7 +61,7 @@ function WithdrawReport() {
 
   const [sortMode, setSortMode] = useState('nearest');
 
-  const [lineView, setLineView] = useState(false);
+  const [layoutMode, setLayoutMode] = useState('product');
 
 
 
@@ -111,7 +126,8 @@ function WithdrawReport() {
 
   );
 
-  const lineViewActive = lineView;
+  const lineViewActive = layoutMode === 'line';
+  const allViewActive = layoutMode === 'all';
 
   const lineGroups = useMemo(
 
@@ -128,6 +144,11 @@ function WithdrawReport() {
   const totalActMc = reportItems.reduce((s, it) => s + actualMc(it), 0);
 
   const totalKg = reportItems.reduce((s, it) => s + (actualMc(it) * Number(it.bulk_weight_kg)), 0);
+
+  const allLines = useMemo(
+    () => getWithdrawAllRelatedStockRows(data, inventory, sortMode),
+    [data, inventory, sortMode]
+  );
 
 
 
@@ -263,17 +284,17 @@ function WithdrawReport() {
             <span className="wr-layout-switch-label">Layout</span>
             <button
               type="button"
-              className={`wr-layout-switch-option ${!lineView ? 'active' : ''}`}
-              aria-pressed={!lineView}
-              onClick={() => setLineView(false)}
+              className={`wr-layout-switch-option ${layoutMode === 'product' ? 'active' : ''}`}
+              aria-pressed={layoutMode === 'product'}
+              onClick={() => setLayoutMode('product')}
             >
               By product
             </button>
             <button
               type="button"
-              className={`wr-layout-switch-option ${lineView ? 'active' : ''}`}
-              aria-pressed={lineView}
-              onClick={() => setLineView(true)}
+              className={`wr-layout-switch-option ${lineViewActive ? 'active' : ''}`}
+              aria-pressed={lineViewActive}
+              onClick={() => setLayoutMode('line')}
               title={sortMode === 'single_place'
                 ? 'Group by warehouse line — fewest picks (single fulfilling location) within each line'
                 : (sortByCsIn
@@ -282,6 +303,16 @@ function WithdrawReport() {
             >
               <FiMapPin aria-hidden />
               <span>Line view</span>
+            </button>
+            <button
+              type="button"
+              className={`wr-layout-switch-option ${allViewActive ? 'active' : ''}`}
+              aria-pressed={allViewActive}
+              onClick={() => setLayoutMode('all')}
+              title="Every Stock Summary row for the requested fish name, size, and related fields"
+            >
+              <FiList aria-hidden />
+              <span>All</span>
             </button>
           </div>
 
@@ -332,11 +363,16 @@ function WithdrawReport() {
                 const base = sortMode === 'single_place'
                   ? 'Single place (fewest picks)'
                   : (sortByCsIn ? 'Oldest CS IN date first (FIFO)' : 'Nearest line');
-                return lineViewActive ? `${base} — by Line / Place` : base;
+                return allViewActive
+                  ? `${base} — all stock for requested item`
+                  : (lineViewActive ? `${base} — by Line / Place` : base);
               })()}</span>
 
               {lineViewActive && (
                 <span className="wr-meta-line-view-tag">Line view layout</span>
+              )}
+              {allViewActive && (
+                <span className="wr-meta-line-view-tag">All related stock</span>
               )}
 
             </div>
@@ -345,6 +381,75 @@ function WithdrawReport() {
 
 
 
+          {allViewActive ? (
+            <div className="wr-all-wrap">
+              <table className="wr-table wr-table--all-view">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Fish Name</th>
+                    <th>Size</th>
+                    <th>Bulk WT (KG)</th>
+                    <th>Type</th>
+                    <th>Glazing</th>
+                    <th>CS IN Date</th>
+                    <th>Sticker</th>
+                    <th>Lot No</th>
+                    <th>Order</th>
+                    <th>Country</th>
+                    <th>Production Date</th>
+                    <th>Expiration Date</th>
+                    <th>Lines / Place</th>
+                    <th>Stack No</th>
+                    <th>ST NO</th>
+                    <th>Hand on Balance</th>
+                    <th>Request MC</th>
+                    <th>Actual (MC)</th>
+                    <th>KG</th>
+                    <th className="wr-col-remark">Remark</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allLines.map((line, lineIdx) => {
+                    const reqMc = requestedMc(line);
+                    const actMc = actualMc(line);
+                    const lineDiffers = actMc !== reqMc;
+                    const bulkWt = Number(line.bulk_weight_kg || 0);
+                    const balance = Number(line.hand_on_balance || 0);
+                    const kg = balance * bulkWt;
+                    return (
+                      <tr
+                        key={line.id ?? `${line.line_place}-${line.stack_no}-${lineIdx}`}
+                        className={lineIdx % 2 === 1 ? 'wr-all-row--alt' : undefined}
+                      >
+                        <td className="wr-center">{lineIdx + 1}</td>
+                        <td className="wr-all-fish">{displayDash(line.fish_name)}</td>
+                        <td className="wr-center">{displayDash(line.size)}</td>
+                        <td className="wr-center">{bulkWt ? bulkWt.toFixed(2) : '-'}</td>
+                        <td className="wr-center">{displayDash(line.type)}</td>
+                        <td className="wr-center">{displayDash(line.glazing)}</td>
+                        <td className="wr-center">{displayDash(formatWithdrawCsInDate(line.cs_in_date))}</td>
+                        <td className="wr-center">{displayDash(line.sticker)}</td>
+                        <td className="wr-center">{allViewLotNo(line)}</td>
+                        <td className="wr-center">{displayDash(line.order_code)}</td>
+                        <td className="wr-center">{displayDash(line.country)}</td>
+                        <td className="wr-center">{displayDash(formatFlexibleDateDisplay(line.production_date))}</td>
+                        <td className="wr-center">{displayDash(formatFlexibleDateDisplay(line.expiration_date))}</td>
+                        <td className="wr-center wr-all-loc">{displayDash(line.line_place)}</td>
+                        <td className="wr-center">{displayDash(withdrawLineStackNo(line))}</td>
+                        <td className="wr-center">{displayDash(line.st_no)}</td>
+                        <td className="wr-center wr-all-balance">{balance}</td>
+                        <td className="wr-center">{reqMc.toLocaleString()}</td>
+                        <td className={`wr-center${lineDiffers ? ' wr-balance' : ''}`}>{actMc.toLocaleString()}</td>
+                        <td className="wr-center">{kg.toFixed(2)}</td>
+                        <td className="wr-remark-cell" aria-label="Remark (handwriting)" />
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
           <table className={`wr-table${lineViewActive ? ' wr-table--line-view' : ''}`}>
 
             <thead>
@@ -514,7 +619,7 @@ function WithdrawReport() {
 
               })}
 
-              {!lineViewActive && itemGroups.map((group) => {
+              {!lineViewActive && !allViewActive && itemGroups.map((group) => {
 
                 const groupActualDiffers = group.totalActMc !== group.totalReqMc;
 
@@ -647,6 +752,7 @@ function WithdrawReport() {
             </tbody>
 
           </table>
+          )}
 
 
 
@@ -664,7 +770,7 @@ function WithdrawReport() {
 
               <span className="wr-summary-label">Locations</span>
 
-              <span className="wr-summary-value">{totalLocations}</span>
+              <span className="wr-summary-value">{allViewActive ? allLines.length : totalLocations}</span>
 
             </div>
 

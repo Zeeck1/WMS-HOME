@@ -1264,8 +1264,10 @@ router.put('/:id/reject', authMiddleware, async (req, res) => {
 
   try {
     await pool.query(
-      'UPDATE withdraw_requests SET status = "REJECTED", updated_at = NOW() WHERE id = ?',
-      [id]
+      `UPDATE withdraw_requests
+       SET rejected_from_status = ?, status = "REJECTED", updated_at = NOW()
+       WHERE id = ?`,
+      [exists[0].status, id]
     );
     res.json({
       message: 'Request rejected — still visible, cannot go to the next process',
@@ -1275,6 +1277,47 @@ router.put('/:id/reject', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Error rejecting withdrawal:', error);
     res.status(500).json({ error: 'Failed to reject withdrawal' });
+  }
+});
+
+// ─── PUT restore a rejected request to its previous workflow stage ──
+router.put('/:id/restore', authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (Number.isNaN(id)) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
+
+  const [rows] = await pool.query(
+    'SELECT id, request_no, status, rejected_from_status FROM withdraw_requests WHERE id = ?',
+    [id]
+  );
+  if (rows.length === 0) {
+    return res.status(404).json({ error: 'Request not found' });
+  }
+  if (rows[0].status !== 'REJECTED') {
+    return res.status(400).json({ error: 'Only rejected requests can be restored' });
+  }
+
+  const restorableStatuses = ['PENDING', 'TAKING_OUT', 'READY'];
+  const restoredStatus = restorableStatuses.includes(rows[0].rejected_from_status)
+    ? rows[0].rejected_from_status
+    : 'PENDING';
+
+  try {
+    await pool.query(
+      `UPDATE withdraw_requests
+       SET status = ?, rejected_from_status = NULL, updated_at = NOW()
+       WHERE id = ? AND status = "REJECTED"`,
+      [restoredStatus, id]
+    );
+    res.json({
+      message: `Request restored to ${restoredStatus}`,
+      request_no: rows[0].request_no,
+      status: restoredStatus,
+    });
+  } catch (error) {
+    console.error('Error restoring rejected withdrawal:', error);
+    res.status(500).json({ error: 'Failed to restore rejected withdrawal' });
   }
 });
 

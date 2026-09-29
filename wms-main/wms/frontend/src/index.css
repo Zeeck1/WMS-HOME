@@ -5991,7 +5991,7 @@ body {
   outline-offset: 2px;
 }
 
-/* Layout switch — By product / Line view */
+/* Layout switch — By product / Line view / All */
 .wr-layout-switch {
   display: inline-flex;
   align-items: center;
@@ -6066,7 +6066,45 @@ body {
   background: #ccfbf1;
   border: 1px solid #99f6e4;
   border-radius: 999px;
-  vertical-align: middle;
+}
+
+.wr-all-wrap {
+  overflow-x: auto;
+}
+
+.wr-table--all-view {
+  font-size: 0.78rem;
+  min-width: 1280px;
+}
+
+.wr-table--all-view th,
+.wr-table--all-view td {
+  white-space: nowrap;
+  padding: 7px 8px;
+}
+
+.wr-table--all-view .wr-all-fish {
+  font-weight: 700;
+  color: #1e3a5f;
+  text-align: left;
+}
+
+.wr-table--all-view .wr-all-loc {
+  font-weight: 700;
+  color: #0f766e;
+}
+
+.wr-table--all-view .wr-all-balance {
+  background: #fef2f2;
+  font-weight: 700;
+}
+
+.wr-table--all-view tr.wr-all-row--alt td {
+  background: #f8fafc;
+}
+
+.wr-table--all-view tr.wr-all-row--alt td.wr-all-balance {
+  background: #fee2e2;
 }
 
 .wr-group-cs-summary {

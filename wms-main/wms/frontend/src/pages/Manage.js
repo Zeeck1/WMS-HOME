@@ -5,7 +5,7 @@ import {
   FiMapPin, FiCalendar, FiRotateCcw, FiSave, FiPlus, FiEdit3
 } from 'react-icons/fi';
 import {
-  STATUS_FLOW, STATUS_CONFIG, withdrawDeptBadgeClass, isWithdrawStopped,
+  STATUS_FLOW, MANAGE_STATUS_FLOW, STATUS_CONFIG, withdrawDeptBadgeClass, isWithdrawStopped, isVisibleOnManage,
   loadWithdrawApproverName, saveWithdrawApproverName,
 } from './manageShared';
 import { toast } from 'react-toastify';
@@ -365,11 +365,12 @@ function Manage() {
     setLoading(true);
     try {
       const params = {};
-      if (filterStatus) params.status = filterStatus;
+      if (filterStatus && filterStatus !== 'PENDING') params.status = filterStatus;
       if (filterDept) params.department = filterDept;
       if (dateFilter) params.date = dateFilter;
       const res = await getWithdrawals(params);
-      setRequests(res.data);
+      const rows = Array.isArray(res.data) ? res.data : [];
+      setRequests(rows.filter((r) => isVisibleOnManage(r.status)));
     } catch (err) {
       toast.error('Failed to load requests');
     } finally {
@@ -843,6 +844,7 @@ function Manage() {
   };
 
   const filtered = requests.filter(r => {
+    if (!isVisibleOnManage(r.status)) return false;
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return r.request_no.toLowerCase().includes(q) ||
@@ -890,9 +892,11 @@ function Manage() {
             <option value="RM">RM</option>
             <option value="Branch.05 (SM)">Branch.05 (SM)</option>
           </select>
-          <select className="form-control" style={{ width: 'auto' }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          <select className="form-control" style={{ width: 'auto' }} value={filterStatus === 'PENDING' ? '' : filterStatus} onChange={e => setFilterStatus(e.target.value)}>
             <option value="">All Status</option>
-            {Object.entries(STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            {Object.entries(STATUS_CONFIG)
+              .filter(([k]) => k !== 'PENDING')
+              .map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
           </select>
         </div>
 
@@ -922,7 +926,7 @@ function Manage() {
 
         {/* Status summary cards */}
         <div className="mg-status-cards">
-          {STATUS_FLOW.map(s => (
+          {MANAGE_STATUS_FLOW.map(s => (
             <div
               key={s}
               className={`mg-status-card ${filterStatus === s ? 'active' : ''}`}

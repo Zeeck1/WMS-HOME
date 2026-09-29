@@ -118,6 +118,7 @@ function SidebarNav({ collapsed, mobileOpen, onNavClick }) {
   const location = useLocation();
   const { hasAccess, user } = useAuth();
   const [pendingReceiveCount, setPendingReceiveCount] = useState(0);
+  const [takingOutCount, setTakingOutCount] = useState(0);
 
   useEffect(() => {
     if (mobileOpen) onNavClick();
@@ -129,16 +130,25 @@ function SidebarNav({ collapsed, mobileOpen, onNavClick }) {
   useEffect(() => {
     if (!canManage && !canApproval) {
       setPendingReceiveCount(0);
+      setTakingOutCount(0);
       return;
     }
     let cancelled = false;
     const load = async () => {
       try {
-        const res = await getWithdrawals({ status: 'PENDING' });
-        const n = Array.isArray(res.data) ? res.data.length : 0;
-        if (!cancelled) setPendingReceiveCount(n);
+        const [pendingRes, takingRes] = await Promise.all([
+          canApproval ? getWithdrawals({ status: 'PENDING' }) : Promise.resolve({ data: [] }),
+          canManage ? getWithdrawals({ status: 'TAKING_OUT' }) : Promise.resolve({ data: [] }),
+        ]);
+        if (!cancelled) {
+          setPendingReceiveCount(Array.isArray(pendingRes.data) ? pendingRes.data.length : 0);
+          setTakingOutCount(Array.isArray(takingRes.data) ? takingRes.data.length : 0);
+        }
       } catch {
-        if (!cancelled) setPendingReceiveCount(0);
+        if (!cancelled) {
+          setPendingReceiveCount(0);
+          setTakingOutCount(0);
+        }
       }
     };
     load();
@@ -157,7 +167,7 @@ function SidebarNav({ collapsed, mobileOpen, onNavClick }) {
         {icon}
         <span className="nav-label">{label}</span>
         {showBadge && (
-          <span className="nav-badge" title={`Receive Request: ${badgeCount}`}>
+          <span className="nav-badge" title={pageKey === 'manage' ? `Taking Out: ${badgeCount}` : `Receive Request: ${badgeCount}`}>
             {badgeCount > 99 ? '99+' : badgeCount}
           </span>
         )}
@@ -167,7 +177,11 @@ function SidebarNav({ collapsed, mobileOpen, onNavClick }) {
 
   const renderNavItem = (item) => {
     const Icon = item.Icon;
-    const badge = (item.pageKey === 'manage' || item.pageKey === 'approval') ? pendingReceiveCount : undefined;
+    const badge = item.pageKey === 'approval'
+      ? pendingReceiveCount
+      : item.pageKey === 'manage'
+        ? takingOutCount
+        : undefined;
     return link(item.to, <Icon />, item.label, item.pageKey, item.end, badge);
   };
 

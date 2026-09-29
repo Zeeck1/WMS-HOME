@@ -198,10 +198,63 @@ router.post('/', async (req, res) => {
   }
 });
 
+// PUT /api/users/me/password — superadmin changes only their own password
+router.put('/me/password', async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body;
+    if (!current_password || !new_password) {
+      return res.status(400).json({ error: 'Current password and new password are required' });
+    }
+    if (String(new_password).length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters' });
+    }
+    if (current_password === new_password) {
+      return res.status(400).json({ error: 'New password must be different from the current password' });
+    }
+
+    const [rows] = await pool.query(
+      'SELECT id, role, password_hash FROM users WHERE id = ? AND is_active = 1',
+      [req.user.id]
+    );
+    if (rows.length === 0 || rows[0].role !== 'superadmin') {
+      return res.status(403).json({ error: 'Only the signed-in superadmin can change this password' });
+    }
+
+    const valid = await bcrypt.compare(current_password, rows[0].password_hash);
+    if (!valid) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    const hash = await bcrypt.hash(new_password, 10);
+    await pool.query(
+      'UPDATE users SET password_hash = ?, updated_at = NOW() WHERE id = ?',
+      [hash, req.user.id]
+    );
+
+    res.json({ message: 'Password changed successfully' });
+  } catch (error) {
+    console.error('Error changing superadmin password:', error);
+    res.status(500).json({ error: 'Failed to change password' });
+  }
+});
+
 // PUT /api/users/:id — update user (password optional)
 router.put('/:id', async (req, res) => {
   try {
     const { username, password, display_name, permissions, withdraw_departments, is_active } = req.body;
+
+    const [targetRows] = await pool.query(
+      'SELECT id, role FROM users WHERE id = ?',
+      [req.params.id]
+    );
+    if (targetRows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (targetRows[0].role === 'superadmin') {
+      return res.status(403).json({
+        error: 'Superadmin can only change their own password using the password change action',
+      });
+    }
 
     const updates = [];
     const params = [];

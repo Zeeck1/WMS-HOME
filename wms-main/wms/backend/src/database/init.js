@@ -467,6 +467,7 @@ async function initDatabase() {
         request_no VARCHAR(50) NOT NULL UNIQUE,
         department ENUM('PK','RM','Branch.05 (SM)') NOT NULL,
         status ENUM('PENDING','TAKING_OUT','READY','FINISHED','CANCELLED','REJECTED') NOT NULL DEFAULT 'PENDING',
+        rejected_from_status ENUM('PENDING','TAKING_OUT','READY') DEFAULT NULL,
         withdraw_date DATE DEFAULT NULL,
         request_time TIME DEFAULT NULL,
         finished_at TIMESTAMP NULL DEFAULT NULL,
@@ -554,6 +555,19 @@ async function initDatabase() {
       }
     } catch (e) {
       console.error('  Migration withdraw_requests REJECTED status:', e.message);
+    }
+
+    // Migration: remember the workflow stage so a rejected request can be restored
+    try {
+      if (!(await tableHasColumn(connection, 'withdraw_requests', 'rejected_from_status', dbName))) {
+        await connection.query(
+          `ALTER TABLE withdraw_requests
+           ADD COLUMN rejected_from_status ENUM('PENDING','TAKING_OUT','READY') DEFAULT NULL AFTER status`
+        );
+        console.log('  Migration: rejected_from_status on withdraw_requests');
+      }
+    } catch (e) {
+      console.error('  Migration rejected_from_status:', e.message);
     }
 
     // Migration: pick route (FIFO / nearest) save + undo backup on withdraw_requests
