@@ -63,6 +63,7 @@ export const adjustInventoryBalance = (data) => api.post('/movements/adjust', da
 // ─── Inventory ────────────────────────────────────────
 export const getInventory = (params) => api.get('/inventory', { params });
 export const getDashboard = () => api.get('/inventory/dashboard');
+export const getNewDashboard = (params) => api.get('/new-dashboard', { params });
 export const deleteAllStockData = (params) => api.delete('/inventory/all', { params });
 
 // ─── Withdrawals ──────────────────────────────────────

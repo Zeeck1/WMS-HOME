@@ -36,6 +36,7 @@ app.use('/api/locations', require('./routes/locations'));
 app.use('/api/lots', require('./routes/lots'));
 app.use('/api/movements', require('./routes/movements'));
 app.use('/api/inventory', require('./routes/inventory'));
+app.use('/api/new-dashboard', require('./routes/newDashboard'));
 app.use('/api/upload', require('./routes/upload'));
 app.use('/api/withdrawals', require('./routes/withdrawals'));
 app.use('/api/settings', require('./routes/settings'));

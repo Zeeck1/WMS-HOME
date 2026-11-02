@@ -6,6 +6,7 @@ const AuthContext = createContext(null);
 // All page keys that can be permissioned
 export const ALL_PAGES = [
   { key: 'dashboard',        label: 'Dashboard',            path: '/' },
+  { key: 'new-dashboard',    label: 'New Dashboard',        path: '/new-dashboard' },
   { key: 'ck-intelligence',  label: 'CK Intelligence',      path: '/ck-intelligence' },
   { key: 'products',         label: 'Product Master',        path: '/products' },
   { key: 'locations',        label: 'Location Master',       path: '/locations' },

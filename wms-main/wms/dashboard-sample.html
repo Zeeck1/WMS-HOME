@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CK Cold Storage — Stock Dashboard</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --surface-1: #fcfcfb;
+            --plane: #f9f9f7;
+            --text-primary: #0b0b0b;
+            --text-secondary: #52514e;
+            --muted: #898781;
+            --grid: #e1e0d9;
+            --axis: #c3c2b7;
+            --border: rgba(11, 11, 11, 0.10);
+            --s1: #2a78d6;
+            --s2: #eb6834;
+            --s3: #1baf7a;
+            --seq-250: #86b6ef;
+            --seq-350: #5598e7;
+            --seq-450: #2a78d6;
+            --seq-550: #1c5cab;
+            --seq-650: #104281;
+            --seq-700: #0d366b;
+            --good: #0ca30c;
+            --warning: #fab219;
+            --serious: #ec835a;
+            --critical: #d03b3b;
+            --success-text: #006300;
+        }
+
+        :root[data-theme="dark"] {
+            color-scheme: dark;
+            --surface-1: #1a1a19;
+            --plane: #0d0d0d;
+            --text-primary: #ffffff;
+            --text-secondary: #c3c2b7;
+            --muted: #898781;
+            --grid: #2c2c2a;
+            --axis: #383835;
+            --border: rgba(255, 255, 255, 0.10);
+            --s1: #3987e5;
+            --s2: #d95926;
+            --s3: #199e70;
+            --seq-250: #184f95;
+            --seq-350: #1c5cab;
+            --seq-450: #256abf;
+            --seq-550: #3987e5;
+            --seq-650: #5598e7;
+            --seq-700: #86b6ef;
+            --success-text: #0ca30c;
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        body {
+            margin: 0;
+            background: var(--plane);
+            color: var(--text-primary);
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+            font-size: 14px;
+            line-height: 1.5
+        }
+
+        .wrap {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 28px 20px 72px
+        }
+
+        header {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            align-items: flex-start;
+            justify-content: space-between;
+            margin-bottom: 8px
+        }
+
+        h1 {
+            font-size: 22px;
+            margin: 0 0 4px;
+            letter-spacing: -.01em
+        }
+
+        .sub {
+            color: var(--text-secondary);
+            font-size: 13px;
+            margin: 0
+        }
+
+        .btn {
+            background: var(--surface-1);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            border-radius: 8px;
+            padding: 7px 12px;
+            font: inherit;
+            font-size: 13px;
+            cursor: pointer
+        }
+
+        .btn:hover {
+            color: var(--text-primary)
+        }
+
+        .card {
+            background: var(--surface-1);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 20px 22px;
+            margin-top: 18px
+        }
+
+        h2 {
+            font-size: 15px;
+            margin: 0 0 2px;
+            letter-spacing: -.005em
+        }
+
+        .note {
+            color: var(--muted);
+            font-size: 12px;
+            margin: 0 0 18px
+        }
+
+        .hero {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 34px;
+            align-items: flex-end
+        }
+
+        .hero .fig {
+            font-size: 52px;
+            font-weight: 600;
+            line-height: 1;
+            letter-spacing: -.02em
+        }
+
+        .hero .unit {
+            font-size: 16px;
+            color: var(--text-secondary);
+            font-weight: 400;
+            margin-left: 6px
+        }
+
+        .tiles {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 14px;
+            margin-top: 20px
+        }
+
+        .tile {
+            background: var(--plane);
+            border: 1px solid var(--border);
+            border-radius: 11px;
+            padding: 13px 15px
+        }
+
+        .tile .lab {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 5px
+        }
+
+        .tile .val {
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: -.01em
+        }
+
+        .tile .meta {
+            font-size: 11.5px;
+            color: var(--muted);
+            margin-top: 3px
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin: 0 0 14px;
+            font-size: 12.5px;
+            color: var(--text-secondary)
+        }
+
+        .legend span {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px
+        }
+
+        .sw {
+            width: 11px;
+            height: 11px;
+            border-radius: 3px;
+            display: inline-block
+        }
+
+        .ln {
+            width: 16px;
+            height: 2px;
+            border-radius: 2px;
+            display: inline-block
+        }
+
+        svg {
+            display: block;
+            width: 100%;
+            overflow: visible
+        }
+
+        .tick {
+            fill: var(--muted);
+            font-size: 11px
+        }
+
+        .vlab {
+            fill: var(--text-secondary);
+            font-size: 11.5px;
+            font-weight: 600
+        }
+
+        .clab {
+            fill: var(--text-secondary);
+            font-size: 11.5px
+        }
+
+        .gl {
+            stroke: var(--grid);
+            stroke-width: 1
+        }
+
+        .ax {
+            stroke: var(--axis);
+            stroke-width: 1
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12.5px;
+            font-variant-numeric: tabular-nums
+        }
+
+        th {
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--axis);
+            padding: 7px 10px 7px 0;
+            font-size: 11.5px;
+            text-transform: uppercase;
+            letter-spacing: .04em
+        }
+
+        td {
+            padding: 7px 10px 7px 0;
+            border-bottom: 1px solid var(--grid);
+            color: var(--text-primary)
+        }
+
+        th.n,
+        td.n {
+            text-align: right
+        }
+
+        .pill {
+            display: inline-block;
+            padding: 1px 8px;
+            border-radius: 99px;
+            font-size: 11px;
+            font-weight: 600;
+            border: 1px solid
+        }
+
+        .p-crit {
+            color: var(--critical);
+            border-color: var(--critical)
+        }
+
+        .p-warn {
+            color: var(--serious);
+            border-color: var(--serious)
+        }
+
+        .p-ok {
+            color: var(--success-text);
+            border-color: var(--good)
+        }
+
+        details {
+            margin-top: 14px
+        }
+
+        summary {
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 12.5px;
+            padding: 4px 0
+        }
+
+        .grid2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 18px
+        }
+
+        @media(max-width:820px) {
+            .grid2 {
+                grid-template-columns: 1fr
+            }
+        }
+
+        .cols {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 14px
+        }
+
+        .callout {
+            display: flex;
+            gap: 11px;
+            align-items: flex-start;
+            background: var(--plane);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--serious);
+            border-radius: 9px;
+            padding: 12px 15px;
+            margin-top: 16px;
+            font-size: 13px;
+            color: var(--text-secondary)
+        }
+
+        .callout b {
+            color: var(--text-primary)
+        }
+
+        .tip {
+            position: fixed;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity .1s;
+            background: var(--surface-1);
+            border: 1px solid var(--border);
+            border-radius: 9px;
+            padding: 8px 11px;
+            font-size: 12.5px;
+            z-index: 99;
+            box-shadow: 0 6px 22px rgba(0, 0, 0, .14);
+            white-space: nowrap;
+            color: var(--text-primary)
+        }
+
+        .tip b {
+            font-weight: 600
+        }
+
+        .hit {
+            cursor: default
+        }
+
+        footer {
+            color: var(--muted);
+            font-size: 11.5px;
+            margin-top: 26px;
+            text-align: center
+        }
+
+        .reqhead {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+            align-items: flex-start;
+            justify-content: space-between
+        }
+
+        .reqctl {
+            display: flex;
+            gap: 7px;
+            align-items: center;
+            flex-wrap: wrap
+        }
+
+        .reqctl input[type=date] {
+            font-variant-numeric: tabular-nums
+        }
+
+        .form {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin-top: 16px;
+            overflow: hidden;
+            background: var(--plane)
+        }
+
+        .form-hd {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 18px;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: var(--surface-1);
+            border-bottom: 1px solid var(--border)
+        }
+
+        .form-id {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap
+        }
+
+        .form-no {
+            font-weight: 600;
+            font-size: 13.5px;
+            font-variant-numeric: tabular-nums
+        }
+
+        .form-meta {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+            font-size: 12px;
+            color: var(--text-secondary)
+        }
+
+        .form-meta b {
+            color: var(--text-primary);
+            font-weight: 600
+        }
+
+        .form table {
+            margin: 0
+        }
+
+        .form th {
+            padding: 9px 12px 8px;
+            background: var(--surface-1)
+        }
+
+        .form td {
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--grid)
+        }
+
+        .form tbody tr:last-child td {
+            border-bottom: 1px solid var(--axis)
+        }
+
+        .form tfoot td {
+            font-weight: 600;
+            border-bottom: none;
+            padding: 10px 12px
+        }
+
+        .form .idx {
+            color: var(--muted);
+            width: 26px
+        }
+
+        .lotno {
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace
+        }
+
+        .loc {
+            font-weight: 600;
+            font-variant-numeric: tabular-nums
+        }
+
+        .proc {
+            font-size: 11px;
+            color: var(--text-secondary)
+        }
+
+        .short {
+            display: inline-block;
+            padding: 0 6px;
+            border-radius: 5px;
+            background: rgba(208, 59, 59, .12);
+            color: var(--critical);
+            font-weight: 600
+        }
+
+        .empty {
+            text-align: center;
+            padding: 44px 20px;
+            color: var(--muted);
+            font-size: 13px
+        }
+
+        .daybar {
+            display: flex;
+            gap: 22px;
+            flex-wrap: wrap;
+            margin-top: 14px;
+            font-size: 12.5px;
+            color: var(--text-secondary)
+        }
+
+        .daybar b {
+            color: var(--text-primary)
+        }
+
+        .chips {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 12px
+        }
+
+        .chip {
+            border: 1px solid var(--border);
+            background: var(--surface-1);
+            color: var(--text-secondary);
+            border-radius: 99px;
+            padding: 3px 11px;
+            font-size: 11.5px;
+            cursor: pointer;
+            font: inherit;
+            font-size: 11.5px
+        }
+
+        .chip:hover {
+            color: var(--text-primary)
+        }
+
+        .chip.on {
+            border-color: var(--s1);
+            color: var(--s1);
+            font-weight: 600
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+
+        <header>
+            <div>
+                <h1>CK Cold Storage — Stock Dashboard</h1>
+                <p class="sub">Snapshot as of 17 August 2026 · CK Thailand WMS</p>
+                <p class="sub" style="margin-top:4px;font-size:12px;color:var(--muted)">Layout v2 — Overview → Aging
+                    &amp; expiry → Request forms → Stock composition → Movement trends</p>
+            </div>
+            <button class="btn" id="theme">Dark mode</button>
+        </header>
+
+        <!-- ============ OVERVIEW ============ -->
+        <div class="card">
+            <div class="hero">
+                <div>
+                    <div class="tile-lab" style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">Total
+                        stock on hand</div>
+                    <div class="fig">714,713<span class="unit">kg</span></div>
+                </div>
+            </div>
+            <div class="tiles">
+                <div class="tile">
+                    <div class="lab">Master cartons</div>
+                    <div class="val">37,836</div>
+                    <div class="meta">across 2,339 lots</div>
+                </div>
+                <div class="tile">
+                    <div class="lab">Locations in use</div>
+                    <div class="val">928</div>
+                    <div class="meta">of 941 · 98.6% occupied</div>
+                </div>
+                <div class="tile">
+                    <div class="lab">Distinct products</div>
+                    <div class="val">219</div>
+                    <div class="meta">SKU / size combinations</div>
+                </div>
+                <div class="tile">
+                    <div class="lab">Avg lot size</div>
+                    <div class="val">306<span style="font-size:14px;font-weight:400;color:var(--text-secondary)">
+                            kg</span></div>
+                    <div class="meta">16 MC per lot</div>
+                </div>
+                <div class="tile">
+                    <div class="lab">Open withdrawals</div>
+                    <div class="val">95</div>
+                    <div class="meta">3 pending · 92 taking out</div>
+                </div>
+            </div>
+            <div class="callout" style="border-left-color:var(--critical)">
+                <span>⚠</span>
+                <div><b>Capacity is effectively full.</b> 928 of 941 storage positions are occupied — only 13 free
+                    stacks remain. Any inbound volume needs an outbound clear-down first.</div>
+            </div>
+        </div>
+
+        <!-- ============ AGING ============ -->
+        <div class="card">
+            <h2>Aging &amp; expiry risk</h2>
+            <p class="note">Longest-resident stock first, then how the whole warehouse ages. As of 17 Aug 2026.</p>
+
+            <h2 style="font-size:13.5px">Oldest lots on hand</h2>
+            <p class="note">Longest-resident stock — first candidates for clear-down.</p>
+            <table id="t-old">
+                <thead>
+                    <tr>
+                        <th>Product</th>
+                        <th>Size</th>
+                        <th>Location</th>
+                        <th>In date</th>
+                        <th class="n">Age</th>
+                        <th class="n">MC</th>
+                        <th class="n">Kg</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <h2 style="font-size:13.5px;margin-top:30px">Stock by time in cold store</h2>
+            <p class="note">Kilograms on hand by age bucket (days since cs_in_date).</p>
+            <svg id="c-age" viewBox="0 0 900 300"></svg>
+
+            <div class="cols" style="margin-top:20px">
+                <div class="tile">
+                    <div class="lab">Older than 90 days</div>
+                    <div class="val" style="color:var(--text-primary)">365,716 kg</div>
+                    <div class="meta">51.2% of stock · 1,483 lots</div>
+                </div>
+                <div class="tile">
+                    <div class="lab">Older than 180 days</div>
+                    <div class="val">178,571 kg</div>
+                    <div class="meta">25.0% of stock · 706 lots</div>
+                </div>
+                <div class="tile">
+                    <div class="lab">Older than 1 year</div>
+                    <div class="val">8,534 kg</div>
+                    <div class="meta">1.2% of stock · 29 lots</div>
+                </div>
+                <div class="tile">
+                    <div class="lab">Lots past expiry date</div>
+                    <div class="val">3</div>
+                    <div class="meta">50 kg · 7 MC</div>
+                </div>
+            </div>
+
+            <div class="callout">
+                <span>⚠</span>
+                <div><b>Half the warehouse is over 90 days old.</b> 365,716 kg has been in cold store for more than
+                    three months, and 178,571 kg for more than six. With capacity at 98.6%, the aged tail is what is
+                    blocking space.</div>
+            </div>
+
+            <div class="callout" style="border-left-color:var(--warning)">
+                <span>◔</span>
+                <div><b>Expiry dates are barely recorded.</b> Only <b>65 of 2,339 lots</b> (2.8%) carry an expiration
+                    date, so expiry risk can't be measured for 97% of stock — aging by intake date is the only usable
+                    proxy today. Capturing expiry at stock-in would fix this.</div>
+            </div>
+        </div>
+
+        <!-- ============ REQUEST FORMS FOR THE DAY ============ -->
+        <div class="card">
+            <div class="reqhead">
+                <div>
+                    <h2>Request forms</h2>
+                    <p class="note" style="margin-bottom:0">Every item asked of cold storage on the selected day. Pulled
+                        live from the WMS.</p>
+                </div>
+                <div class="reqctl">
+                    <button class="btn" id="rq-prev" title="Previous day">←</button>
+                    <input type="date" class="btn" id="rq-date">
+                    <button class="btn" id="rq-next" title="Next day">→</button>
+                    <button class="btn" id="rq-today">Today</button>
+                </div>
+            </div>
+            <div id="rq-body">
+                <p class="note" style="margin-top:18px">Loading request forms…</p>
+            </div>
+        </div>
+
+        <!-- ============ COMPOSITION ============ -->
+        <div class="card">
+            <h2>Stock composition</h2>
+            <p class="note">What is in the warehouse, by stock type, product and size.</p>
+
+            <div class="legend" id="lg-type"></div>
+            <svg id="c-type" viewBox="0 0 900 68" preserveAspectRatio="none" style="height:68px"></svg>
+            <div
+                style="display:flex;gap:26px;flex-wrap:wrap;margin-top:12px;font-size:12.5px;color:var(--text-secondary)">
+                <span><b style="color:var(--text-primary)">BULK</b> 643,625 kg · 90.1% · 2,212 lots</span>
+                <span><b style="color:var(--text-primary)">IMPORT</b> 42,495 kg · 5.9% · 51 lots</span>
+                <span><b style="color:var(--text-primary)">CONTAINER EXTRA</b> 28,593 kg · 4.0% · 76 lots</span>
+            </div>
+
+            <div class="grid2" style="margin-top:26px">
+                <div>
+                    <h2 style="font-size:13.5px">Top 10 products by weight</h2>
+                    <p class="note">kilograms on hand</p>
+                    <svg id="c-prod" viewBox="0 0 460 330"></svg>
+                </div>
+                <div>
+                    <h2 style="font-size:13.5px">Top 10 sizes by weight</h2>
+                    <p class="note">kilograms on hand</p>
+                    <svg id="c-size" viewBox="0 0 460 330"></svg>
+                </div>
+            </div>
+
+            <div class="callout">
+                <span>◆</span>
+                <div><b>Heavy concentration in two SKUs.</b> ROHU/SO and ROHU/G alone are 320,141 kg — <b>45%</b> of
+                    everything in the building. The top 5 products cover 62%, the top 10 cover 78%.</div>
+            </div>
+
+            <details>
+                <summary>Show product table (all 20 top products)</summary>
+                <table id="t-prod">
+                    <thead>
+                        <tr>
+                            <th>Product</th>
+                            <th class="n">MC</th>
+                            <th class="n">Kg</th>
+                            <th class="n">Lots</th>
+                            <th class="n">% of stock</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </details>
+        </div>
+
+        <!-- ============ MOVEMENT ============ -->
+        <div class="card">
+            <h2>Movement trends</h2>
+            <p class="note">Daily stock in vs stock out, kilograms — last 42 recorded days (24 Jun – 15 Aug 2026).</p>
+
+            <div class="legend">
+                <span><i class="ln" style="background:var(--s1)"></i> Stock IN</span>
+                <span><i class="ln" style="background:var(--s2)"></i> Stock OUT</span>
+            </div>
+            <svg id="c-mv" viewBox="0 0 900 320"></svg>
+
+            <div class="cols" style="margin-top:20px">
+                <div class="tile">
+                    <div class="lab">Received (excl. opening load)</div>
+                    <div class="val">247,607<span style="font-size:13px;font-weight:400"> kg</span></div>
+                    <div class="meta">2 Jun – 15 Aug 2026</div>
+                </div>
+                <div class="tile">
+                    <div class="lab">Dispatched</div>
+                    <div class="val">102,935<span style="font-size:13px;font-weight:400"> kg</span></div>
+                    <div class="meta">same period</div>
+                </div>
+                <div class="tile">
+                    <div class="lab">Net build-up</div>
+                    <div class="val" style="color:var(--critical)">+144,672<span style="font-size:13px;font-weight:400">
+                            kg</span></div>
+                    <div class="meta">IN is 2.4× OUT</div>
+                </div>
+                <div class="tile">
+                    <div class="lab">Est. months of cover</div>
+                    <div class="val">~17</div>
+                    <div class="meta">at current dispatch rate</div>
+                </div>
+            </div>
+
+            <div class="callout" style="border-left-color:var(--critical)">
+                <span>⚠</span>
+                <div><b>Inflow is running far ahead of outflow.</b> Since June the site has taken in 2.4 kg for every 1
+                    kg dispatched, adding ~145 tonnes net. That is the direct cause of the 98.6% occupancy and the aging
+                    tail.</div>
+            </div>
+
+            <div class="grid2" style="margin-top:26px">
+                <div>
+                    <h2 style="font-size:13.5px">Top 10 products dispatched</h2>
+                    <p class="note">kilograms out, Jun–Aug 2026</p>
+                    <svg id="c-out" viewBox="0 0 460 330"></svg>
+                </div>
+                <div>
+                    <h2 style="font-size:13.5px">Withdrawal requests by status</h2>
+                    <p class="note">155 requests on record</p>
+                    <table style="margin-top:6px">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th class="n">Requests</th>
+                                <th class="n">MC requested</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span class="pill p-warn">PENDING</span></td>
+                                <td class="n">3</td>
+                                <td class="n">729</td>
+                            </tr>
+                            <tr>
+                                <td><span class="pill p-warn">TAKING OUT</span></td>
+                                <td class="n">92</td>
+                                <td class="n">14,936</td>
+                            </tr>
+                            <tr>
+                                <td><span class="pill p-ok">FINISHED</span></td>
+                                <td class="n">55</td>
+                                <td class="n">6,993</td>
+                            </tr>
+                            <tr>
+                                <td><span class="pill p-crit">CANCELLED</span></td>
+                                <td class="n">5</td>
+                                <td class="n">641</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div class="callout" style="margin-top:14px">
+                        <span>◆</span>
+                        <div><b>92 requests sit in "taking out".</b> That is 14,936 MC — nearly 40% of the whole
+                            warehouse — logged as in-progress but not closed off. Worth checking whether these are
+                            genuinely open or just never marked finished.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer>Built from live CK Thailand WMS data · inventory, movements, withdrawals and location endpoints ·
+            snapshot 17 Aug 2026</footer>
+    </div>
+
+    <div class="tip" id="tip"></div>
+
+    <script>
+        const fmt = n => n.toLocaleString('en-US');
+        const tip = document.getElementById('tip');
+        function hook(el, html) {
+            el.classList.add('hit');
+            el.addEventListener('pointerenter', e => { tip.innerHTML = html; tip.style.opacity = 1; });
+            el.addEventListener('pointermove', e => {
+                tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 10) + 'px';
+                tip.style.top = (e.clientY - tip.offsetHeight - 12) + 'px';
+            });
+            el.addEventListener('pointerleave', () => tip.style.opacity = 0);
+        }
+        const NS = 'http://www.w3.org/2000/svg';
+        const mk = (t, a) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+
+        /* ---------- DATA ---------- */
+        const TYPE = [['BULK', 643625, 'var(--s1)'], ['IMPORT', 42494.5, 'var(--s2)'], ['CONTAINER EXTRA', 28593, 'var(--s3)']];
+        const PROD = [["ROHU/SO", 8605, 171986, 287], ["ROHU/G", 7437, 148155, 308], ["RIVER PANGASH/G", 2566, 51320, 195], ["TILAPIA/SO", 1897, 37800, 110], ["TILAPIA/GS", 1719, 34380, 185], ["ROHU/H-L/STEAK", 1711, 34220, 90], ["PUTI/CLN", 1309, 25914, 145], ["PANGASH/G", 1132, 22524, 82], ["PANGASH/WR", 1092, 20913, 41], ["PANGASH/H-L/STEAK", 459, 9176, 43], ["CHITAL/WR", 397, 7928, 14], ["TILAPIA/FC", 378, 7550, 53], ["TANGRA/CLN", 751, 7520, 2], ["DRY BOMBAY DUCK FISH", 729, 7290, 2], ["ROHU/H-L/RFC", 313, 6260, 24], ["KORAL/WR", 253, 5025, 21], ["ROHU/STEAK/HEAD", 228, 4560, 17], ["KOI/CLN", 535, 4512, 7], ["CARFU/WR", 202, 4040, 30], ["MAGUR/TRAY", 235, 3986, 9]];
+        const SIZE = [["1 KG UP", 196384], ["800 GM UP", 167263], ["600 GM UP", 94580], ["4 KG UP", 35180], ["100 - 200 GM", 23184], ["(not set)", 19995], ["2 KG UP", 19521], ["150 GM UP", 18600], ["1.5 KG UP", 18358], ["300 - 500 GM", 13640]];
+        const AGE = [["0–30d", 5243, 102879, 325], ["31–60d", 3788, 75762, 188], ["61–90d", 8741, 169396, 340], ["91–180d", 10797, 187145, 777], ["181–365d", 8642, 170037, 677], ["365d+", 577, 8534, 29]];
+        const OLD = [["MAGUR/SO", "4 - 6 PCS", "DD04-1-1", "2023-02-01", 1293, 5, 40], ["RED TILAPIA", "–", "(unassigned)", "2024-07-23", 755, 1, 0], ["DRY ANCHOVY FISH", "–", "(unassigned)", "2024-08-22", 725, 2, 30], ["DRY SHRIMP", "–", "(unassigned)", "2024-08-22", 725, 3, 39], ["BACHA/TRAY", "240 GM", "DD04-1-1", "2024-09-01", 715, 1, 10], ["CLEANED GOBY / BAILA", "100 GM UP", "(unassigned)", "2024-12-19", 606, 2, 20], ["GURA ESSA", "2-5 CM/PCS", "(unassigned)", "2024-12-19", 606, 2, 12], ["TAPOSHI EGG FISH", "100 GM UP", "(unassigned)", "2024-12-19", 606, 2, 20], ["KHOLSHA/WR", "9 - 10 PCS", "A01R-2", "2025-01-20", 574, 94, 940], ["KHOLSHA/WR", "6 - 7 PCS", "K03L-3", "2025-01-20", 574, 68, 680], ["HILSA/WR", "600 GM UP", "(unassigned)", "2025-02-03", 560, 4, 80], ["KOI/CLN", "7-8 PCS", "(unassigned)", "2025-02-18", 545, 3, 24], ["KORAL/WR", "1000 GM UP", "(unassigned)", "2025-02-18", 545, 1, 10], ["DRY RIVER PRAWNS", "–", "(unassigned)", "2025-03-20", 515, 1, 12], ["CHITAL/WR", "500 GM UP", "(unassigned)", "2025-03-23", 512, 88, 1760]];
+        const OUT = [["BARRAMUNDI - USA", 15740], ["DRY SHRIMP", 12960], ["BOAL/G", 11020], ["PABDA/WR", 8900], ["TENGRA/WR", 6400], ["AYER/G", 5940], ["ROHU/SO", 5720], ["DRY ANCHOVY FISH", 5160], ["SHOL/WR - USA", 3880], ["E.MOILA (MITHU) - CLEAN", 3390]];
+        const MV = [["06-24", 3020, 280], ["06-25", 110, 2410], ["06-26", 1682, 1260], ["06-27", 2700, 2320], ["06-29", 820, 1340], ["06-30", 8080, 8], ["07-01", 0, 2100], ["07-02", 12380, 1080], ["07-03", 2120, 2825], ["07-04", 880, 200], ["07-06", 0, 3040], ["07-07", 0, 6945], ["07-08", 2120, 135], ["07-09", 5560, 555], ["07-10", 1280, 1300], ["07-11", 3380, 2790], ["07-13", 920, 600], ["07-14", 3900, 350], ["07-15", 1740, 90], ["07-16", 54, 3550], ["07-17", 1280, 7360], ["07-18", 0, 280], ["07-20", 3760, 0], ["07-21", 0, 450], ["07-22", 5340, 768], ["07-23", 7160, 0], ["07-24", 5758, 150], ["07-25", 6600, 0], ["07-27", 6500, 600], ["07-28", 720, 2810], ["07-31", 5560, 60], ["08-01", 360, 1120], ["08-03", 3500, 655], ["08-04", 5680, 9230], ["08-05", 6036, 0], ["08-06", 4789, 0], ["08-07", 16858, 458], ["08-08", 840, 0], ["08-10", 5320, 13000], ["08-11", 1380, 660], ["08-14", 10058, 3505], ["08-15", 2820, 166]];
+        const TOTAL_KG = 714712.5;
+
+
+        /* ---------- 1. STOCK TYPE : stacked bar ---------- */
+        (function () {
+            const svg = document.getElementById('c-type'), W = 900, H = 26, GAP = 2;
+            const tot = TYPE.reduce((s, d) => s + d[1], 0); let x = 0;
+            TYPE.forEach((d, i) => {
+                const w = (d[1] / tot) * (W - GAP * (TYPE.length - 1));
+                const r = mk('rect', { x: x, y: 0, width: Math.max(w, 2), height: H, rx: 5, fill: d[2] });
+                hook(r, `<b>${d[0]}</b><br>${fmt(Math.round(d[1]))} kg · ${(d[1] / tot * 100).toFixed(1)}%`);
+                svg.appendChild(r);
+                if (w > 90) {
+                    const t = mk('text', { x: x + 12, y: H / 2 + 4, fill: '#fff', 'font-size': 12, 'font-weight': 600 });
+                    t.textContent = d[0] + '  ' + (d[1] / tot * 100).toFixed(1) + '%'; svg.appendChild(t);
+                }
+                x += w + GAP;
+            });
+            const lg = document.getElementById('lg-type');
+            lg.innerHTML = TYPE.map(d => `<span><i class="sw" style="background:${d[2]}"></i>${d[0]}</span>`).join('');
+        })();
+
+        /* ---------- horizontal bar helper ---------- */
+        function hbar(id, rows, color, unit) {
+            const svg = document.getElementById(id), W = 460, PADL = 150, PADR = 62, BH = 20, GAP = 12;
+            const max = Math.max(...rows.map(r => r[1]));
+            rows.forEach((r, i) => {
+                const y = i * (BH + GAP) + 8;
+                const w = Math.max((r[1] / max) * (W - PADL - PADR), 2);
+                const lab = mk('text', { x: PADL - 10, y: y + BH / 2 + 4, 'text-anchor': 'end', class: 'clab' });
+                lab.textContent = r[0].length > 20 ? r[0].slice(0, 19) + '…' : r[0];
+                svg.appendChild(lab);
+                const bar = mk('rect', { x: PADL, y: y, width: w, height: BH, fill: color, rx: 4 });
+                bar.setAttribute('style', 'clip-path:inset(0 0 0 0)');
+                hook(bar, `<b>${r[0]}</b><br>${fmt(r[1])} ${unit}`);
+                svg.appendChild(bar);
+                const v = mk('text', { x: PADL + w + 8, y: y + BH / 2 + 4, class: 'vlab' });
+                v.textContent = fmt(r[1]); svg.appendChild(v);
+            });
+            svg.setAttribute('viewBox', `0 0 ${W} ${rows.length * (BH + GAP) + 14}`);
+        }
+        hbar('c-prod', PROD.slice(0, 10).map(p => [p[0], p[2]]), 'var(--s1)', 'kg');
+        hbar('c-size', SIZE, 'var(--s1)', 'kg');
+        hbar('c-out', OUT, 'var(--s2)', 'kg');
+
+        /* ---------- 3. AGING : columns, ordinal blue ramp ---------- */
+        (function () {
+            const svg = document.getElementById('c-age'), W = 900, H = 300, PT = 18, PB = 52, PL = 62, PR = 14;
+            const steps = ['var(--seq-250)', 'var(--seq-350)', 'var(--seq-450)', 'var(--seq-550)', 'var(--seq-650)', 'var(--seq-700)'];
+            const max = 200000, ph = H - PT - PB, bw = 84;
+            [0, 50000, 100000, 150000, 200000].forEach(v => {
+                const y = PT + ph - (v / max) * ph;
+                svg.appendChild(mk('line', { x1: PL, x2: W - PR, y1: y, y2: y, class: v ? 'gl' : 'ax' }));
+                const t = mk('text', { x: PL - 10, y: y + 4, 'text-anchor': 'end', class: 'tick' });
+                t.textContent = v ? (v / 1000) + 'k' : '0'; svg.appendChild(t);
+            });
+            const band = (W - PL - PR) / AGE.length;
+            AGE.forEach((d, i) => {
+                const x = PL + i * band + (band - bw) / 2;
+                const h = (d[2] / max) * ph, y = PT + ph - h;
+                const p = mk('path', { d: `M${x},${y + h} L${x},${y + 4} Q${x},${y} ${x + 4},${y} L${x + bw - 4},${y} Q${x + bw},${y} ${x + bw},${y + 4} L${x + bw},${y + h} Z`, fill: steps[i] });
+                hook(p, `<b>${d[0]} in store</b><br>${fmt(d[2])} kg · ${fmt(d[1])} MC<br>${d[3]} lots · ${(d[2] / TOTAL_KG * 100).toFixed(1)}% of stock`);
+                svg.appendChild(p);
+                const v = mk('text', { x: x + bw / 2, y: y - 8, 'text-anchor': 'middle', class: 'vlab' });
+                v.textContent = fmt(d[2]); svg.appendChild(v);
+                const l = mk('text', { x: x + bw / 2, y: H - PB + 20, 'text-anchor': 'middle', class: 'clab' });
+                l.textContent = d[0]; svg.appendChild(l);
+                const l2 = mk('text', { x: x + bw / 2, y: H - PB + 36, 'text-anchor': 'middle', class: 'tick' });
+                l2.textContent = d[3] + ' lots'; svg.appendChild(l2);
+            });
+        })();
+
+        /* ---------- 4. MOVEMENTS : dual line ---------- */
+        (function () {
+            const svg = document.getElementById('c-mv'), W = 900, H = 320, PT = 20, PB = 46, PL = 62, PR = 18;
+            const max = 18000, ph = H - PT - PB, pw = W - PL - PR;
+            const X = i => PL + (i / (MV.length - 1)) * pw;
+            const Y = v => PT + ph - (v / max) * ph;
+            [0, 4500, 9000, 13500, 18000].forEach(v => {
+                svg.appendChild(mk('line', { x1: PL, x2: W - PR, y1: Y(v), y2: Y(v), class: v ? 'gl' : 'ax' }));
+                const t = mk('text', { x: PL - 10, y: Y(v) + 4, 'text-anchor': 'end', class: 'tick' });
+                t.textContent = v ? (v / 1000) + 'k' : '0'; svg.appendChild(t);
+            });
+            const line = (idx, color) => {
+                const d = MV.map((r, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(r[idx]).toFixed(1)}`).join(' ');
+                svg.appendChild(mk('path', { d, fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+            };
+            line(1, 'var(--s1)'); line(2, 'var(--s2)');
+            MV.forEach((r, i) => {
+                if (i % 5 === 0) {
+                    const t = mk('text', { x: X(i), y: H - PB + 20, 'text-anchor': 'middle', class: 'tick' });
+                    t.textContent = r[0]; svg.appendChild(t);
+                }
+                const hz = mk('rect', { x: X(i) - pw / (MV.length - 1) / 2, y: PT, width: pw / (MV.length - 1), height: ph, fill: 'transparent' });
+                hook(hz, `<b>${r[0]}</b><br><span style="color:var(--s1)">■</span> IN ${fmt(r[1])} kg<br><span style="color:var(--s2)">■</span> OUT ${fmt(r[2])} kg`);
+                hz.addEventListener('pointerenter', () => {
+                    cur.setAttribute('x1', X(i)); cur.setAttribute('x2', X(i)); cur.style.opacity = 1;
+                    d1.setAttribute('cx', X(i)); d1.setAttribute('cy', Y(r[1])); d2.setAttribute('cx', X(i)); d2.setAttribute('cy', Y(r[2]));
+                    d1.style.opacity = 1; d2.style.opacity = 1;
+                });
+                hz.addEventListener('pointerleave', () => { cur.style.opacity = 0; d1.style.opacity = 0; d2.style.opacity = 0; });
+                svg.appendChild(hz);
+            });
+            const cur = mk('line', { y1: PT, y2: PT + ph, stroke: 'var(--axis)', 'stroke-width': 1 });
+            cur.style.opacity = 0; svg.appendChild(cur);
+            const d1 = mk('circle', { r: 5, fill: 'var(--s1)', stroke: 'var(--surface-1)', 'stroke-width': 2 }); d1.style.opacity = 0;
+            const d2 = mk('circle', { r: 5, fill: 'var(--s2)', stroke: 'var(--surface-1)', 'stroke-width': 2 }); d2.style.opacity = 0;
+            svg.appendChild(d1); svg.appendChild(d2);
+            // annotate the two biggest days
+            const ann = (i, idx, txt, dy) => { const t = mk('text', { x: X(i), y: Y(MV[i][idx]) + dy, 'text-anchor': 'middle', class: 'vlab' }); t.textContent = txt; svg.appendChild(t); };
+            ann(36, 1, '16,858 kg in', -14); ann(38, 2, '13,000 kg out', 26);
+        })();
+
+        /* ---------- tables ---------- */
+        document.querySelector('#t-prod tbody').innerHTML = PROD.map(p =>
+            `<tr><td>${p[0]}</td><td class="n">${fmt(p[1])}</td><td class="n">${fmt(p[2])}</td><td class="n">${p[3]}</td><td class="n">${(p[2] / TOTAL_KG * 100).toFixed(1)}%</td></tr>`).join('');
+        document.querySelector('#t-old tbody').innerHTML = OLD.map(o => {
+            const cls = o[4] > 730 ? 'p-crit' : o[4] > 365 ? 'p-warn' : 'p-ok';
+            return `<tr><td>${o[0]}</td><td>${o[1]}</td><td>${o[2]}</td><td>${o[3]}</td><td class="n"><span class="pill ${cls}">${fmt(o[4])}d</span></td><td class="n">${o[5]}</td><td class="n">${fmt(o[6])}</td></tr>`;
+        }).join('');
+
+        /* ---------- 5. REQUEST FORMS (live from the WMS API) ---------- */
+        (function () {
+            const API = 'https://wms-home-production.up.railway.app';
+            const body = document.getElementById('rq-body');
+            const dateEl = document.getElementById('rq-date');
+            const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+            const iso = d => d.toISOString().slice(0, 10);
+            const pretty = s => {
+                const [y, m, dd] = s.split('-');
+                return `${dd} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+m - 1]} ${y}`;
+            };
+            const stPill = s => s === 'FINISHED' ? 'p-ok' : s === 'CANCELLED' ? 'p-crit' : 'p-warn';
+
+            let index = null;   // all withdrawals, for date lookup
+            let cache = {};     // id -> full form
+            let offline = false;
+
+            /* Snapshot of the 17 Aug 2026 forms, used only if the WMS can't be reached
+               (no connection, or the file is opened in a sandbox that blocks network). */
+            const FALLBACK_INDEX = [
+                { id: 'f1', request_no: 'WD-PK-20260815-002', department: 'PK', status: 'TAKING_OUT', withdraw_date: '2026-08-17', request_time: '08:40:00', requested_by: 'SARAPEE', managed_by: 'JIRATIS', finished_at: null, notes: null },
+                { id: 'f2', request_no: 'WD-B05SM-20260817-001', department: 'Branch.05 (SM)', status: 'PENDING', withdraw_date: '2026-08-18', request_time: '08:00:00', requested_by: 'APITCHAYA', managed_by: null, finished_at: null, notes: null },
+                { id: 'f4', request_no: 'WD-PK-20260815-001', department: 'PK', status: 'TAKING_OUT', withdraw_date: '2026-08-16', request_time: '08:30:00', requested_by: 'SARAPEE', managed_by: 'JIRATIS', finished_at: null, notes: null },
+            ];
+            const mkItems = rows => rows.map(([f, s, l, loc, req, act, kg, p]) => ({
+                snap_fish_name: f, snap_size: s, snap_lot_no: l, snap_line_place: loc,
+                requested_mc: req, quantity_mc: act, weight_kg: kg, production_process: p
+            }));
+            const FALLBACK_FORMS = {
+                f1: {
+                    ...FALLBACK_INDEX[0], items: mkItems([
+                        ['ROHU/G', '1 KG UP', 'MAN-1786101267467', 'C07L-2', 24, 24, 480, 'WTC011'],
+                        ['ROHU/G', '1 KG UP', 'MAN-1780987095822', 'N07L-2', 25, 25, 500, 'WTC011'],
+                        ['ROHU/G', '1 KG UP', 'MAN-1780536122127', 'T07R-2', 20, 20, 400, 'WTC011'],
+                        ['ROHU/G', '1 KG UP', 'IMP-BULK-1780365062539-234-3e307d', 'C07L-1', 17, 17, 340, 'WTC011'],
+                        ['ROHU/G', '1 KG UP', 'MAN-1782132121171', 'V07R-1', 9, 9, 180, 'WTC011'],
+                        ['ROHU/G', '1 KG UP', 'IMP-BULK-1780365068099-1996-f87c32', 'W06R-4', 48, 48, 960, 'WTC011'],
+                        ['ROHU/G', '1 KG UP', 'MAN-1786096587130', 'I06L-2', 48, 48, 960, 'WTC011'],
+                        ['ROHU/G', '1 KG UP', 'MAN-1780372369305', 'V06R-2', 38, 38, 760, 'WTC011'],
+                        ['ROHU/G', '1 KG UP', 'IMP-BULK-1780365066796-1580-e6e882', 'Q06R-1', 21, 21, 420, 'WTC011'],
+                        ['HILSA(W)', '800 - 1000 GM', '', '', 25, 25, 500, 'KBL014']])
+                },
+                f2: {
+                    ...FALLBACK_INDEX[1], items: mkItems([
+                        ['RED CHILLI/ORGANIC', '15 KG', 'IMP-BULK-1780365061866-59-b6ac50', 'A05L-1', 10, 10, 150, 'TH1 JBC26-06'],
+                        ['GREEN CHILLI/ORGANIC', '15 KG', 'IMP-BULK-1780365061836-53-60a434', 'A03L-4', 10, 10, 150, 'TH1 JBC26-06'],
+                        ['TANGRA/CLN', '4-UP CM/PCS', 'IMP-1780398877629-78-275c13', '_', 30, 30, 300, 'ALL ORDER']])
+                },
+                f4: {
+                    ...FALLBACK_INDEX[2], items: mkItems([
+                        ['ROHU/G', '1 KG UP', 'MAN-1786101267467', 'C07L-2', 24, 24, 480, 'WTC011'],
+                        ['ROHU/G', '1 KG UP', 'MAN-1780987095822', 'N07L-2', 25, 25, 500, 'WTC011'],
+                        ['ROHU/G', '1 KG UP', 'IMP-BULK-1780365068099-1996-f87c32', 'W06R-4', 48, 48, 960, 'WTC011'],
+                        ['PANGASH/H-L/STEAK', '800 GM UP', 'MAN-1784028842269', 'C06L-1', 28, 28, 560, 'KOL003,ABT012'],
+                        ['ROHU/H-L/STEAK', '600 GM UP', 'MAN-1782989543152', 'H05L-2', 49, 49, 980, 'KOL003,ABT012'],
+                        ['ROHU/H-L/STEAK', '600 GM UP', 'MAN-1785938496580', 'C04R-1', 34, 34, 680, 'KOL003,ABT012']])
+                },
+            };
+
+            const render = async (date) => {
+                dateEl.value = date;
+                if (!index) { body.innerHTML = `<p class="note" style="margin-top:18px">Loading…</p>`; return; }
+                const dayReqs = index.filter(w => String(w.withdraw_date).slice(0, 10) === date)
+                    .sort((a, b) => String(a.request_time || '').localeCompare(String(b.request_time || '')));
+
+                const active = [...new Set(index.map(w => String(w.withdraw_date).slice(0, 10)))].sort().slice(-8).reverse();
+                const chips = `<div class="chips">${active.map(d =>
+                    `<button class="chip${d === date ? ' on' : ''}" data-d="${d}">${pretty(d)}</button>`).join('')}</div>`;
+
+                if (!dayReqs.length) {
+                    body.innerHTML = `<div class="empty">No request forms for ${pretty(date)}.</div>${chips}`;
+                    wire(); return;
+                }
+
+                body.innerHTML = `<p class="note" style="margin-top:16px">Loading ${dayReqs.length} form${dayReqs.length > 1 ? 's' : ''}…</p>`;
+                const forms = await Promise.all(dayReqs.map(async w => {
+                    if (!cache[w.id]) {
+                        cache[w.id] = offline
+                            ? FALLBACK_FORMS[w.id]
+                            : await fetch(`${API}/api/withdrawals/${w.id}`).then(r => r.json());
+                    }
+                    return cache[w.id];
+                }));
+
+                const totMc = forms.reduce((s, f) => s + (f.items || []).reduce((a, i) => a + (+i.requested_mc || 0), 0), 0);
+                const totKg = forms.reduce((s, f) => s + (f.items || []).reduce((a, i) => a + (+i.weight_kg || 0), 0), 0);
+                const totIt = forms.reduce((s, f) => s + (f.items || []).length, 0);
+                const depts = [...new Set(forms.map(f => f.department))];
+
+                body.innerHTML = `
+      ${offline ? `<div class="callout" style="border-left-color:var(--warning);margin-top:14px">
+        <span>◔</span><div><b>Offline — showing the 17 Aug 2026 snapshot.</b> Couldn't reach the WMS,
+        so these are the last known forms rather than live data. Open the file with an internet
+        connection and it will load the current day automatically.</div></div>` : ''}
+      <div class="daybar">
+        <span><b>${forms.length}</b> request form${forms.length > 1 ? 's' : ''}</span>
+        <span><b>${totIt}</b> line items</span>
+        <span><b>${fmt(totMc)}</b> MC requested</span>
+        <span><b>${fmt(totKg)}</b> kg</span>
+        <span>${depts.map(esc).join(' · ')}</span>
+      </div>
+      ${chips}
+      ${forms.map(f => {
+                    const items = f.items || [];
+                    const sMc = items.reduce((a, i) => a + (+i.requested_mc || 0), 0);
+                    const sAct = items.reduce((a, i) => a + (+i.quantity_mc || 0), 0);
+                    const sKg = items.reduce((a, i) => a + (+i.weight_kg || 0), 0);
+                    return `
+        <div class="form">
+          <div class="form-hd">
+            <div class="form-id">
+              <span class="form-no">${esc(f.request_no)}</span>
+              <span class="pill p-ok" style="color:var(--text-secondary);border-color:var(--axis)">${esc(f.department)}</span>
+              <span class="pill ${stPill(f.status)}">${esc(String(f.status).replace('_', ' '))}</span>
+            </div>
+            <div class="form-meta">
+              <span>Pick time <b>${esc(String(f.request_time || '').slice(0, 5))}</b></span>
+              <span>Requested by <b>${esc(f.requested_by || '—')}</b></span>
+              ${f.managed_by ? `<span>Managed by <b>${esc(f.managed_by)}</b></span>` : ''}
+              ${f.dispatcher ? `<span>Dispatcher <b>${esc(f.dispatcher)}</b></span>` : ''}
+              ${f.finished_at ? `<span>Finished <b>${esc(String(f.finished_at).slice(11, 16))}</b></span>` : ''}
+            </div>
+          </div>
+          ${f.notes ? `<div style="padding:10px 16px;font-size:12.5px;color:var(--text-secondary);border-bottom:1px solid var(--border)"><b style="color:var(--text-primary)">Note:</b> ${esc(f.notes)}</div>` : ''}
+          <table>
+            <thead><tr>
+              <th class="idx">#</th><th>Product</th><th>Size</th><th>Lot no</th><th>Location</th>
+              <th class="n">Req MC</th><th class="n">Picked MC</th><th class="n">Kg</th><th>Production</th>
+            </tr></thead>
+            <tbody>
+              ${items.map((i, n) => {
+                        const req = +i.requested_mc || 0, act = +i.quantity_mc || 0;
+                        const loc = i.snap_line_place || i.line_place || '';
+                        return `<tr>
+                  <td class="idx">${n + 1}</td>
+                  <td>${esc(i.snap_fish_name || i.fish_name || '—')}</td>
+                  <td>${esc(i.snap_size || i.size || '—')}</td>
+                  <td class="lotno">${esc(i.snap_lot_no || i.lot_no || '—')}</td>
+                  <td class="loc">${esc(loc && loc !== '_' && loc !== '-' ? loc : '—')}</td>
+                  <td class="n">${fmt(req)}</td>
+                  <td class="n">${act === req ? fmt(act) : `<span class="short">${fmt(act)}</span>`}</td>
+                  <td class="n">${fmt(+i.weight_kg || 0)}</td>
+                  <td class="proc">${esc(i.production_process || '—')}</td>
+                </tr>`;
+                    }).join('')}
+            </tbody>
+            <tfoot><tr>
+              <td></td><td colspan="4">${items.length} item${items.length > 1 ? 's' : ''}</td>
+              <td class="n">${fmt(sMc)}</td><td class="n">${fmt(sAct)}</td><td class="n">${fmt(sKg)}</td><td></td>
+            </tr></tfoot>
+          </table>
+        </div>`;
+                }).join('')}`;
+                wire();
+            };
+
+            const wire = () => body.querySelectorAll('.chip').forEach(c =>
+                c.onclick = () => render(c.dataset.d));
+
+            const shift = n => { const d = new Date(dateEl.value + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); render(iso(d)); };
+            document.getElementById('rq-prev').onclick = () => shift(-1);
+            document.getElementById('rq-next').onclick = () => shift(1);
+            document.getElementById('rq-today').onclick = () => render(iso(new Date()));
+            dateEl.onchange = () => render(dateEl.value);
+
+            fetch(`${API}/api/withdrawals`).then(r => r.json()).then(list => {
+                index = list;
+                const today = iso(new Date());
+                const has = list.some(w => String(w.withdraw_date).slice(0, 10) === today);
+                const latest = [...new Set(list.map(w => String(w.withdraw_date).slice(0, 10)))].sort().pop();
+                render(has ? today : (latest || today));
+            }).catch(() => {
+                offline = true;
+                index = FALLBACK_INDEX;
+                render('2026-08-17');
+            });
+        })();
+
+        /* ---------- theme ---------- */
+        const btn = document.getElementById('theme');
+        if (matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.dataset.theme = 'dark';
+        const sync = () => btn.textContent = document.documentElement.dataset.theme === 'dark' ? 'Light mode' : 'Dark mode';
+        sync();
+        btn.onclick = () => { document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; sync(); };
+    </script>
+</body>
+
+</html>
