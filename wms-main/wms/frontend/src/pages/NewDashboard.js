@@ -480,8 +480,8 @@ function RequestForms({ activeDates, today, reloadKey }) {
               </div>
               {f.notes && <div className="nd-form-note"><b>Note:</b> {f.notes}</div>}
 
-              {/* Desktop / Tablet table */}
-              <div className="nd-table-scroll nd-hide-mobile">
+              {/* Request form table (scrollable on mobile) */}
+              <div className="nd-table-scroll">
                 <table>
                   <thead>
                     <tr>
@@ -516,42 +516,6 @@ function RequestForms({ activeDates, today, reloadKey }) {
                     </tr>
                   </tfoot>
                 </table>
-              </div>
-
-              {/* Mobile card list */}
-              <div className="nd-mobile-req-items nd-show-mobile">
-                {items.map((i, n) => {
-                  const req = Number(i.requested_mc) || 0;
-                  const act = Number(i.quantity_mc) || 0;
-                  const loc = i.line_place || i.snap_line_place || '';
-                  const cleanLoc = loc && loc !== '_' && loc !== '-' ? loc : '—';
-                  const lot = i.lot_no || i.snap_lot_no || i.import_inv_no || '—';
-                  return (
-                    <div className="nd-mitem" key={i.id || n}>
-                      <div className="nd-mitem-top">
-                        <span className="nd-mitem-idx">#{n + 1}</span>
-                        <div className="nd-mitem-name">
-                          <b>{i.fish_name || i.snap_fish_name || '—'}</b>
-                          <span>{i.size || i.snap_size || '—'}</span>
-                        </div>
-                        <span className="nd-mitem-loc">{cleanLoc}</span>
-                      </div>
-                      <div className="nd-mitem-grid">
-                        <div><span>Req MC</span><b>{fmt(req)}</b></div>
-                        <div><span>Picked</span><b>{act === req ? fmt(act) : <span className="short">{fmt(act)}</span>}</b></div>
-                        <div><span>Weight</span><b>{fmt(Number(i.weight_kg) || 0)} kg</b></div>
-                      </div>
-                      <div className="nd-mitem-sub">
-                        <span className="lotno">Lot: {lot}</span>
-                        {i.production_process && <span className="proc">Process: <b>{i.production_process}</b></span>}
-                      </div>
-                    </div>
-                  );
-                })}
-                <div className="nd-mitem-foot">
-                  <span>{items.length} item{items.length !== 1 ? 's' : ''} total</span>
-                  <span>Req <b>{fmt(sMc)}</b> MC · Picked <b>{fmt(sAct)}</b> MC · <b>{fmt(sKg)}</b> kg</span>
-                </div>
               </div>
             </div>
           );
