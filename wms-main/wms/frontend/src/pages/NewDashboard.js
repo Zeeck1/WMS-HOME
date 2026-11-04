@@ -743,58 +743,33 @@ function NewDashboard() {
           <h3>Oldest lots on hand</h3>
           <p className="nd-note">Longest-resident stock — first candidates for clear-down.</p>
           {aging.oldest.length ? (
-            <>
-              <div className="nd-table-scroll nd-hide-mobile">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Product</th><th>Size</th><th>Lot no</th><th>Location</th><th>In date</th>
-                      <th className="n">Age</th><th className="n">MC</th><th className="n">Kg</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {aging.oldest.map((o, i) => {
-                      const cls = o.age_days > 730 ? 'p-crit' : o.age_days > 365 ? 'p-warn' : 'p-ok';
-                      return (
-                        <tr key={`${o.lot_no}-${o.line_place}-${i}`}>
-                          <td>{o.fish_name}</td>
-                          <td>{o.size || '–'}</td>
-                          <td className="lotno">{o.lot_no || '–'}</td>
-                          <td>{o.line_place || '(unassigned)'}</td>
-                          <td>{o.cs_in_date || '–'}</td>
-                          <td className="n"><span className={`nd-pill ${cls}`}>{fmt(o.age_days)}d</span></td>
-                          <td className="n">{fmt(o.mc)}</td>
-                          <td className="n">{fmt(o.kg)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="nd-mobile-lot-list nd-show-mobile">
-                {aging.oldest.map((o, i) => {
-                  const cls = o.age_days > 730 ? 'p-crit' : o.age_days > 365 ? 'p-warn' : 'p-ok';
-                  return (
-                    <div className="nd-mlot" key={`${o.lot_no}-${o.line_place}-${i}`}>
-                      <div className="nd-mlot-top">
-                        <div className="nd-mlot-title">
-                          <b>{o.fish_name}</b>
-                          {o.size && <span>{o.size}</span>}
-                        </div>
-                        <span className={`nd-pill ${cls}`}>{fmt(o.age_days)}d</span>
-                      </div>
-                      <div className="nd-mlot-meta">
-                        <span className="loc">{o.line_place || '(unassigned)'}</span>
-                        <span>In: {o.cs_in_date || '–'}</span>
-                        <span><b>{fmt(o.mc)}</b> MC · <b>{fmt(o.kg)}</b> kg</span>
-                      </div>
-                      {o.lot_no && <div className="nd-mlot-lot lotno">Lot: {o.lot_no}</div>}
-                    </div>
-                  );
-                })}
-              </div>
-            </>
+            <div className="nd-table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Product</th><th>Size</th><th>Lot no</th><th>Location</th><th>In date</th>
+                    <th className="n">Age</th><th className="n">MC</th><th className="n">Kg</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {aging.oldest.map((o, i) => {
+                    const cls = o.age_days > 730 ? 'p-crit' : o.age_days > 365 ? 'p-warn' : 'p-ok';
+                    return (
+                      <tr key={`${o.lot_no}-${o.line_place}-${i}`}>
+                        <td>{o.fish_name}</td>
+                        <td>{o.size || '–'}</td>
+                        <td className="lotno">{o.lot_no || '–'}</td>
+                        <td>{o.line_place || '(unassigned)'}</td>
+                        <td>{o.cs_in_date || '–'}</td>
+                        <td className="n"><span className={`nd-pill ${cls}`}>{fmt(o.age_days)}d</span></td>
+                        <td className="n">{fmt(o.mc)}</td>
+                        <td className="n">{fmt(o.kg)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           ) : <div className="nd-empty">No stock on hand.</div>}
 
           <h3 style={{ marginTop: 30 }}>Stock by time in cold store</h3>
