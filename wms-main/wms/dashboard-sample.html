@@ -727,7 +727,7 @@
             }
 
             .cal-wrap {
-                height: 420px
+                height: 430px
             }
 
             .chips {
@@ -761,6 +761,12 @@
             }
         }
 
+        @media (max-width: 640px) {
+            .cal-wrap {
+                height: 390px
+            }
+        }
+
         @media (max-width: 380px) {
 
             .tiles,
@@ -782,8 +788,7 @@
             <div>
                 <h1>CK Cold Storage — Stock Dashboard</h1>
                 <p class="sub">Snapshot as of 17 August 2026 · CK Thailand WMS</p>
-                <p class="sub" style="margin-top:4px;font-size:12px;color:var(--muted)">Layout v2 — Overview → Aging
-                    &amp; expiry → Request forms → Stock composition → Movement trends</p>
+                <p class="sub" style="margin-top:4px;font-size:12px;color:var(--muted)">Calendar → Overview → Aging &amp; expiry → Request forms → Stock composition → Movement trends</p>
             </div>
             <button class="btn" id="theme">Dark mode</button>
         </header>

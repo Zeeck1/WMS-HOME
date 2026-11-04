@@ -74,10 +74,10 @@ const CALENDARS = [
 const SECTIONS = [
   { id: 'nd-calendar', label: 'Calendar' },
   { id: 'nd-overview', label: 'Overview' },
-  { id: 'nd-aging', label: 'Aging & Expiry' },
-  { id: 'nd-requests', label: 'Request Forms' },
+  { id: 'nd-aging', label: 'Aging' },
+  { id: 'nd-requests', label: 'Requests' },
   { id: 'nd-composition', label: 'Composition' },
-  { id: 'nd-movement', label: 'Movements' },
+  { id: 'nd-movement', label: 'Movement' },
 ];
 
 /* ───────────────────────── charts ───────────────────────── */
@@ -696,6 +696,9 @@ function NewDashboard() {
           <div>
             <h1>CK Cold Storage — Stock Dashboard</h1>
             <p className="nd-sub">Snapshot as of {pretty(today)} · CK Thailand WMS</p>
+            <p className="nd-sub nd-sub-layout">
+              Calendar → Overview → Aging &amp; expiry → Request forms → Stock composition → Movement trends
+            </p>
           </div>
           <div className="nd-actions">
             {error && <span className="nd-error" style={{ fontSize: 12 }}>{error}</span>}
