@@ -2,10 +2,14 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   FiCheckCircle, FiSearch, FiRefreshCw, FiUser,
   FiPrinter, FiShield, FiX, FiAlertCircle, FiCopy, FiXCircle, FiTrash2,
-  FiArrowLeft, FiChevronLeft, FiChevronRight, FiList, FiFileText
+  FiArrowLeft, FiChevronLeft, FiChevronRight, FiList, FiFileText,
+  FiZoomIn, FiZoomOut, FiDownload, FiMaximize2
 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
-import { copyWithdrawFormImageToClipboard } from '../utils/captureWithdrawFormImage';
+import {
+  captureWithdrawFormCanvas,
+  copyWithdrawFormImageToClipboard,
+} from '../utils/captureWithdrawFormImage';
 import {
   getWithdrawals, getWithdrawal, rejectWithdrawal, restoreRejectedWithdrawal, purgeWithdrawal,
 } from '../services/api';
@@ -20,9 +24,13 @@ import {
   bangkokYYYYMMDD,
   bangkokYMDYesterday,
   bangkokLocaleDateString,
+  bangkokLocaleString,
+  bangkokHHMMSS,
   dateToYYYYMMDDInBangkok,
   formatWithdrawRequestedAt,
   formatWithdrawSelectedAt,
+  formatWithdrawSelectedDate,
+  formatWithdrawSelectedTime,
 } from '../utils/bangkokTime';
 
 const STATUS_TABS = ['PENDING', 'REJECTED', 'ALL', 'TAKING_OUT', 'READY', 'FINISHED'];
@@ -43,10 +51,15 @@ export default function Approval() {
   const [processingId, setProcessingId] = useState(null);
   const [confirmModal, setConfirmModal] = useState(null); // { action: 'approve'|'reject'|'restore'|'delete', req }
   const [copyingImage, setCopyingImage] = useState(false);
-  const [mobileViewMode, setMobileViewMode] = useState('summary'); // 'summary' | 'print'
+  const [mobileViewMode, setMobileViewMode] = useState('print'); // 'summary' | 'print'
   const [isMobileSplit, setIsMobileSplit] = useState(() => (
     typeof window !== 'undefined' ? window.innerWidth <= 900 : false
   ));
+  const [sheetImageUrl, setSheetImageUrl] = useState(null);
+  const [sheetImageLoading, setSheetImageLoading] = useState(false);
+  const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [imageZoom, setImageZoom] = useState(1);
+
   const formRef = useRef(null);
   const formColRef = useRef(null);
 
@@ -63,6 +76,35 @@ export default function Approval() {
       setApproverSaved(true);
     }
   }, [user?.id]);
+
+  // Automatically render the print sheet into a responsive PNG image whenever selectedData changes
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedData) {
+      setSheetImageUrl(null);
+      setSheetImageLoading(false);
+      return undefined;
+    }
+    setSheetImageLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        if (!formRef.current) return;
+        const canvas = await captureWithdrawFormCanvas(formRef);
+        if (!cancelled && canvas) {
+          setSheetImageUrl(canvas.toDataURL('image/png'));
+        }
+      } catch (err) {
+        console.error('Failed to generate print sheet preview image:', err);
+      } finally {
+        if (!cancelled) setSheetImageLoading(false);
+      }
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [selectedData]);
 
   const persistApproverName = useCallback((name) => {
     const trimmed = (name || '').trim();
@@ -332,6 +374,52 @@ export default function Approval() {
     }
   };
 
+  const openSheetImageModal = async () => {
+    setImageZoom(1);
+    setImageModalOpen(true);
+    if (!sheetImageUrl && formRef.current) {
+      setSheetImageLoading(true);
+      try {
+        const canvas = await captureWithdrawFormCanvas(formRef);
+        if (canvas) {
+          setSheetImageUrl(canvas.toDataURL('image/png'));
+        }
+      } catch (err) {
+        console.error(err);
+        toast.error('Failed to render form image');
+      } finally {
+        setSheetImageLoading(false);
+      }
+    }
+  };
+
+  const handleDownloadSheetImage = async (e) => {
+    if (e) e.stopPropagation();
+    try {
+      let dataUrl = sheetImageUrl;
+      if (!dataUrl && formRef.current) {
+        const canvas = await captureWithdrawFormCanvas(formRef);
+        if (canvas) {
+          dataUrl = canvas.toDataURL('image/png');
+          setSheetImageUrl(dataUrl);
+        }
+      }
+      if (!dataUrl) {
+        toast.error('Failed to generate image');
+        return;
+      }
+      const link = document.createElement('a');
+      const fileName = `withdraw-form-${selectedData?.request_no || selectedId || 'sheet'}.png`.replace(/\s+/g, '-');
+      link.download = fileName;
+      link.href = dataUrl;
+      link.click();
+      toast.success('Print sheet image downloaded');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to download image');
+    }
+  };
+
   const todayStr = bangkokYYYYMMDD();
   const yesterdayStr = bangkokYMDYesterday();
   const selectedReq = filtered.find((r) => r.id === selectedId) || (selectedData ? { id: selectedData.id, status: selectedData.status, request_no: selectedData.request_no, department: selectedData.department } : null);
@@ -365,6 +453,57 @@ export default function Approval() {
     });
     return { reqMc, actMc, netKg };
   }, [summarizedItems, selectedData?.status]);
+
+  // Exact metadata values matching WithdrawFormPrint
+  const sheetMeta = useMemo(() => {
+    if (!selectedData) return null;
+    const dateStr = formatWithdrawSelectedDate(selectedData.withdraw_date)
+      || formatWithdrawSelectedDate(selectedData.created_at)
+      || '—';
+    const requestTimeStr = formatWithdrawSelectedTime(selectedData.request_time) || '';
+    const submittedCreated = selectedData.created_at ? new Date(selectedData.created_at) : null;
+    const submittedValid = submittedCreated && !Number.isNaN(submittedCreated.getTime());
+    const submittedTimeStr = submittedValid ? bangkokHHMMSS(submittedCreated) : '';
+    const submittedDateStr = submittedValid ? formatWithdrawSelectedDate(submittedCreated) : '';
+    const finishedAtStr = selectedData.finished_at
+      ? bangkokLocaleString(new Date(selectedData.finished_at), { hour: '2-digit', minute: '2-digit' })
+      : '';
+    const finishedDateStr = selectedData.finished_at
+      ? bangkokLocaleDateString(new Date(selectedData.finished_at), { day: '2-digit', month: '2-digit', year: 'numeric' })
+      : '';
+    const configuredDate = selectedData.form_timeout_date ? String(selectedData.form_timeout_date).split('T')[0] : '';
+    const configuredDateStr = configuredDate && /^\d{4}-\d{2}-\d{2}$/.test(configuredDate)
+      ? `${configuredDate.slice(8, 10)}/${configuredDate.slice(5, 7)}/${configuredDate.slice(0, 4)}`
+      : '';
+    const configuredStart = selectedData.form_timeout_start ? String(selectedData.form_timeout_start).slice(0, 5) : '';
+    const configuredEnd = selectedData.form_timeout_end ? String(selectedData.form_timeout_end).slice(0, 5) : '';
+    const configuredTimeRange = configuredStart && configuredEnd
+      ? `${configuredStart} - ${configuredEnd}`
+      : '';
+    const showActualMc = selectedData.status === 'FINISHED';
+    const showFinalFields = selectedData.status === 'FINISHED';
+    const showApprover = selectedData.status
+      && selectedData.status !== 'PENDING'
+      && selectedData.status !== 'CANCELLED'
+      && selectedData.status !== 'REJECTED';
+
+    return {
+      dateStr,
+      requestTimeStr,
+      submittedTimeStr,
+      submittedDateStr,
+      finishedAtStr,
+      finishedDateStr,
+      configuredDate,
+      configuredDateStr,
+      configuredStart,
+      configuredEnd,
+      configuredTimeRange,
+      showActualMc,
+      showFinalFields,
+      showApprover,
+    };
+  }, [selectedData]);
 
   const selectedStatusConfig = selectedData
     ? STATUS_CONFIG[selectedData.status] || STATUS_CONFIG.PENDING
@@ -617,6 +756,15 @@ export default function Approval() {
                     <button
                       type="button"
                       className="ap-icon-btn"
+                      onClick={openSheetImageModal}
+                      title="View form as image"
+                    >
+                      <FiMaximize2 />
+                      <span className="ap-icon-btn-label">Image</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="ap-icon-btn"
                       onClick={handlePrint}
                       title="Print form"
                     >
@@ -725,19 +873,19 @@ export default function Approval() {
                 <div className="ap-mobile-view-switch">
                   <button
                     type="button"
-                    className={`ap-mobile-view-btn ${mobileViewMode === 'summary' ? 'active' : ''}`}
-                    onClick={() => setMobileViewMode('summary')}
-                  >
-                    <FiList size={14} />
-                    <span>Items Summary ({summarizedItems.length})</span>
-                  </button>
-                  <button
-                    type="button"
                     className={`ap-mobile-view-btn ${mobileViewMode === 'print' ? 'active' : ''}`}
                     onClick={() => setMobileViewMode('print')}
                   >
                     <FiFileText size={14} />
                     <span>Print Sheet Preview</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`ap-mobile-view-btn ${mobileViewMode === 'summary' ? 'active' : ''}`}
+                    onClick={() => setMobileViewMode('summary')}
+                  >
+                    <FiList size={14} />
+                    <span>Items Summary ({summarizedItems.length})</span>
                   </button>
                 </div>
               )}
@@ -813,17 +961,327 @@ export default function Approval() {
                 </div>
               )}
 
-              <div
-                className={`ap-form-scroll ap-form-print-target ${
-                  isMobileSplit && mobileViewMode === 'summary' ? 'ap-form-scroll--offscreen-capture' : ''
-                }`}
-              >
+              {/* Responsive Print Sheet Preview section (clickable to open full-screen image viewer) */}
+              {(!isMobileSplit || mobileViewMode === 'print') && (
+                <div className="ap-sheet-preview-section">
+                  <div
+                    className="ap-sheet-image-card"
+                    role="button"
+                    tabIndex={0}
+                    onClick={openSheetImageModal}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openSheetImageModal();
+                      }
+                    }}
+                    title="Click to view full withdraw form image"
+                  >
+                    <div className="ap-sheet-image-banner">
+                      <span className="ap-sheet-image-banner-title">
+                        <FiMaximize2 size={14} />
+                        <span>Tap / Click Print Sheet to View Full Image</span>
+                      </span>
+                      <button
+                        type="button"
+                        className="ap-sheet-download-mini"
+                        onClick={handleDownloadSheetImage}
+                      >
+                        <FiDownload size={13} />
+                        <span>Save PNG</span>
+                      </button>
+                    </div>
+
+                    <div className="ap-sheet-image-body">
+                      {sheetImageUrl ? (
+                        <img
+                          src={sheetImageUrl}
+                          alt={`Withdraw Form ${selectedData.request_no}`}
+                          className="ap-sheet-preview-img"
+                        />
+                      ) : (
+                        <div className="ap-sheet-generating">
+                          <div className="spinner" />
+                          <span>{sheetImageLoading ? 'Rendering print sheet image...' : 'Preparing print sheet preview...'}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Mobile-Responsive Full Print Sheet Data Breakdown (shows all 11 print columns clearly on mobile) */}
+                  {isMobileSplit && sheetMeta && (
+                    <div className="ap-sheet-mobile-details">
+                      <div className="ap-sheet-mobile-hd">
+                        <div className="ap-sheet-mobile-hd-top">
+                          <div>
+                            <div className="ap-sheet-mobile-th">ขอเบิกสินค้าออกจากห้องเย็น (WITHDRAW LIST)</div>
+                            <div className="ap-sheet-mobile-ref">FM-CS-002.1 Rev.00</div>
+                          </div>
+                          <button
+                            type="button"
+                            className="ap-sheet-view-img-btn"
+                            onClick={openSheetImageModal}
+                          >
+                            <FiMaximize2 size={13} />
+                            <span>View Image</span>
+                          </button>
+                        </div>
+
+                        <div className="ap-sheet-mobile-meta-grid">
+                          <div>
+                            <span>DATE (วันที่):</span>
+                            <strong>{sheetMeta.dateStr}</strong>
+                          </div>
+                          <div>
+                            <span>TIME (เวลาที่ขอ):</span>
+                            <strong>
+                              {sheetMeta.submittedTimeStr || sheetMeta.requestTimeStr || '—'}
+                              {sheetMeta.submittedDateStr ? ` (${sheetMeta.submittedDateStr})` : ''}
+                            </strong>
+                          </div>
+                          <div>
+                            <span>DEP (แผนก):</span>
+                            <strong>{selectedData.department}</strong>
+                          </div>
+                          <div>
+                            <span>Request No:</span>
+                            <strong>{selectedData.request_no}</strong>
+                          </div>
+                        </div>
+
+                        {(selectedData.form_notice || sheetMeta.configuredDateStr || sheetMeta.configuredTimeRange) && (
+                          <div className="ap-sheet-mobile-notice">
+                            {selectedData.form_notice && <div><strong>{selectedData.form_notice}</strong></div>}
+                            {(sheetMeta.configuredTimeRange || sheetMeta.configuredDateStr) && (
+                              <div>
+                                TIME OUT: {[sheetMeta.configuredTimeRange, sheetMeta.configuredDateStr].filter(Boolean).join(' · ')}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="ap-sheet-mobile-rows">
+                        {summarizedItems.map((item, idx) => {
+                          const requestedMc = Number(item.requested_mc || item.quantity_mc) || 0;
+                          const actualMc = Number(item.quantity_mc) || 0;
+                          const showRow = item.show_actual_on_form !== 0;
+                          const netKg = (sheetMeta.showActualMc ? actualMc : requestedMc) * (Number(item.bulk_weight_kg) || 0);
+                          const st = item.stock_type || 'BULK';
+                          const originDisplay = st === 'CONTAINER_EXTRA' ? (item.order_code || 'EXTRA')
+                            : st === 'IMPORT' ? (item.order_code || 'IMPORT')
+                            : 'SCK';
+
+                          const itemDate = item.form_timeout_date
+                            ? String(item.form_timeout_date).split('T')[0]
+                            : sheetMeta.configuredDate;
+                          const itemDateStr = itemDate && /^\d{4}-\d{2}-\d{2}$/.test(itemDate)
+                            ? `${itemDate.slice(8, 10)}/${itemDate.slice(5, 7)}/${itemDate.slice(0, 4)}`
+                            : '';
+                          const itemStart = item.form_timeout_start
+                            ? String(item.form_timeout_start).slice(0, 5)
+                            : sheetMeta.configuredStart;
+                          const itemEnd = item.form_timeout_end
+                            ? String(item.form_timeout_end).slice(0, 5)
+                            : sheetMeta.configuredEnd;
+                          const itemTimeRange = itemStart && itemEnd ? `${itemStart} - ${itemEnd}` : '';
+                          const hasItemTimeout = Boolean(itemDateStr || itemTimeRange);
+
+                          let timeOutDisplay = '—';
+                          if (hasItemTimeout && showRow) {
+                            timeOutDisplay = [itemTimeRange, itemDateStr].filter(Boolean).join(' · ');
+                          } else if (sheetMeta.showFinalFields && showRow) {
+                            timeOutDisplay = [sheetMeta.finishedAtStr, sheetMeta.finishedDateStr].filter(Boolean).join(' · ') || '—';
+                          }
+
+                          const remarkDisplay = idx === 0 && selectedData.notes ? selectedData.notes : '—';
+
+                          return (
+                            <div key={item.id || idx} className="ap-sheet-mobile-row">
+                              <div className="ap-sheet-mobile-row-head">
+                                <span className="ap-mobile-item-idx">NO. {idx + 1}</span>
+                                <div className="ap-mobile-item-title">
+                                  <strong>
+                                    {item.fish_name}
+                                    {item.type ? `/${item.type}` : ''}
+                                    {item.glazing ? `(${item.glazing})` : ''}
+                                  </strong>
+                                  <span className="ap-mobile-item-size">SIZE: {item.size || '—'}</span>
+                                </div>
+                                <span className="ap-mobile-item-origin">ORIGIN: {originDisplay}</span>
+                              </div>
+
+                              <div className="ap-sheet-mobile-grid">
+                                <div className="ap-mobile-metric">
+                                  <span className="ap-mobile-metric-lbl">Request Package (CTN)</span>
+                                  <strong className="ap-mobile-metric-val">{requestedMc}</strong>
+                                </div>
+                                <div className="ap-mobile-metric">
+                                  <span className="ap-mobile-metric-lbl">Request Time</span>
+                                  <strong className="ap-mobile-metric-val">{sheetMeta.requestTimeStr || '—'}</strong>
+                                </div>
+                                <div className="ap-mobile-metric">
+                                  <span className="ap-mobile-metric-lbl">Actual Package (CTN)</span>
+                                  <strong className="ap-mobile-metric-val">
+                                    {sheetMeta.showActualMc && showRow ? actualMc : '—'}
+                                  </strong>
+                                </div>
+                                <div className="ap-mobile-metric">
+                                  <span className="ap-mobile-metric-lbl">Net Weight (KG.)</span>
+                                  <strong className="ap-mobile-metric-val">
+                                    {showRow ? `${netKg.toFixed(1)} kg` : '—'}
+                                  </strong>
+                                </div>
+                                <div className="ap-mobile-metric">
+                                  <span className="ap-mobile-metric-lbl">Time Out</span>
+                                  <strong className="ap-mobile-metric-val">{timeOutDisplay}</strong>
+                                </div>
+                                <div className="ap-mobile-metric">
+                                  <span className="ap-mobile-metric-lbl">Production Process</span>
+                                  <strong className="ap-mobile-metric-val">{item.production_process || '—'}</strong>
+                                </div>
+                                {remarkDisplay !== '—' && (
+                                  <div className="ap-mobile-metric ap-mobile-metric--wide">
+                                    <span className="ap-mobile-metric-lbl">Remark</span>
+                                    <strong className="ap-mobile-metric-val">{remarkDisplay}</strong>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="ap-mobile-totals-bar">
+                        <span>TOTAL ({summarizedItems.length} items)</span>
+                        <strong>
+                          Req: {summaryTotals.reqMc} CTN
+                          {sheetMeta.showActualMc ? ` · Act: ${summaryTotals.actMc} CTN` : ''}
+                          {` · Net: ${summaryTotals.netKg.toFixed(1)} KG`}
+                        </strong>
+                      </div>
+
+                      <div className="ap-sheet-mobile-sigs">
+                        <div className="ap-sheet-mobile-sig-box">
+                          <span className="ap-sheet-mobile-sig-val">
+                            {selectedData.requested_by && selectedData.requested_by !== 'system' ? selectedData.requested_by : '—'}
+                          </span>
+                          <span className="ap-sheet-mobile-sig-lbl">ผู้ขอเบิก / Requester</span>
+                        </div>
+                        <div className="ap-sheet-mobile-sig-box">
+                          <span className="ap-sheet-mobile-sig-val">
+                            {sheetMeta.showApprover && selectedData.managed_by && selectedData.managed_by !== 'system' && selectedData.managed_by !== 'admin'
+                              ? selectedData.managed_by
+                              : approverName.trim() || '—'}
+                          </span>
+                          <span className="ap-sheet-mobile-sig-lbl">ผู้อนุมัติ / Approver</span>
+                        </div>
+                        <div className="ap-sheet-mobile-sig-box">
+                          <span className="ap-sheet-mobile-sig-val">
+                            {selectedData.dispatcher || '—'}
+                          </span>
+                          <span className="ap-sheet-mobile-sig-lbl">ผู้จ่าย / Dispatcher</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Offscreen canonical A4/landscape print sheet for html2canvas & window.print() */}
+              <div className="ap-form-scroll ap-form-print-target ap-form-scroll--offscreen-capture">
                 <WithdrawFormPrint ref={formRef} data={selectedData} />
               </div>
             </div>
           ) : null}
         </div>
       </div>
+
+      {/* Full-Screen Print Sheet Image Lightbox Modal */}
+      {imageModalOpen && selectedData && (
+        <div className="ap-img-modal-overlay" onClick={() => setImageModalOpen(false)}>
+          <div className="ap-img-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="ap-img-modal-bar">
+              <div className="ap-img-modal-title">
+                <strong>{selectedData.request_no}</strong>
+                <span>Print Sheet Image</span>
+              </div>
+              <div className="ap-img-modal-controls">
+                <button
+                  type="button"
+                  className="ap-img-ctl-btn"
+                  onClick={() => setImageZoom((z) => Math.max(0.75, +(z - 0.25).toFixed(2)))}
+                  title="Zoom out"
+                >
+                  <FiZoomOut size={15} />
+                </button>
+                <button
+                  type="button"
+                  className="ap-img-ctl-btn ap-img-ctl-btn--pct"
+                  onClick={() => setImageZoom(1)}
+                  title="Reset zoom"
+                >
+                  {Math.round(imageZoom * 100)}%
+                </button>
+                <button
+                  type="button"
+                  className="ap-img-ctl-btn"
+                  onClick={() => setImageZoom((z) => Math.min(2.5, +(z + 0.25).toFixed(2)))}
+                  title="Zoom in"
+                >
+                  <FiZoomIn size={15} />
+                </button>
+                <button
+                  type="button"
+                  className="ap-img-ctl-btn"
+                  onClick={handleDownloadSheetImage}
+                  title="Download PNG"
+                >
+                  <FiDownload size={15} />
+                  <span className="ap-img-ctl-txt">Save</span>
+                </button>
+                <button
+                  type="button"
+                  className="ap-img-ctl-btn"
+                  onClick={handleCopyImage}
+                  disabled={copyingImage}
+                  title="Copy image"
+                >
+                  <FiCopy size={15} />
+                  <span className="ap-img-ctl-txt">Copy</span>
+                </button>
+                <button
+                  type="button"
+                  className="ap-img-ctl-btn ap-img-ctl-btn--close"
+                  onClick={() => setImageModalOpen(false)}
+                  title="Close"
+                >
+                  <FiX size={17} />
+                </button>
+              </div>
+            </div>
+            <div className="ap-img-modal-stage">
+              {sheetImageUrl ? (
+                <div
+                  className="ap-img-modal-canvas-wrap"
+                  style={{ width: `${Math.round(imageZoom * 100)}%` }}
+                >
+                  <img
+                    src={sheetImageUrl}
+                    alt={`Withdraw Form ${selectedData.request_no}`}
+                    className="ap-img-modal-img"
+                  />
+                </div>
+              ) : (
+                <div className="ap-sheet-generating" style={{ color: '#fff' }}>
+                  <div className="spinner" />
+                  <span>Rendering print sheet image...</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Approve / Reject / Delete confirm modal */}
       {confirmModal && modalReq && (
