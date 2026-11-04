@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   FiCheckCircle, FiSearch, FiRefreshCw, FiUser,
-  FiPrinter, FiShield, FiX, FiAlertCircle, FiCopy, FiXCircle, FiTrash2
+  FiPrinter, FiShield, FiX, FiAlertCircle, FiCopy, FiXCircle, FiTrash2,
+  FiArrowLeft, FiChevronLeft, FiChevronRight, FiList, FiFileText
 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import { copyWithdrawFormImageToClipboard } from '../utils/captureWithdrawFormImage';
@@ -10,7 +11,7 @@ import {
 } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { approveWithdrawalToTakingOut } from '../utils/withdrawApprove';
-import WithdrawFormPrint from '../components/WithdrawFormPrint';
+import WithdrawFormPrint, { summarizeWithdrawItems } from '../components/WithdrawFormPrint';
 import {
   STATUS_CONFIG, withdrawDeptBadgeClass, isWithdrawStopped,
   loadWithdrawApproverName, saveWithdrawApproverName,
@@ -42,7 +43,18 @@ export default function Approval() {
   const [processingId, setProcessingId] = useState(null);
   const [confirmModal, setConfirmModal] = useState(null); // { action: 'approve'|'reject'|'restore'|'delete', req }
   const [copyingImage, setCopyingImage] = useState(false);
+  const [mobileViewMode, setMobileViewMode] = useState('summary'); // 'summary' | 'print'
+  const [isMobileSplit, setIsMobileSplit] = useState(() => (
+    typeof window !== 'undefined' ? window.innerWidth <= 900 : false
+  ));
   const formRef = useRef(null);
+  const formColRef = useRef(null);
+
+  useEffect(() => {
+    const onResize = () => setIsMobileSplit(window.innerWidth <= 900);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     const saved = loadWithdrawApproverName(user?.id);
@@ -58,6 +70,16 @@ export default function Approval() {
     saveWithdrawApproverName(user?.id, trimmed);
     setApproverSaved(true);
   }, [user?.id]);
+
+  const handleApproverChange = (v) => {
+    setApproverName(v);
+    if (v.trim()) {
+      saveWithdrawApproverName(user?.id, v);
+      setApproverSaved(true);
+    } else {
+      setApproverSaved(false);
+    }
+  };
 
   const fetchRequests = useCallback(async () => {
     setLoading(true);
@@ -103,6 +125,16 @@ export default function Approval() {
     return Object.values(groups).sort((a, b) => b.dateKey.localeCompare(a.dateKey));
   }, [filtered]);
 
+  const flatOrderedRequests = useMemo(
+    () => requestsByDay.flatMap((day) => day.requests),
+    [requestsByDay]
+  );
+
+  const selectedIndex = useMemo(
+    () => flatOrderedRequests.findIndex((r) => r.id === selectedId),
+    [flatOrderedRequests, selectedId]
+  );
+
   const counts = useMemo(() => ({
     pending: requests.filter((r) => r.status === 'PENDING').length,
     active: requests.filter((r) => r.status === 'PENDING' || r.status === 'TAKING_OUT').length,
@@ -110,7 +142,12 @@ export default function Approval() {
   }), [requests]);
 
   const selectRequest = async (id) => {
-    if (selectedId === id && selectedData) return;
+    if (selectedId === id && selectedData) {
+      if (isMobileSplit && formColRef.current) {
+        formColRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      return;
+    }
     setSelectedId(id);
     setLoadingForm(true);
     try {
@@ -123,6 +160,17 @@ export default function Approval() {
     } finally {
       setLoadingForm(false);
     }
+  };
+
+  const closeMobileDetail = () => {
+    setSelectedId(null);
+    setSelectedData(null);
+  };
+
+  const stepRequest = (delta) => {
+    if (selectedIndex < 0) return;
+    const next = flatOrderedRequests[selectedIndex + delta];
+    if (next) selectRequest(next.id);
   };
 
   const openApproveModal = (req) => {
@@ -173,8 +221,13 @@ export default function Approval() {
       toast.success(`อนุมัติแล้ว — ${req.request_no} moved to Taking Out`);
       setConfirmModal(null);
       if (selectedId === req.id) {
-        const res = await getWithdrawal(req.id);
-        setSelectedData(res.data);
+        if (isMobileSplit && statusTab === 'PENDING') {
+          setSelectedId(null);
+          setSelectedData(null);
+        } else {
+          const res = await getWithdrawal(req.id);
+          setSelectedData(res.data);
+        }
       }
       fetchRequests();
     } catch (err) {
@@ -193,8 +246,13 @@ export default function Approval() {
       toast.success(`ปฏิเสธแล้ว — ${req.request_no} stays visible and cannot go to the next process`);
       setConfirmModal(null);
       if (selectedId === req.id) {
-        const res = await getWithdrawal(req.id);
-        setSelectedData(res.data);
+        if (isMobileSplit && statusTab === 'PENDING') {
+          setSelectedId(null);
+          setSelectedData(null);
+        } else {
+          const res = await getWithdrawal(req.id);
+          setSelectedData(res.data);
+        }
       }
       fetchRequests();
     } catch (err) {
@@ -285,14 +343,41 @@ export default function Approval() {
   const isRestoreModal = confirmModal?.action === 'restore';
   const isDeleteModal = confirmModal?.action === 'delete';
 
+  const summarizedItems = useMemo(
+    () => (selectedData ? summarizeWithdrawItems(selectedData.items || []) : []),
+    [selectedData]
+  );
+
+  const summaryTotals = useMemo(() => {
+    const showAct = selectedData?.status === 'FINISHED';
+    let reqMc = 0;
+    let actMc = 0;
+    let netKg = 0;
+    summarizedItems.forEach((it) => {
+      const r = Number(it.requested_mc || it.quantity_mc) || 0;
+      const a = Number(it.quantity_mc) || 0;
+      const showRow = it.show_actual_on_form !== 0;
+      reqMc += r;
+      if (showRow) {
+        actMc += a;
+        netKg += (showAct ? a : r) * (Number(it.bulk_weight_kg) || 0);
+      }
+    });
+    return { reqMc, actMc, netKg };
+  }, [summarizedItems, selectedData?.status]);
+
+  const selectedStatusConfig = selectedData
+    ? STATUS_CONFIG[selectedData.status] || STATUS_CONFIG.PENDING
+    : null;
+
   return (
-    <div className="ap-page">
+    <div className={`ap-page ${isMobileSplit && selectedId ? 'ap-page--mobile-detail' : ''}`}>
       <div className="ap-hero ap-hero--compact">
         <div className="ap-hero-content">
           <div className="ap-hero-icon"><FiShield /></div>
           <div>
             <h1 className="ap-hero-title">Approval <span className="ap-hero-th">อนุมัติ</span></h1>
-            <p className="ap-hero-sub">Click a request to preview the withdraw form</p>
+            <p className="ap-hero-sub">Tap a request to review items &amp; withdraw form</p>
           </div>
         </div>
         <div className="ap-hero-right">
@@ -313,22 +398,16 @@ export default function Approval() {
         <div className="ap-approver-body">
           <label className="ap-approver-label">
             ผู้อนุมัติ <span className="ap-approver-en">Approver</span>
+            {approverSaved && approverName.trim() && (
+              <span className="ap-approver-saved-badge"><FiCheckCircle size={12} /> Saved</span>
+            )}
           </label>
           <input
             type="text"
             className="form-control ap-approver-input"
             placeholder="Your name — shown on print form"
             value={approverName}
-            onChange={(e) => {
-              const v = e.target.value;
-              setApproverName(v);
-              if (v.trim()) {
-                saveWithdrawApproverName(user?.id, v);
-                setApproverSaved(true);
-              } else {
-                setApproverSaved(false);
-              }
-            }}
+            onChange={(e) => handleApproverChange(e.target.value)}
             onBlur={() => persistApproverName(approverName)}
             autoComplete="name"
           />
@@ -336,7 +415,7 @@ export default function Approval() {
       </div>
 
       <div className="ap-toolbar ap-toolbar--compact">
-        <div className="ap-tabs">
+        <div className="ap-tabs" role="tablist">
           {STATUS_TABS.map((tab) => (
             <button
               key={tab}
@@ -353,10 +432,20 @@ export default function Approval() {
             <FiSearch className="ap-search-icon" />
             <input
               className="form-control ap-search-input"
-              placeholder="Search..."
+              placeholder="Search request, dept, product..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
+            {search && (
+              <button
+                type="button"
+                className="ap-search-clear"
+                onClick={() => setSearch('')}
+                aria-label="Clear search"
+              >
+                <FiX size={14} />
+              </button>
+            )}
           </div>
           <select className="form-control ap-dept-select" value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}>
             <option value="">All Depts</option>
@@ -369,14 +458,16 @@ export default function Approval() {
 
       <div className="ap-date-bar ap-date-bar--compact">
         <input type="date" className="form-control ap-date-input" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
-        <button type="button" className={`ap-date-btn ${!dateFilter ? 'active' : ''}`} onClick={() => setDateFilter('')}>All</button>
-        <button type="button" className={`ap-date-btn ${dateFilter === todayStr ? 'active' : ''}`} onClick={() => setDateFilter(todayStr)}>Today</button>
-        <button type="button" className={`ap-date-btn ${dateFilter === yesterdayStr ? 'active' : ''}`} onClick={() => setDateFilter(yesterdayStr)}>Yesterday</button>
+        <div className="ap-date-quick">
+          <button type="button" className={`ap-date-btn ${!dateFilter ? 'active' : ''}`} onClick={() => setDateFilter('')}>All</button>
+          <button type="button" className={`ap-date-btn ${dateFilter === todayStr ? 'active' : ''}`} onClick={() => setDateFilter(todayStr)}>Today</button>
+          <button type="button" className={`ap-date-btn ${dateFilter === yesterdayStr ? 'active' : ''}`} onClick={() => setDateFilter(yesterdayStr)}>Yesterday</button>
+        </div>
       </div>
 
       <div className="ap-split">
         {/* Left — request list */}
-        <div className="ap-list-col">
+        <div className={`ap-list-col ${isMobileSplit && selectedId ? 'ap-list-col--mobile-hidden' : ''}`}>
           {loading ? (
             <div className="loading"><div className="spinner" /></div>
           ) : filtered.length === 0 ? (
@@ -388,7 +479,10 @@ export default function Approval() {
             <div className="ap-days">
               {requestsByDay.map((day) => (
                 <div key={day.dateKey} className="ap-day-section">
-                  <h3 className="ap-day-heading">{day.dateLabel}</h3>
+                  <div className="ap-day-heading-row">
+                    <h3 className="ap-day-heading">{day.dateLabel}</h3>
+                    <span className="ap-day-count">{day.requests.length}</span>
+                  </div>
                   <div className="ap-cards ap-cards--compact">
                     {day.requests.map((req) => {
                       const config = STATUS_CONFIG[req.status] || STATUS_CONFIG.PENDING;
@@ -417,9 +511,13 @@ export default function Approval() {
                           {formatWithdrawSelectedAt(req) && formatWithdrawRequestedAt(req) && (
                             <span className="ap-card-btn-submitted">Submitted {formatWithdrawRequestedAt(req)}</span>
                           )}
-                          <span className="ap-card-btn-meta">
-                            {req.item_count} items · {Number(req.total_requested_mc || req.total_mc)} MC
-                          </span>
+                          <div className="ap-card-btn-footer">
+                            <span className="ap-card-btn-meta">
+                              {req.item_count} item{Number(req.item_count) === 1 ? '' : 's'} · {Number(req.total_requested_mc || req.total_mc)} MC
+                              {req.requested_by && req.requested_by !== 'system' ? ` · ${req.requested_by}` : ''}
+                            </span>
+                            <span className="ap-card-btn-chevron" aria-hidden>›</span>
+                          </div>
                           {req.item_summary && (
                             <span className="ap-card-btn-products">{req.item_summary}</span>
                           )}
@@ -438,8 +536,11 @@ export default function Approval() {
           )}
         </div>
 
-        {/* Right — print form preview */}
-        <div className="ap-form-col">
+        {/* Right — print form preview & mobile detail */}
+        <div
+          ref={formColRef}
+          className={`ap-form-col ${isMobileSplit && !selectedId ? 'ap-form-col--mobile-empty' : ''}`}
+        >
           {!selectedId ? (
             <div className="ap-form-placeholder">
               <FiPrinter size={40} />
@@ -450,105 +551,273 @@ export default function Approval() {
             <div className="loading"><div className="spinner" />Loading form...</div>
           ) : selectedData ? (
             <div className="ap-form-panel">
+              {isMobileSplit && (
+                <div className="ap-mobile-nav-bar">
+                  <button type="button" className="ap-mobile-back-btn" onClick={closeMobileDetail}>
+                    <FiArrowLeft size={16} />
+                    <span>All Requests ({flatOrderedRequests.length})</span>
+                  </button>
+                  <div className="ap-mobile-Pager">
+                    <button
+                      type="button"
+                      className="ap-mobile-step-btn"
+                      onClick={() => stepRequest(-1)}
+                      disabled={selectedIndex <= 0}
+                      title="Previous request"
+                    >
+                      <FiChevronLeft size={16} />
+                    </button>
+                    <span className="ap-mobile-step-count">
+                      {selectedIndex >= 0 ? `${selectedIndex + 1} / ${flatOrderedRequests.length}` : '—'}
+                    </span>
+                    <button
+                      type="button"
+                      className="ap-mobile-step-btn"
+                      onClick={() => stepRequest(1)}
+                      disabled={selectedIndex < 0 || selectedIndex >= flatOrderedRequests.length - 1}
+                      title="Next request"
+                    >
+                      <FiChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="ap-form-panel-header">
-                <div>
-                  <strong>{selectedData.request_no}</strong>
-                  <span className="ap-form-panel-dept">{selectedData.department}</span>
+                <div className="ap-form-panel-title-group">
+                  <div className="ap-form-panel-id-row">
+                    <strong>{selectedData.request_no}</strong>
+                    <span className={`mg-dept-badge ${withdrawDeptBadgeClass(selectedData.department)}`}>
+                      {selectedData.department}
+                    </span>
+                    {selectedStatusConfig && (
+                      <span
+                        className="ap-status-pill ap-status-pill--sm"
+                        style={{ color: selectedStatusConfig.color, background: selectedStatusConfig.bg }}
+                      >
+                        {selectedStatusConfig.label}
+                      </span>
+                    )}
+                  </div>
                   <div className="ap-form-panel-when">
                     วันที่เบิก / เวลาที่ขอ {formatWithdrawSelectedAt(selectedData) || '—'}
                   </div>
                   {formatWithdrawRequestedAt(selectedData) && (
                     <div className="ap-form-panel-submitted">
                       Submitted {formatWithdrawRequestedAt(selectedData)}
+                      {selectedData.requested_by && selectedData.requested_by !== 'system'
+                        ? ` · by ${selectedData.requested_by}`
+                        : ''}
                     </div>
                   )}
                 </div>
+
                 <div className="ap-form-panel-actions">
-                  <button
-                    type="button"
-                    className="ap-icon-btn"
-                    onClick={handlePrint}
-                    title="Print form"
-                  >
-                    <FiPrinter />
-                  </button>
-                  <button
-                    type="button"
-                    className="ap-icon-btn"
-                    onClick={handleCopyImage}
-                    disabled={copyingImage}
-                    title="Copy form as image"
-                  >
-                    {copyingImage ? <span className="login-spinner" /> : <FiCopy />}
-                  </button>
-                  {canRejectSelected && (
+                  <div className="ap-form-util-btns">
                     <button
                       type="button"
-                      className="ap-reject-btn ap-reject-btn--sm"
-                      onClick={() => openRejectModal(selectedReq)}
-                      disabled={processingId === selectedId}
+                      className="ap-icon-btn"
+                      onClick={handlePrint}
+                      title="Print form"
                     >
-                      {processingId === selectedId ? (
-                        <span className="login-spinner" />
-                      ) : (
-                        <FiXCircle />
-                      )}
-                      ปฏิเสธ Reject
+                      <FiPrinter />
+                      <span className="ap-icon-btn-label">Print</span>
                     </button>
-                  )}
-                  {selectedReq?.status === 'REJECTED' && (
                     <button
                       type="button"
-                      className="ap-approve-btn ap-approve-btn--sm"
-                      onClick={() => openRestoreModal(selectedReq)}
-                      disabled={processingId === selectedId}
+                      className="ap-icon-btn"
+                      onClick={handleCopyImage}
+                      disabled={copyingImage}
+                      title="Copy form as image"
                     >
-                      {processingId === selectedId ? (
-                        <span className="login-spinner" />
-                      ) : (
-                        <FiRefreshCw />
-                      )}
-                      คืนสู่กระบวนการ Restore Process
+                      {copyingImage ? <span className="login-spinner" /> : <FiCopy />}
+                      <span className="ap-icon-btn-label">Copy</span>
                     </button>
-                  )}
-                  {canDeleteSelected && (
-                    <button
-                      type="button"
-                      className="ap-delete-btn ap-delete-btn--sm"
-                      onClick={() => openDeleteModal(selectedReq)}
-                      disabled={processingId === selectedId}
-                    >
-                      {processingId === selectedId ? (
-                        <span className="login-spinner" />
-                      ) : (
-                        <FiTrash2 />
-                      )}
-                      ลบ Delete
-                    </button>
-                  )}
-                  {isSelectedPending && (
-                    <button
-                      type="button"
-                      className="ap-approve-btn ap-approve-btn--sm"
-                      onClick={() => openApproveModal(selectedReq)}
-                      disabled={processingId === selectedId || !approverName.trim()}
-                    >
-                      {processingId === selectedId ? (
-                        <span className="login-spinner" />
-                      ) : (
-                        <FiCheckCircle />
-                      )}
-                      อนุมัติ Approve
-                    </button>
-                  )}
+                  </div>
+
+                  <div className="ap-form-main-btns">
+                    {isSelectedPending && (
+                      <button
+                        type="button"
+                        className="ap-approve-btn ap-approve-btn--sm"
+                        onClick={() => openApproveModal(selectedReq)}
+                        disabled={processingId === selectedId || !approverName.trim()}
+                      >
+                        {processingId === selectedId ? (
+                          <span className="login-spinner" />
+                        ) : (
+                          <FiCheckCircle />
+                        )}
+                        อนุมัติ Approve
+                      </button>
+                    )}
+                    {selectedReq?.status === 'REJECTED' && (
+                      <button
+                        type="button"
+                        className="ap-approve-btn ap-approve-btn--sm"
+                        onClick={() => openRestoreModal(selectedReq)}
+                        disabled={processingId === selectedId}
+                      >
+                        {processingId === selectedId ? (
+                          <span className="login-spinner" />
+                        ) : (
+                          <FiRefreshCw />
+                        )}
+                        คืนสู่กระบวนการ Restore
+                      </button>
+                    )}
+                    {canRejectSelected && (
+                      <button
+                        type="button"
+                        className="ap-reject-btn ap-reject-btn--sm"
+                        onClick={() => openRejectModal(selectedReq)}
+                        disabled={processingId === selectedId}
+                      >
+                        {processingId === selectedId ? (
+                          <span className="login-spinner" />
+                        ) : (
+                          <FiXCircle />
+                        )}
+                        ปฏิเสธ Reject
+                      </button>
+                    )}
+                    {canDeleteSelected && (
+                      <button
+                        type="button"
+                        className="ap-delete-btn ap-delete-btn--sm"
+                        onClick={() => openDeleteModal(selectedReq)}
+                        disabled={processingId === selectedId}
+                      >
+                        {processingId === selectedId ? (
+                          <span className="login-spinner" />
+                        ) : (
+                          <FiTrash2 />
+                        )}
+                        ลบ Delete
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
-              {selectedData.status === 'REJECTED' && (
-                <div className="ap-rejected-banner">
-                  This request is <strong>Rejected</strong>. Use <strong>Restore Process</strong> to return it to its previous workflow stage.
+
+              {isSelectedPending && !approverName.trim() && (
+                <div className="ap-inline-approver-prompt">
+                  <FiAlertCircle size={15} />
+                  <span>กรุณากรอกชื่อผู้อนุมัติก่อนกด Approve:</span>
+                  <input
+                    type="text"
+                    className="form-control ap-inline-approver-input"
+                    placeholder="Enter Approver name..."
+                    value={approverName}
+                    onChange={(e) => handleApproverChange(e.target.value)}
+                    onBlur={() => persistApproverName(approverName)}
+                  />
                 </div>
               )}
-              <div className="ap-form-scroll ap-form-print-target">
+
+              {selectedData.status === 'REJECTED' && (
+                <div className="ap-rejected-banner">
+                  This request is <strong>Rejected</strong>. Use <strong>Restore</strong> to return it to its previous workflow stage.
+                </div>
+              )}
+
+              {isMobileSplit && (
+                <div className="ap-mobile-view-switch">
+                  <button
+                    type="button"
+                    className={`ap-mobile-view-btn ${mobileViewMode === 'summary' ? 'active' : ''}`}
+                    onClick={() => setMobileViewMode('summary')}
+                  >
+                    <FiList size={14} />
+                    <span>Items Summary ({summarizedItems.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`ap-mobile-view-btn ${mobileViewMode === 'print' ? 'active' : ''}`}
+                    onClick={() => setMobileViewMode('print')}
+                  >
+                    <FiFileText size={14} />
+                    <span>Print Sheet Preview</span>
+                  </button>
+                </div>
+              )}
+
+              {isMobileSplit && mobileViewMode === 'summary' && (
+                <div className="ap-mobile-summary">
+                  {selectedData.notes && (
+                    <div className="ap-mobile-note">
+                      <strong>Remark / Note:</strong> {selectedData.notes}
+                    </div>
+                  )}
+                  <div className="ap-mobile-items">
+                    {summarizedItems.map((item, idx) => {
+                      const requestedMc = Number(item.requested_mc || item.quantity_mc) || 0;
+                      const actualMc = Number(item.quantity_mc) || 0;
+                      const showAct = selectedData.status === 'FINISHED' && item.show_actual_on_form !== 0;
+                      const netKg = (showAct ? actualMc : requestedMc) * (Number(item.bulk_weight_kg) || 0);
+                      const st = item.stock_type || 'BULK';
+                      const originDisplay = st === 'CONTAINER_EXTRA' ? (item.order_code || 'EXTRA')
+                        : st === 'IMPORT' ? (item.order_code || 'IMPORT')
+                        : 'SCK';
+                      return (
+                        <div key={item.id || idx} className="ap-mobile-item-card">
+                          <div className="ap-mobile-item-top">
+                            <span className="ap-mobile-item-idx">#{idx + 1}</span>
+                            <div className="ap-mobile-item-title">
+                              <strong>
+                                {item.fish_name}
+                                {item.type ? `/${item.type}` : ''}
+                                {item.glazing ? `(${item.glazing})` : ''}
+                              </strong>
+                              <span className="ap-mobile-item-size">{item.size || '—'}</span>
+                            </div>
+                            <span className="ap-mobile-item-origin">{originDisplay}</span>
+                          </div>
+                          <div className="ap-mobile-item-metrics">
+                            <div className="ap-mobile-metric">
+                              <span className="ap-mobile-metric-lbl">Req CTN</span>
+                              <strong className="ap-mobile-metric-val">{requestedMc}</strong>
+                            </div>
+                            {showAct && (
+                              <div className="ap-mobile-metric">
+                                <span className="ap-mobile-metric-lbl">Actual CTN</span>
+                                <strong className="ap-mobile-metric-val">{actualMc}</strong>
+                              </div>
+                            )}
+                            <div className="ap-mobile-metric">
+                              <span className="ap-mobile-metric-lbl">Net Weight</span>
+                              <strong className="ap-mobile-metric-val">{netKg.toFixed(1)} kg</strong>
+                            </div>
+                            {item.production_process && (
+                              <div className="ap-mobile-metric ap-mobile-metric--wide">
+                                <span className="ap-mobile-metric-lbl">Process</span>
+                                <strong className="ap-mobile-metric-val">{item.production_process}</strong>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="ap-mobile-totals-bar">
+                    <span>Total ({summarizedItems.length} items)</span>
+                    <strong>{summaryTotals.reqMc} CTN · {summaryTotals.netKg.toFixed(1)} kg</strong>
+                  </div>
+                  <div className="ap-mobile-sigs">
+                    <div><span>ผู้ขอเบิก / Requester:</span> <strong>{selectedData.requested_by || '—'}</strong></div>
+                    <div><span>ผู้อนุมัติ / Approver:</span> <strong>{selectedData.managed_by || approverName.trim() || '—'}</strong></div>
+                    {selectedData.dispatcher && (
+                      <div><span>ผู้จ่าย / Dispatcher:</span> <strong>{selectedData.dispatcher}</strong></div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div
+                className={`ap-form-scroll ap-form-print-target ${
+                  isMobileSplit && mobileViewMode === 'summary' ? 'ap-form-scroll--offscreen-capture' : ''
+                }`}
+              >
                 <WithdrawFormPrint ref={formRef} data={selectedData} />
               </div>
             </div>

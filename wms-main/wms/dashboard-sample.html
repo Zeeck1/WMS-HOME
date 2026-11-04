@@ -540,6 +540,238 @@
             color: var(--s1);
             font-weight: 600
         }
+
+        .btn.on {
+            border-color: var(--s1);
+            color: var(--s1);
+            font-weight: 600
+        }
+
+        .jump-bar {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            padding: 6px 0 4px;
+            margin-top: 8px
+        }
+
+        .jump-bar::-webkit-scrollbar {
+            display: none
+        }
+
+        .jump-pill {
+            flex-shrink: 0;
+            background: var(--surface-1);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            border-radius: 99px;
+            padding: 6px 14px;
+            font: inherit;
+            font-size: 12.5px;
+            font-weight: 500;
+            text-decoration: none;
+            cursor: pointer
+        }
+
+        .jump-pill:hover {
+            border-color: var(--s1);
+            color: var(--s1)
+        }
+
+        .table-scroll {
+            width: 100%;
+            max-width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch
+        }
+
+        .cal-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 16px;
+            margin-top: 16px
+        }
+
+        .cal-panel {
+            background: var(--plane);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 10px
+        }
+
+        .cal-panel-hd {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px
+        }
+
+        .cal-panel-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--text-primary)
+        }
+
+        .cal-wrap {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            background: #ffffff;
+            width: 100%;
+            height: 560px
+        }
+
+        .cal-iframe {
+            width: 100%;
+            height: 100%;
+            border: 0;
+            display: block
+        }
+
+        @media (max-width: 900px) {
+            .cal-grid {
+                grid-template-columns: minmax(0, 1fr)
+            }
+        }
+
+        @media (max-width: 768px) {
+            body {
+                overflow-x: hidden
+            }
+
+            .wrap {
+                padding: 14px 10px 52px
+            }
+
+            header {
+                gap: 10px
+            }
+
+            h1 {
+                font-size: 18px
+            }
+
+            .sub {
+                font-size: 12px
+            }
+
+            .card {
+                padding: 14px 12px;
+                border-radius: 12px;
+                margin-top: 12px;
+                overflow: hidden
+            }
+
+            .hero .fig {
+                font-size: clamp(32px, 8vw, 48px)
+            }
+
+            .tiles,
+            .cols {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 10px
+            }
+
+            .tiles>.tile:last-child:nth-child(odd) {
+                grid-column: 1 / -1
+            }
+
+            .tile {
+                padding: 10px 11px;
+                min-width: 0
+            }
+
+            .tile .val {
+                font-size: 19px;
+                word-break: break-word
+            }
+
+            .reqhead {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px
+            }
+
+            .reqctl {
+                width: 100%;
+                display: flex;
+                gap: 6px
+            }
+
+            .reqctl input[type=date] {
+                flex: 1;
+                min-width: 0;
+                font-size: 14px;
+                padding: 7px 8px
+            }
+
+            .cal-ctl {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 6px
+            }
+
+            .cal-ctl .btn {
+                padding: 7px 6px;
+                font-size: 12px;
+                text-align: center
+            }
+
+            .cal-wrap {
+                height: 420px
+            }
+
+            .chips {
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+                padding-bottom: 4px
+            }
+
+            .chips::-webkit-scrollbar {
+                display: none
+            }
+
+            .chip {
+                flex-shrink: 0
+            }
+
+            .daybar {
+                gap: 8px 14px;
+                font-size: 12px
+            }
+
+            .callout {
+                padding: 10px 12px;
+                font-size: 12.5px
+            }
+
+            svg {
+                overflow: hidden
+            }
+        }
+
+        @media (max-width: 380px) {
+
+            .tiles,
+            .cols {
+                grid-template-columns: 1fr
+            }
+
+            .cal-ctl {
+                grid-template-columns: repeat(2, 1fr)
+            }
+        }
     </style>
 </head>
 
@@ -556,8 +788,71 @@
             <button class="btn" id="theme">Dark mode</button>
         </header>
 
+        <nav class="jump-bar" aria-label="Dashboard sections">
+            <a class="jump-pill" href="#sec-calendar">Calendar</a>
+            <a class="jump-pill" href="#sec-overview">Overview</a>
+            <a class="jump-pill" href="#sec-aging">Aging</a>
+            <a class="jump-pill" href="#sec-requests">Requests</a>
+            <a class="jump-pill" href="#sec-composition">Composition</a>
+            <a class="jump-pill" href="#sec-movement">Movement</a>
+        </nav>
+
+        <!-- ============ GOOGLE CALENDAR ============ -->
+        <div class="card" id="sec-calendar">
+            <div class="reqhead">
+                <div>
+                    <h2>Loading schedule &amp; Google Calendar</h2>
+                    <p class="note" style="margin-bottom:0">Chachoengsao &amp; Samut Prakarn schedules side-by-side
+                        (Asia/Bangkok).</p>
+                </div>
+                <div class="reqctl cal-ctl">
+                    <button class="btn cal-mode on" data-mode="MONTH">Month</button>
+                    <button class="btn cal-mode" data-mode="WEEK">Week</button>
+                    <button class="btn cal-mode" data-mode="AGENDA">Agenda</button>
+                </div>
+            </div>
+            <div class="cal-grid">
+                <div class="cal-panel">
+                    <div class="cal-panel-hd">
+                        <div class="cal-panel-title">
+                            <i class="sw" style="background:var(--s1)"></i>
+                            <span>Chachoengsao</span>
+                        </div>
+                        <a class="btn"
+                            href="https://calendar.google.com/calendar/embed?src=43fc401935073480d71aef1792ee5dfe9d22a0056561823d90372856c6011e35%40group.calendar.google.com&ctz=Asia%2FBangkok"
+                            target="_blank" rel="noopener noreferrer"
+                            style="text-decoration:none;padding:5px 10px;font-size:12px">Open ↗</a>
+                    </div>
+                    <div class="cal-wrap">
+                        <iframe id="gcal-chachoengsao" class="cal-iframe" title="WMS Google Calendar — Chachoengsao"
+                            loading="lazy" scrolling="no" frameborder="0"
+                            src="https://calendar.google.com/calendar/embed?height=600&wkst=1&ctz=Asia%2FBangkok&showPrint=0&showTitle=0&showNav=1&showDate=1&showTabs=0&showCalendars=0&src=43fc401935073480d71aef1792ee5dfe9d22a0056561823d90372856c6011e35%40group.calendar.google.com&mode=MONTH">
+                        </iframe>
+                    </div>
+                </div>
+                <div class="cal-panel">
+                    <div class="cal-panel-hd">
+                        <div class="cal-panel-title">
+                            <i class="sw" style="background:var(--s3)"></i>
+                            <span>Samut Prakarn</span>
+                        </div>
+                        <a class="btn"
+                            href="https://calendar.google.com/calendar/embed?height=600&wkst=1&ctz=Asia%2FBangkok&showPrint=0&src=YTY2OGMyZDQ0MWZiMTU5N2I5YmVkYzE0MzNkODI3Y2RkYWQyMDQxNWMzOWFmNWViYjdjMjBlZWE3NmE3M2Y3N0Bncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=NTZlOWM1YzBjNDhiMmRiOTM0OWM5MTgwZDc0OGE1MjA1OTU3YTg5NDJhYWVlMzQ5YmJjZmQ3YWVmYzhkNTAyYUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&color=%23c0ca33&color=%23009688"
+                            target="_blank" rel="noopener noreferrer"
+                            style="text-decoration:none;padding:5px 10px;font-size:12px">Open ↗</a>
+                    </div>
+                    <div class="cal-wrap">
+                        <iframe id="gcal-samut-prakarn" class="cal-iframe" title="WMS Google Calendar — Samut Prakarn"
+                            loading="lazy" scrolling="no" frameborder="0"
+                            src="https://calendar.google.com/calendar/embed?height=600&wkst=1&ctz=Asia%2FBangkok&showPrint=0&showTitle=0&showNav=1&showDate=1&showTabs=0&showCalendars=0&src=YTY2OGMyZDQ0MWZiMTU5N2I5YmVkYzE0MzNkODI3Y2RkYWQyMDQxNWMzOWFmNWViYjdjMjBlZWE3NmE3M2Y3N0Bncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=NTZlOWM1YzBjNDhiMmRiOTM0OWM5MTgwZDc0OGE1MjA1OTU3YTg5NDJhYWVlMzQ5YmJjZmQ3YWVmYzhkNTAyYUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&color=%23c0ca33&color=%23009688&mode=MONTH">
+                        </iframe>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- ============ OVERVIEW ============ -->
-        <div class="card">
+        <div class="card" id="sec-overview">
             <div class="hero">
                 <div>
                     <div class="tile-lab" style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">Total
@@ -601,26 +896,28 @@
         </div>
 
         <!-- ============ AGING ============ -->
-        <div class="card">
+        <div class="card" id="sec-aging">
             <h2>Aging &amp; expiry risk</h2>
             <p class="note">Longest-resident stock first, then how the whole warehouse ages. As of 17 Aug 2026.</p>
 
             <h2 style="font-size:13.5px">Oldest lots on hand</h2>
             <p class="note">Longest-resident stock — first candidates for clear-down.</p>
-            <table id="t-old">
-                <thead>
-                    <tr>
-                        <th>Product</th>
-                        <th>Size</th>
-                        <th>Location</th>
-                        <th>In date</th>
-                        <th class="n">Age</th>
-                        <th class="n">MC</th>
-                        <th class="n">Kg</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
+            <div class="table-scroll">
+                <table id="t-old">
+                    <thead>
+                        <tr>
+                            <th>Product</th>
+                            <th>Size</th>
+                            <th>Location</th>
+                            <th>In date</th>
+                            <th class="n">Age</th>
+                            <th class="n">MC</th>
+                            <th class="n">Kg</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
 
             <h2 style="font-size:13.5px;margin-top:30px">Stock by time in cold store</h2>
             <p class="note">Kilograms on hand by age bucket (days since cs_in_date).</p>
@@ -665,7 +962,7 @@
         </div>
 
         <!-- ============ REQUEST FORMS FOR THE DAY ============ -->
-        <div class="card">
+        <div class="card" id="sec-requests">
             <div class="reqhead">
                 <div>
                     <h2>Request forms</h2>
@@ -685,7 +982,7 @@
         </div>
 
         <!-- ============ COMPOSITION ============ -->
-        <div class="card">
+        <div class="card" id="sec-composition">
             <h2>Stock composition</h2>
             <p class="note">What is in the warehouse, by stock type, product and size.</p>
 
@@ -719,23 +1016,25 @@
 
             <details>
                 <summary>Show product table (all 20 top products)</summary>
-                <table id="t-prod">
-                    <thead>
-                        <tr>
-                            <th>Product</th>
-                            <th class="n">MC</th>
-                            <th class="n">Kg</th>
-                            <th class="n">Lots</th>
-                            <th class="n">% of stock</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
+                <div class="table-scroll">
+                    <table id="t-prod">
+                        <thead>
+                            <tr>
+                                <th>Product</th>
+                                <th class="n">MC</th>
+                                <th class="n">Kg</th>
+                                <th class="n">Lots</th>
+                                <th class="n">% of stock</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
             </details>
         </div>
 
         <!-- ============ MOVEMENT ============ -->
-        <div class="card">
+        <div class="card" id="sec-movement">
             <h2>Movement trends</h2>
             <p class="note">Daily stock in vs stock out, kilograms — last 42 recorded days (24 Jun – 15 Aug 2026).</p>
 
@@ -825,6 +1124,7 @@
                 </div>
             </div>
         </div>
+
 
         <footer>Built from live CK Thailand WMS data · inventory, movements, withdrawals and location endpoints ·
             snapshot 17 Aug 2026</footer>
@@ -1100,7 +1400,7 @@
             </div>
           </div>
           ${f.notes ? `<div style="padding:10px 16px;font-size:12.5px;color:var(--text-secondary);border-bottom:1px solid var(--border)"><b style="color:var(--text-primary)">Note:</b> ${esc(f.notes)}</div>` : ''}
-          <table>
+          <div class="table-scroll"><table>
             <thead><tr>
               <th class="idx">#</th><th>Product</th><th>Size</th><th>Lot no</th><th>Location</th>
               <th class="n">Req MC</th><th class="n">Picked MC</th><th class="n">Kg</th><th>Production</th>
@@ -1126,7 +1426,7 @@
               <td></td><td colspan="4">${items.length} item${items.length > 1 ? 's' : ''}</td>
               <td class="n">${fmt(sMc)}</td><td class="n">${fmt(sAct)}</td><td class="n">${fmt(sKg)}</td><td></td>
             </tr></tfoot>
-          </table>
+          </table></div>
         </div>`;
                 }).join('')}`;
                 wire();
@@ -1152,6 +1452,23 @@
                 index = FALLBACK_INDEX;
                 render('2026-08-17');
             });
+        })();
+
+
+        /* ---------- 6. GOOGLE CALENDAR ---------- */
+        (function () {
+            const f1 = document.getElementById('gcal-chachoengsao');
+            const f2 = document.getElementById('gcal-samut-prakarn');
+            const btns = document.querySelectorAll('.cal-mode');
+            const base1 = 'https://calendar.google.com/calendar/embed?height=600&wkst=1&ctz=Asia%2FBangkok&showPrint=0&showTitle=0&showNav=1&showDate=1&showTabs=0&showCalendars=0&src=43fc401935073480d71aef1792ee5dfe9d22a0056561823d90372856c6011e35%40group.calendar.google.com';
+            const base2 = 'https://calendar.google.com/calendar/embed?height=600&wkst=1&ctz=Asia%2FBangkok&showPrint=0&showTitle=0&showNav=1&showDate=1&showTabs=0&showCalendars=0&src=YTY2OGMyZDQ0MWZiMTU5N2I5YmVkYzE0MzNkODI3Y2RkYWQyMDQxNWMzOWFmNWViYjdjMjBlZWE3NmE3M2Y3N0Bncm91cC5jYWxlbmRhci5nb29nbGUuY29t&src=NTZlOWM1YzBjNDhiMmRiOTM0OWM5MTgwZDc0OGE1MjA1OTU3YTg5NDJhYWVlMzQ5YmJjZmQ3YWVmYzhkNTAyYUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t&color=%23c0ca33&color=%23009688';
+            const setMode = (mode) => {
+                btns.forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+                if (f1) f1.src = base1 + '&mode=' + mode;
+                if (f2) f2.src = base2 + '&mode=' + mode;
+            };
+            btns.forEach(b => b.onclick = () => setMode(b.dataset.mode));
+            if (window.innerWidth <= 640) setMode('AGENDA');
         })();
 
         /* ---------- theme ---------- */
