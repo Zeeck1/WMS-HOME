@@ -77,10 +77,10 @@ export default function Approval() {
     }
   }, [user?.id]);
 
-  // Automatically render the print sheet into a responsive PNG image whenever selectedData changes
+  // Automatically render the print sheet into a responsive PNG image on mobile whenever selectedData changes
   useEffect(() => {
     let cancelled = false;
-    if (!selectedData) {
+    if (!selectedData || !isMobileSplit) {
       setSheetImageUrl(null);
       setSheetImageLoading(false);
       return undefined;
@@ -104,7 +104,7 @@ export default function Approval() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [selectedData]);
+  }, [selectedData, isMobileSplit]);
 
   const persistApproverName = useCallback((name) => {
     const trimmed = (name || '').trim();
@@ -753,15 +753,17 @@ export default function Approval() {
 
                 <div className="ap-form-panel-actions">
                   <div className="ap-form-util-btns">
-                    <button
-                      type="button"
-                      className="ap-icon-btn"
-                      onClick={openSheetImageModal}
-                      title="View form as image"
-                    >
-                      <FiMaximize2 />
-                      <span className="ap-icon-btn-label">Image</span>
-                    </button>
+                    {isMobileSplit && (
+                      <button
+                        type="button"
+                        className="ap-icon-btn"
+                        onClick={openSheetImageModal}
+                        title="View form as image"
+                      >
+                        <FiMaximize2 />
+                        <span className="ap-icon-btn-label">Image</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="ap-icon-btn"
@@ -961,8 +963,8 @@ export default function Approval() {
                 </div>
               )}
 
-              {/* Responsive Print Sheet Preview section (clickable to open full-screen image viewer) */}
-              {(!isMobileSplit || mobileViewMode === 'print') && (
+              {/* Mobile-only Responsive Print Sheet Preview section (clickable to open full-screen image viewer) */}
+              {isMobileSplit && mobileViewMode === 'print' && (
                 <div className="ap-sheet-preview-section">
                   <div
                     className="ap-sheet-image-card"
@@ -1188,8 +1190,8 @@ export default function Approval() {
                 </div>
               )}
 
-              {/* Offscreen canonical A4/landscape print sheet for html2canvas & window.print() */}
-              <div className="ap-form-scroll ap-form-print-target ap-form-scroll--offscreen-capture">
+              {/* Desktop: normal withdraw form table design; Mobile: offscreen for image capture & printing */}
+              <div className={`ap-form-scroll ap-form-print-target ${isMobileSplit ? 'ap-form-scroll--offscreen-capture' : ''}`}>
                 <WithdrawFormPrint ref={formRef} data={selectedData} />
               </div>
             </div>

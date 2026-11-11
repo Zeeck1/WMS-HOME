@@ -5,8 +5,7 @@ const AuthContext = createContext(null);
 
 // All page keys that can be permissioned
 export const ALL_PAGES = [
-  { key: 'dashboard',        label: 'Dashboard',            path: '/' },
-  { key: 'new-dashboard',    label: 'New Dashboard',        path: '/new-dashboard' },
+  { key: 'new-dashboard',    label: 'Dashboard',            path: '/' },
   { key: 'ck-intelligence',  label: 'CK Intelligence',      path: '/ck-intelligence' },
   { key: 'products',         label: 'Product Master',        path: '/products' },
   { key: 'locations',        label: 'Location Master',       path: '/locations' },
@@ -97,6 +96,11 @@ export function AuthProvider({ children }) {
   const hasAccess = (pageKey) => {
     if (!user) return false;
     if (user.role === 'superadmin') return true;
+    if (pageKey === 'new-dashboard') {
+      return Boolean(
+        user.permissions?.includes('new-dashboard') || user.permissions?.includes('dashboard')
+      );
+    }
     return user.permissions?.includes(pageKey);
   };
 

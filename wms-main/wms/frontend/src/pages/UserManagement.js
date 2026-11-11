@@ -102,12 +102,18 @@ function UsersTab({ users, loading, onRefresh, currentUser }) {
   };
 
   const openEdit = (u) => {
+    const validKeys = new Set(ALL_PAGES.map((p) => p.key));
+    const normalizedPerms = [...new Set(
+      (u.permissions || [])
+        .map((p) => (p === 'dashboard' ? 'new-dashboard' : p))
+        .filter((p) => validKeys.has(p))
+    )];
     setEditing(u);
     setForm({
       username: u.username,
       password: '',
       display_name: u.display_name || '',
-      permissions: u.permissions || [],
+      permissions: normalizedPerms,
       withdraw_departments: u.withdraw_departments?.length
         ? u.withdraw_departments
         : WITHDRAW_DEPARTMENTS.map((d) => d.value),
@@ -255,7 +261,7 @@ function UsersTab({ users, loading, onRefresh, currentUser }) {
                 <td>
                   {u.role === 'superadmin'
                     ? <span style={{ color: 'var(--success)', fontWeight: 500 }}>All Pages</span>
-                    : <span>{u.permissions?.length || 0} / {ALL_PAGES.length}</span>
+                    : <span>{[...new Set((u.permissions || []).map(p => p === 'dashboard' ? 'new-dashboard' : p).filter(p => ALL_PAGES.some(ap => ap.key === p)))].length} / {ALL_PAGES.length}</span>
                   }
                 </td>
                 <td>

@@ -7,12 +7,11 @@ import {
   FiGrid, FiPackage, FiMapPin, FiArrowDownCircle,
   FiArrowUpCircle, FiTable, FiUpload, FiClock,
   FiMenu, FiX, FiChevronLeft, FiLayers, FiList,
-  FiShoppingCart, FiSettings, FiBarChart2, FiBook, FiAlertTriangle, FiTrendingDown, FiCalendar, FiUsers, FiUser, FiUserCheck, FiClipboard, FiCpu, FiAnchor, FiShield, FiLogOut, FiActivity
+  FiShoppingCart, FiSettings, FiBarChart2, FiBook, FiAlertTriangle, FiTrendingDown, FiCalendar, FiUsers, FiUser, FiUserCheck, FiClipboard, FiCpu, FiAnchor, FiShield, FiLogOut
 } from 'react-icons/fi';
 
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthProvider, ALL_PAGES, useAuth } from './context/AuthContext';
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
 import NewDashboard from './pages/NewDashboard';
 import Products from './pages/Products';
 import Locations from './pages/Locations';
@@ -53,8 +52,7 @@ const SIDEBAR_SECTIONS = [
   {
     title: 'Overview',
     items: [
-      { to: '/', Icon: FiGrid, label: 'Dashboard', pageKey: 'dashboard', end: true },
-      { to: '/new-dashboard', Icon: FiActivity, label: 'New Dashboard', pageKey: 'new-dashboard' },
+      { to: '/', Icon: FiGrid, label: 'Dashboard', pageKey: 'new-dashboard', end: true },
       { to: '/stock-table', Icon: FiTable, label: 'Stock Summary', pageKey: 'stock-table' },
       { to: '/ck-intelligence', Icon: FiCpu, label: 'CK Intelligence', pageKey: 'ck-intelligence' },
     ],
@@ -111,7 +109,11 @@ const SIDEBAR_SECTIONS = [
 // Protected route wrapper
 function Protected({ pageKey, children }) {
   const { hasAccess } = useAuth();
-  if (!hasAccess(pageKey)) return <Navigate to="/" replace />;
+  if (!hasAccess(pageKey)) {
+    const fallback = ALL_PAGES.find((p) => p.key !== pageKey && hasAccess(p.key));
+    if (fallback) return <Navigate to={fallback.path} replace />;
+    return pageKey === 'new-dashboard' ? null : <Navigate to="/" replace />;
+  }
   return children;
 }
 
@@ -338,8 +340,8 @@ function AppShell() {
 
         <div className="main-scroll">
           <Routes>
-            <Route path="/" element={<Protected pageKey="dashboard"><Dashboard /></Protected>} />
-            <Route path="/new-dashboard" element={<Protected pageKey="new-dashboard"><NewDashboard /></Protected>} />
+            <Route path="/" element={<Protected pageKey="new-dashboard"><NewDashboard /></Protected>} />
+            <Route path="/new-dashboard" element={<Navigate to="/" replace />} />
             <Route path="/ck-intelligence" element={<Protected pageKey="ck-intelligence"><CKIntelligence /></Protected>} />
             <Route path="/ck-intelligence-chat" element={<Protected pageKey="ck-intelligence"><CKIntelligenceChat /></Protected>} />
             <Route path="/products" element={<Protected pageKey="products"><Products /></Protected>} />
